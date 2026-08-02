@@ -6,6 +6,8 @@ services:
     buildCommand: pip install -r requirements.txt && python build_system_prompt.py
     startCommand: python moodybot.py
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: OPENROUTER_API_KEY
