@@ -24,7 +24,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
 from datetime import datetime
 from moody_categories import detect_category, replace_category_descriptors
-import language_tool_python
 from pytube import Search
 from structure_prompts import STRUCTURE_PROMPTS
 from postprocessing import process_bot_output, process_user_input
@@ -75,8 +74,13 @@ if not TELEGRAM_BOT_TOKEN or not OPENROUTER_API_KEY:
     except Exception as e:
         logger.warning(f"Could not load config from database: {e}")
 
-# Initialize language tool
-tool = language_tool_python.LanguageTool('en-US')
+# LanguageTool needs Java; keep it optional so Render can boot without it.
+tool = None
+try:
+    import language_tool_python
+    tool = language_tool_python.LanguageTool('en-US')
+except Exception as e:
+    logger.warning(f"LanguageTool unavailable, skipping grammar polish: {e}")
 
 def generate_moody_reply(user_input: str) -> str:
     import asyncio
@@ -271,7 +275,10 @@ def polish_sentences(text: str) -> str:
     return " ".join(polished)
 
 def grammar_polish(text: str) -> str:
+    if tool is None:
+        return text
     try:
+        import language_tool_python
         matches = tool.check(text)
         # Add specific rules for common issues
         for match in matches:

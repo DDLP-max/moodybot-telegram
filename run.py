@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
-import subprocess
-import signal
-import platform
 import os
+import sys
 import time
-# -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
-import os, sys, time, platform, signal, subprocess
+import subprocess
 
-HERE  = os.path.dirname(os.path.abspath(__file__))      # ...\moodybot\replit
-PY    = sys.executable
+HERE = os.path.dirname(os.path.abspath(__file__))
+PY = sys.executable
 
-# 🔧 Everything is inside replit/
 BUILD = os.path.join(HERE, "build_system_prompt.py")
-SRC   = os.path.join(HERE, "moodybot-system-prompt")
-PROMPT= os.path.join(HERE, "system_prompt.txt")         # output lives here too
+SRC = os.path.join(HERE, "moodybot-system-prompt")
+PROMPT = os.path.join(HERE, "system_prompt.txt")
 
-BOT1  = os.path.join(HERE, "moodybot.py")
-BOT2  = os.path.join(HERE, "moodybot_trialbot.py")
+BOT1 = os.path.join(HERE, "moodybot.py")
+BOT2 = os.path.join(HERE, "moodybot_trialbot.py")
+
 
 def should_rebuild_system_prompt():
-    # Only rebuild if build script + source dir exist
     if not (os.path.exists(BUILD) and os.path.isdir(SRC)):
         return False
     if not os.path.exists(PROMPT):
@@ -32,29 +27,42 @@ def should_rebuild_system_prompt():
                 return True
     return False
 
-if should_rebuild_system_prompt():
-    print("🧱 Source changed, rebuilding system prompt...")
-    subprocess.run([PY, BUILD], check=True, cwd=HERE)   # run from replit/
-    print("✅ System prompt rebuilt.")
-else:
-    print("📋 System prompt up to date or build script missing; skipping rebuild.")
 
-moody_log = open(os.path.join(HERE, "moodybot.log"), "w")
-trial_log = open(os.path.join(HERE, "trialbot.log"), "w")
+if should_rebuild_system_prompt():
+    print("Source changed, rebuilding system prompt...")
+    subprocess.run([PY, BUILD], check=True, cwd=HERE)
+    print("System prompt rebuilt.")
+else:
+    print("System prompt up to date or build script missing; skipping rebuild.")
+
+# On hosts like Render, run only the main bot.
+# Starting trial + main with the same TELEGRAM_BOT_TOKEN causes polling conflicts.
+if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
+    print("Render detected — starting main MoodyBot only.")
+    raise SystemExit(subprocess.call([PY, BOT1], cwd=HERE))
 
 print("Starting MoodyBot main bot...")
-moodybot = subprocess.Popen([PY, BOT1], stdout=moody_log, stderr=subprocess.STDOUT, cwd=HERE)
+moodybot = subprocess.Popen([PY, BOT1], cwd=HERE)
 
-time.sleep(3)
-print("Starting MoodyBot trial bot...")
-trialbot = subprocess.Popen([PY, BOT2], stdout=trial_log, stderr=subprocess.STDOUT, cwd=HERE)
+trial_token = os.getenv("TELEGRAM_TRIAL_BOT_TOKEN")
+trialbot = None
+if trial_token and trial_token != os.getenv("TELEGRAM_BOT_TOKEN"):
+    time.sleep(3)
+    print("Starting MoodyBot trial bot...")
+    trialbot = subprocess.Popen([PY, BOT2], cwd=HERE)
+else:
+    print("Skipping trial bot (set a distinct TELEGRAM_TRIAL_BOT_TOKEN to enable).")
 
 try:
-    print("🟢 Both bots launched. Press Ctrl+C to terminate.")
-    moodybot.wait(); trialbot.wait()
+    print("Bots launched. Press Ctrl+C to terminate.")
+    moodybot.wait()
+    if trialbot:
+        trialbot.wait()
 except KeyboardInterrupt:
-    print("⛔ Stopping…")
-    moodybot.terminate(); trialbot.terminate()
-    moodybot.wait(); trialbot.wait()
-finally:
-    moody_log.close(); trial_log.close()
+    print("Stopping…")
+    moodybot.terminate()
+    if trialbot:
+        trialbot.terminate()
+    moodybot.wait()
+    if trialbot:
+        trialbot.wait()
