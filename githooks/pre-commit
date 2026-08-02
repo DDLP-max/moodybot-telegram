@@ -1,0 +1,18 @@
+#!/bin/sh
+# Pre-commit hook to ensure UTF-8 encoding
+
+echo "Checking file encodings..."
+
+# Run the UTF-8 encoding check
+python scripts/ensure_utf8.py --fix --verbose
+
+# Check if any files were modified
+if [ $? -ne 0 ]; then
+    echo "Error: Some files had encoding issues that were fixed."
+    echo "Please review the changes and commit again."
+    exit 1
+fi
+
+echo "All files are properly encoded!"
+exit 0
+

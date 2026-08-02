@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoodyBot - Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">MoodyBot</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('index') }}">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('stats') }}">Statistics</a>
+
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_panel') }}">Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <h1>MoodyBot Dashboard</h1>
+                <p class="lead">
+                    MoodyBot is a Telegram bot that responds with the combined wit and personality
+                    of Hank Moody and Anthony Bourdain.
+                </p>
+                <div id="status-message"></div>
+            </div>
+            <div class="col-md-4 text-end d-flex align-items-end justify-content-end">
+                <button id="bot-toggle" class="btn btn-primary btn-lg">
+                    <span id="bot-status-text">Loading...</span>
+                </button>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">MoodyBot Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-dark">
+                            <tr>
+                                <th>API</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                            </tr>
+                            <tr>
+                                <td>Telegram Bot API</td>
+                                <td>
+                                    <span id="telegram-status" class="badge">Checking...</span>
+                                </td>
+                                <td>Required for Telegram messaging functionality</td>
+                            </tr>
+                            <tr>
+                                <td>OpenRouter API</td>
+                                <td>
+                                    <span id="openai-status" class="badge">Checking...</span>
+                                </td>
+                                <td>Required for generating responses</td>
+                            </tr>
+                            <tr>
+                                <td>Bot Status</td>
+                                <td>
+                                    <span id="bot-running-status" class="badge">Checking...</span>
+                                </td>
+                                <td>Current operational status</td>
+                            </tr>
+                        </table>
+                        
+                        {% if not telegram_token_available or not openai_key_available %}
+                        <div class="alert alert-warning mt-3">
+                            <h5 class="alert-heading">Missing API Credentials</h5>
+                            <p>
+                                To use MoodyBot, you need to configure the following environment variables:
+                            </p>
+                            <ul>
+                                {% if not telegram_token_available %}
+                                <li>
+                                    <strong>TELEGRAM_BOT_TOKEN</strong> - Get this from <a href="https://t.me/BotFather" target="_blank">BotFather</a> on Telegram
+                                </li>
+                                {% endif %}
+                                
+                                {% if not openai_key_available %}
+                                <li>
+                                    <strong>OPENAI_API_KEY</strong> - Get this from your <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI account</a>
+                                </li>
+                                {% endif %}
+                            </ul>
+                            <p>
+                                Add these variables to your .env file or set them in your environment.
+                            </p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Quick Stats</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4 text-center">
+                                <h2 id="total-users">--</h2>
+                                <p>Total Users</p>
+                            </div>
+                            <div class="col-md-4 text-center">
+                                <h2 id="total-messages">--</h2>
+                                <p>Total Messages</p>
+                            </div>
+                            <div class="col-md-4 text-center">
+                                <h2 id="total-conversations">--</h2>
+                                <p>Conversations</p>
+                            </div>
+                        </div>
+                        <div class="text-center mt-3">
+                            <a href="{{ url_for('stats_page') }}" class="btn btn-primary">View Detailed Statistics</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Getting Started</h5>
+                    </div>
+                    <div class="card-body">
+                        <ol class="list-group list-group-numbered list-group-flush bg-dark">
+                            <li class="list-group-item bg-dark">Set up your API keys in the environment</li>
+                            <li class="list-group-item bg-dark">Start the bot using the button above</li>
+                            <li class="list-group-item bg-dark">Visit your Telegram bot and send a message</li>
+                            <li class="list-group-item bg-dark">Explore the admin panel for configuration options</li>
+                        </ol>
+                    </div>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">About MoodyBot</h5>
+                    </div>
+                    <div class="card-body">
+                        <p>
+                            MoodyBot combines the wit, cynicism, and linguistic flair of two iconic characters:
+                        </p>
+                        <ul>
+                            <li><strong>Hank Moody</strong> (Californication): Sardonic, self-destructive writer with a gift for brutal honesty</li>
+                            <li><strong>Anthony Bourdain</strong>: Worldly chef and storyteller with unfiltered perspectives</li>
+                        </ul>
+                        <p>
+                            The result is an AI personality that's brutally honest, emotionally perceptive, 
+                            and unapologetically witty—perfect for cutting through emotional bullshit.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const botToggle = document.getElementById('bot-toggle');
+            const botStatusText = document.getElementById('bot-status-text');
+            const statusMessage = document.getElementById('status-message');
+            const telegramStatus = document.getElementById('telegram-status');
+            const openaiStatus = document.getElementById('openai-status');
+            const botRunningStatus = document.getElementById('bot-running-status');
+            
+            // Function to update UI based on bot status
+            function updateBotStatus(status) {
+                if (status.running) {
+                    botToggle.classList.remove('btn-success');
+                    botToggle.classList.add('btn-danger');
+                    botStatusText.textContent = 'Stop Bot';
+                    botRunningStatus.textContent = 'Running';
+                    botRunningStatus.classList.add('bg-success');
+                    botRunningStatus.classList.remove('bg-danger');
+                } else {
+                    botToggle.classList.remove('btn-danger');
+                    botToggle.classList.add('btn-success');
+                    botStatusText.textContent = 'Start Bot';
+                    botRunningStatus.textContent = 'Stopped';
+                    botRunningStatus.classList.add('bg-danger');
+                    botRunningStatus.classList.remove('bg-success');
+                }
+                
+                if (status.telegram_token_available) {
+                    telegramStatus.textContent = 'Available';
+                    telegramStatus.classList.add('bg-success');
+                    telegramStatus.classList.remove('bg-danger');
+                } else {
+                    telegramStatus.textContent = 'Missing';
+                    telegramStatus.classList.add('bg-danger');
+                    telegramStatus.classList.remove('bg-success');
+                }
+                
+                if (status.openai_key_available) {
+                    openaiStatus.textContent = 'Available';
+                    openaiStatus.classList.add('bg-success');
+                    openaiStatus.classList.remove('bg-danger');
+                } else {
+                    openaiStatus.textContent = 'Missing';
+                    openaiStatus.classList.add('bg-danger');
+                    openaiStatus.classList.remove('bg-success');
+                }
+                
+                // Disable button if required APIs are missing
+                if (!status.telegram_token_available || !status.openai_key_available) {
+                    botToggle.disabled = true;
+                    botToggle.title = 'Configure API keys first';
+                } else {
+                    botToggle.disabled = false;
+                    botToggle.title = status.running ? 'Stop the bot' : 'Start the bot';
+                }
+            }
+            
+            // Function to check bot status
+            function checkBotStatus() {
+                fetch('/bot-status')
+                    .then(response => response.json())
+                    .then(status => {
+                        updateBotStatus(status);
+                    })
+                    .catch(error => {
+                        console.error('Error checking bot status:', error);
+                        statusMessage.innerHTML = `
+                            <div class="alert alert-danger">
+                                Error checking bot status: ${error.message}
+                            </div>
+                        `;
+                    });
+            }
+            
+            // Get initial bot status
+            checkBotStatus();
+            
+            // Set up periodic bot status check
+            setInterval(checkBotStatus, 5000);
+            
+            // Handle bot toggle button click
+            botToggle.addEventListener('click', function() {
+                const action = botStatusText.textContent.toLowerCase().includes('start') ? 'start' : 'stop';
+                
+                // Disable button during request
+                botToggle.disabled = true;
+                
+                fetch(`/${action}-bot`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        statusMessage.innerHTML = `
+                            <div class="alert alert-success alert-dismissible fade show">
+                                ${data.message}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        `;
+                        checkBotStatus();
+                    } else {
+                        statusMessage.innerHTML = `
+                            <div class="alert alert-danger alert-dismissible fade show">
+                                ${data.message}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    console.error(`Error ${action}ing bot:`, error);
+                    statusMessage.innerHTML = `
+                        <div class="alert alert-danger alert-dismissible fade show">
+                            Error ${action}ing bot: ${error.message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    `;
+                })
+                .finally(() => {
+                    // Re-enable button after request
+                    botToggle.disabled = false;
+                });
+            });
+            
+            // Fetch statistics
+            fetch('/statistics')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('total-users').textContent = data.data.total_users || 0;
+                        document.getElementById('total-messages').textContent = data.data.total_messages || 0;
+                        document.getElementById('total-conversations').textContent = data.data.total_conversations || 0;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching statistics:', error);
+                });
+        });
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

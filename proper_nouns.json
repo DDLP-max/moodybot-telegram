@@ -1,0 +1,23 @@
+{
+  "PROPER_NOUN_WHITELIST": [
+    "Cialdini",
+    "Kahneman", 
+    "Hahnemann",
+    "Tversky",
+    "Da Nang",
+    "Ala Wai",
+    "Donna Walden",
+    "MoodyBot",
+    "Ogilvy",
+    "Grok",
+    "OpenRouter",
+    "CapCut",
+    "Videoleap",
+    "Telegram",
+    "Da Tiki Queen"
+  ],
+  "description": "Proper nouns that should never be modified by spellcheck or text processing",
+  "last_updated": "2024-01-01",
+  "version": "1.0"
+}
+

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MoodyBot</title>
+</head>
+<body>
+    <h1>Ask MoodyBot</h1>
+    <form method="post">
+        <textarea name="prompt" rows="4" cols="50" placeholder="What do you want to ask?"></textarea><br>
+        <button type="submit">Generate</button>
+    </form>
+    {% if reply %}
+    <h2>Response:</h2>
+    <p>{{ reply }}</p>
+    {% endif %}
+</body>
+</html>

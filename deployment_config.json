@@ -1,0 +1,16 @@
+{
+  "environment_variables": {
+    "SPELLCHECK_BOT_OUTPUT": "false",
+    "DEBUG": "bot:postprocess",
+    "LOG_LEVEL": "INFO"
+  },
+  "description": "Deployment configuration for MoodyBot post-processing pipeline",
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "notes": [
+    "SPELLCHECK_BOT_OUTPUT=false prevents spellcheck on bot outputs",
+    "DEBUG=bot:postprocess enables verbose logging for post-processing stages",
+    "Set SPELLCHECK_BOT_OUTPUT=true only for testing purposes"
+  ]
+}
+

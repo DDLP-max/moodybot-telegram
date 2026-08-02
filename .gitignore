@@ -1,0 +1,48 @@
+# Secrets / local config
+.env
+.env.*
+!.env.example
+api_config.json
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Runtime / logs / locks
+*.log
+*_log.txt
+moodybot.lock
+trial_users.json
+hs_err_pid*.log
+instance/
+
+# Large / local-only artifacts
+moodybot_log.txt
+dispatches2.txt
+*.rar
+attached_assets/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+.cursorgnore
+
+# Optional local junk
+New Text Document.txt
+notes.txt
+
+.github/workflows/

@@ -1,0 +1,11 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ensure-utf8
+        name: ensure-utf8
+        entry: python scripts/ensure_utf8.py --fix
+        language: system
+        files: \.(py|md|json|ya?ml|txt|ini|toml|js|ts|tsx|css|html|mdx|sh|cfg)$
+        pass_filenames: false
+        always_run: true
+

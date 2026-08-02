@@ -1,0 +1,12 @@
+services:
+  - type: worker
+    name: moodybot-telegram
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt && python build_system_prompt.py
+    startCommand: python moodybot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
