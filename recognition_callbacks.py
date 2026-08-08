@@ -22,9 +22,21 @@ GENERIC_FOLLOWUP_PATTERNS = [
     r"\bwhat are you actually asking\b",
     r"\bshould we go deeper\b",
     r"\bwant me to unpack\b",
+    r"\bwant me to\b",
     r"\bexplore that further\b",
     r"\bexplain more\b",
     r"\bwhich aspect are you interested in\b",
+    r"\bif you want\b",
+    r"\bif you'?d like\b",
+    r"\bsay the word\b",
+    r"\bi can also\b",
+    r"\bi can give you\b",
+    r"\blet me know if\b",
+    r"\bwe can go deeper\b",
+    r"\bwant to unpack\b",
+    r"\bdo you want examples\b",
+    r"\bwould examples help\b",
+    r"\bif you want examples\b",
 ]
 
 CLOSER_INSTRUCTIONS = {

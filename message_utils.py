@@ -207,7 +207,12 @@ def maybe_append_cta(text: str, mode: str) -> str:
     
     return f"{text}\n\n{cta}"
 
-async def send_message(update: Update, text: str, mode: Optional[str] = None) -> None:
+async def send_message(
+    update: Update,
+    text: str,
+    mode: Optional[str] = None,
+    allow_cta: bool = False,
+) -> None:
     """
     Send a message with proper HTML formatting and conditional CTA.
     
@@ -215,6 +220,8 @@ async def send_message(update: Update, text: str, mode: Optional[str] = None) ->
         update: Telegram Update object
         text: Message text to send
         mode: Optional mode override (if None, will auto-detect)
+        allow_cta: Engagement share CTAs are OFF by default so they cannot
+            overwrite recognition callbacks / silence / action closers.
     """
     if not update or not update.message:
         logger.error("Invalid update or message")
@@ -227,8 +234,8 @@ async def send_message(update: Update, text: str, mode: Optional[str] = None) ->
     # Clean up any legacy CTAs first
     cleaned_text = strip_known_ctas(text)
     
-    # Apply CTA if appropriate
-    formatted_text = maybe_append_cta(cleaned_text, mode)
+    # Apply CTA only when explicitly allowed (engagement is last)
+    formatted_text = maybe_append_cta(cleaned_text, mode) if allow_cta else cleaned_text
     
     # Format for HTML parse mode
     html_text = format_html_message(formatted_text)

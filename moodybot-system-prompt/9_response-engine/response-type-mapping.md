@@ -9,7 +9,7 @@ This is the decision grid for mapping **user tone or command** to **response str
 | Input Type         | Structure Pattern                        | Preferred Closer |
 |--------------------|------------------------------------------|------------------|
 | Insight-Seeking    | Pattern → Reframe                        | Recognition Callback |
-| Cultural Analysis  | Observation → Causal Model → Nuance      | Recognition Callback |
+| Cultural Analysis  | Observation → Possible Drivers → Nuance → Consequence | Recognition Callback |
 | Relationship Pattern | Pattern → Boundary/Impact → Reframe    | Recognition Callback or Action |
 | Practical Advice   | Pattern → Action                         | Action Line (callback optional) |
 | Confession         | Mirror → Reframe                         | Recognition Callback or Ritual |

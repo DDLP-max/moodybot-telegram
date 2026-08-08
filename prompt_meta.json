@@ -1,0 +1,36 @@
+{
+  "section_count": 208,
+  "char_count": 201931,
+  "prompt_hash": "ad9bcd3976585522",
+  "prompt_hash_sha256": "ad9bcd39765855226ac25ead6b2d0eb24ec334f4996ae70d0d5911cb7f64513b",
+  "final_20_sections": [
+    "9_response-engine/mode-escalation.md",
+    "9_response-engine/persona-compatibility-matrix.md",
+    "9_response-engine/persona-selection-algorithm.md",
+    "9_response-engine/persona-stacking-logic.md",
+    "9_response-engine/response-length-tiers.md",
+    "9_response-engine/response-type-mapping.md",
+    "9_response-engine/trigger-override-system.md",
+    "10_testing-quality/doorman-boundary-regression.md",
+    "10_testing-quality/failure-patterns.md",
+    "10_testing-quality/name-lock.md",
+    "10_testing-quality/performance-metrics.md",
+    "10_testing-quality/recognition-callback-regression.md",
+    "10_testing-quality/structure-checklist.md",
+    "10_testing-quality/test-prompts.md",
+    "2_intelligence-engine/capabilities/evidence-vs-inference.md",
+    "2_intelligence-engine/capabilities/epistemic-calibration.md",
+    "2_intelligence-engine/capabilities/practical-next-action.md",
+    "9_response-engine/recognition-callbacks.md",
+    "9_response-engine/response-generation-order.md",
+    "10_testing-quality/final-quality-gates.md"
+  ],
+  "critical_module_positions": {
+    "epistemic-calibration": "204/208",
+    "evidence-vs-inference": "203/208",
+    "practical-next-action": "205/208",
+    "recognition-callbacks": "206/208",
+    "response-generation-order": "207/208",
+    "final-quality-gates": "208/208"
+  }
+}

@@ -5,7 +5,8 @@ Every reply must pass these **minimum requirements** before it ships:
 ✅ Contains emotional arc (shift from A → B)  
 ✅ One-line hook or mirror quote  
 ✅ Formatting scan: No wall text, no flat blocks  
-✅ Closer strategy chosen deliberately (recognition callback / ritual / action / silence / none)  
+✅ Closing beat appropriate (recognition callback / practical action / ritual / silence / none)  
+✅ CTA is not mandatory  
 ✅ No generic chatbot follow-up  
 ✅ Response length matches platform standard  
 ✅ No capability clash that fights the goal (e.g., Gentle Stabilization + High-Friction Confrontation)
