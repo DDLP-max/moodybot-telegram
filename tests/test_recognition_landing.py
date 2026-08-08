@@ -2,10 +2,12 @@
 """Recognition landing tests — endings that land, not module proofs."""
 
 from recognition_landing import (
+    LANDING_ENGINE_VERSION,
     apply_landing,
     craft_callback_question,
     is_grammatical_english,
     select_landing,
+    validate_landing,
     would_keep_if_nobody_could_reply,
 )
 from response_finalization import build_response_plan, finalize_response
@@ -14,8 +16,28 @@ from signature_language import extract_signature_language
 
 def test_broken_topic_staple_fails_grammar():
     bad = "What about feminists hate woman looks different now that you've seen it named?"
+    ok, reason = validate_landing(bad)
+    assert ok is False
+    assert reason.startswith("REJECTED")
     assert is_grammatical_english(bad) is False
     assert would_keep_if_nobody_could_reply(bad) is False
+
+
+def test_malformed_landing_family_rejected():
+    cases = [
+        "What about X looks different now that you've seen it named?",
+        "What about Y hate Z looks different?",
+        "Something ended. Now that you've seen it named?",
+        "What about feminists hate woman looks different now that you've seen it named?",
+    ]
+    for c in cases:
+        ok, reason = validate_landing(c)
+        assert ok is False, c
+        assert "REJECTED" in reason
+
+
+def test_landing_engine_version():
+    assert LANDING_ENGINE_VERSION == "recognition-landing-v1"
 
 
 def test_politics_prefers_statement_not_question():
@@ -103,6 +125,8 @@ def test_build_plan_landing_field():
 
 if __name__ == "__main__":
     test_broken_topic_staple_fails_grammar()
+    test_malformed_landing_family_rejected()
+    test_landing_engine_version()
     test_politics_prefers_statement_not_question()
     test_stretch_still_allows_rhetorical_question()
     test_topic_nouns_are_not_signature()

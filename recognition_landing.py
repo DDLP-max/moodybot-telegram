@@ -29,6 +29,8 @@ from signature_language import (
 
 LandingType = str
 
+LANDING_ENGINE_VERSION = "recognition-landing-v1"
+
 # Patterns that prove the closer is machine-stapled topic debris.
 BROKEN_CLOSER_PATTERNS = [
     r"^what about\b.+\blooks different\b",
@@ -47,6 +49,28 @@ class LandingDecision:
     reason: str
 
 
+def validate_landing(closer: str) -> Tuple[bool, str]:
+    """Hard rejection gate for landings. Returns (ok, reason)."""
+    s = (closer or "").strip()
+    if not s:
+        return True, "empty"
+    lower = s.lower()
+    if any(re.search(pat, lower) for pat in BROKEN_CLOSER_PATTERNS):
+        return False, "REJECTED:malformed_topic_staple"
+    if lower.startswith("what about ") and " looks " in lower:
+        return False, "REJECTED:what_about_looks"
+    if lower.startswith("what about ") and "hate" in lower:
+        return False, "REJECTED:what_about_hate_stack"
+    if re.search(r"now that you've seen it named\??$", lower):
+        return False, "REJECTED:seen_it_named_template"
+    if re.search(
+        r"\b(?:feminists?|women|men|porn|dirty talk)\b.+\b(?:looks different|seen it named)\b",
+        lower,
+    ):
+        return False, "REJECTED:topic_noun_staple"
+    return True, "ok"
+
+
 def is_grammatical_english(text: str) -> bool:
     """Lightweight gate — reject obviously broken AI-stapled closers."""
     s = (text or "").strip()
@@ -54,15 +78,10 @@ def is_grammatical_english(text: str) -> bool:
         return False
     if len(s.split()) < 3:
         return False
+    ok, _reason = validate_landing(s)
+    if not ok:
+        return False
     lower = s.lower()
-    if any(re.search(pat, lower) for pat in BROKEN_CLOSER_PATTERNS):
-        return False
-    # "What about X Y Z looks..." style
-    if lower.startswith("what about ") and " looks " in lower:
-        return False
-    # Fragment markers
-    if re.search(r"\b(?:feminists?|women|men|porn|dirty talk)\b.+\b(?:looks different|seen it named)\b", lower):
-        return False
     # Must end in . ! or ?
     if s[-1] not in ".!?":
         return False
@@ -70,6 +89,26 @@ def is_grammatical_english(text: str) -> bool:
     if re.search(r"\b(\w+)\s+\1\b", lower):
         return False
     return True
+
+
+def strip_malformed_closers(text: str) -> str:
+    """Nuclear strip — remove banned closer sentences anywhere near the ending."""
+    out = (text or "").strip()
+    if not out:
+        return out
+    if not re.search(
+        r"seen it named|what about .+ looks different|what about .+\bhate\b",
+        out,
+        flags=re.IGNORECASE,
+    ):
+        return out
+    sentences = re.split(r"(?<=[.!?])\s+", out)
+    kept = []
+    for s in sentences:
+        ok, _ = validate_landing(s)
+        if ok and "seen it named" not in s.lower():
+            kept.append(s)
+    return " ".join(kept).strip() if kept else out
 
 
 def would_keep_if_nobody_could_reply(text: str) -> bool:
@@ -289,6 +328,10 @@ def apply_landing(
                 return " ".join(sentences[:-1]).rstrip()
         return base
 
+    def _finish(out: str, modified: bool) -> Tuple[str, bool]:
+        cleaned = strip_malformed_closers(out)
+        return cleaned, modified or cleaned != (out or "").strip()
+
     # Always drop broken / engagement closers
     if closer and (
         not is_grammatical_english(closer)
@@ -311,14 +354,17 @@ def apply_landing(
         # Remove trailing questions
         base = _strip_trailing_question(base)
         if closer and closer.endswith("?"):
-            return base, True
-        return (base if modified_strip or closer == "" else text), modified_strip or bool(closer.endswith("?") if closer else False)
+            return _finish(base, True)
+        return _finish(
+            (base if modified_strip or closer == "" else text),
+            modified_strip or bool(closer.endswith("?") if closer else False),
+        )
 
     if landing == "ACTION":
         base = body or text
         if closer and (closer.endswith("?") or not would_keep_if_nobody_could_reply(closer)):
-            return _strip_trailing_question(base), True
-        return text if not modified_strip else base, modified_strip
+            return _finish(_strip_trailing_question(base), True)
+        return _finish(text if not modified_strip else base, modified_strip)
 
     if landing == "RECOGNITION_CALLBACK":
         # Keep a good existing signature question
@@ -331,7 +377,7 @@ def apply_landing(
                 for stem in extract_signature_language(user_message).stems
             )
         ):
-            return text, False
+            return _finish(text, False)
 
         q = craft_callback_question(user_message, conversation_id=conversation_id)
         base = _strip_trailing_question(body or text)
@@ -341,16 +387,16 @@ def apply_landing(
             if stmt and would_keep_if_nobody_could_reply(stmt):
                 # Only append if not already present
                 if stmt not in base:
-                    return f"{base.rstrip()}\n\n{stmt}", True
-            return base, True
+                    return _finish(f"{base.rstrip()}\n\n{stmt}", True)
+            return _finish(base, True)
         if q in base:
-            return base, True
-        return f"{base.rstrip()}\n\n{q}", True
+            return _finish(base, True)
+        return _finish(f"{base.rstrip()}\n\n{q}", True)
 
     if landing in {"RECOGNITION_STATEMENT", "RECOGNITION_OBSERVATION"}:
         base = _strip_trailing_question(body or text)
         if body_already_lands(base):
-            return base, True if (closer or modified_strip) else modified_strip
+            return _finish(base, True if (closer or modified_strip) else modified_strip)
 
         if landing == "RECOGNITION_OBSERVATION":
             stmt = craft_recognition_observation(base) or craft_recognition_statement(
@@ -360,15 +406,15 @@ def apply_landing(
             stmt = craft_recognition_statement(user_message, base)
 
         if not stmt:
-            return base, True if (closer or modified_strip) else modified_strip
+            return _finish(base, True if (closer or modified_strip) else modified_strip)
         if not would_keep_if_nobody_could_reply(stmt) or not is_grammatical_english(
             stmt if stmt.endswith((".", "!", "?")) else stmt + "."
         ):
-            return base, True if (closer or modified_strip) else modified_strip
+            return _finish(base, True if (closer or modified_strip) else modified_strip)
         if not stmt.endswith((".", "!", "?")):
             stmt += "."
         if stmt in base:
-            return base, True if (closer or modified_strip) else modified_strip
-        return f"{base.rstrip()}\n\n{stmt}", True
+            return _finish(base, True if (closer or modified_strip) else modified_strip)
+        return _finish(f"{base.rstrip()}\n\n{stmt}", True)
 
-    return text, modified_strip
+    return _finish(text, modified_strip)

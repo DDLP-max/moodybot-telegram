@@ -29,9 +29,9 @@ from conversation_anchors import (
     extract_conversation_anchors,
 )
 from recognition_callbacks import is_generic_followup
-from recognition_landing import apply_landing, select_landing
+from recognition_landing import LANDING_ENGINE_VERSION, apply_landing, select_landing
 from signature_language import extract_signature_language
-from surface_render import final_surface_render
+from surface_render import final_surface_render, response_text_after_surface_semantically_equals
 
 logger = logging.getLogger("moodybot.finalization")
 
@@ -652,7 +652,14 @@ def finalize_response(
     anchors = extract_conversation_anchors(user_message, draft)
     plan.anchors = list(anchors.all_anchors)
 
+    def _last_sentence(blob: str) -> str:
+        paras = re.split(r"\n\s*\n", (blob or "").strip())
+        last = (paras[-1] if paras else "").strip()
+        sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", last) if s.strip()]
+        return sents[-1] if sents else last
+
     text = (draft or "").strip()
+    draft_last = _last_sentence(text)
     epistemic_rewrite = False
     generic_removed = False
     closer_replaced = False
@@ -660,6 +667,7 @@ def finalize_response(
 
     # 1) Epistemic / motivation / cultural / quantitative calibration
     text, epistemic_rewrite = run_epistemic_check(text, plan)
+    after_epistemic_last = _last_sentence(text)
 
     # 2) Generic continuation CTA — hard failure → remove
     if plan.missing_required_info and len(text.split()) < 40:
@@ -667,14 +675,32 @@ def finalize_response(
     else:
         text, generic_removed = strip_generic_cta(text)
 
-    # 3) Closing strategy + recognition callback + anchor enforcement
+    # 3) Closing strategy + recognition landing (authoritative)
     text, closer_replaced = _apply_closing_strategy(text, plan, user_message, anchors)
+    after_landing = text
+    after_landing_last = _last_sentence(after_landing)
 
     # 4) Compression
     text, compressed = compress_if_overwritten(text)
 
-    # 5) FINAL SURFACE RENDER — nothing may modify text after this
+    # 5) FINAL SURFACE RENDER — typography only; no new closer wording
     text, surface_cleaned = final_surface_render(text)
+    after_surface_last = _last_sentence(text)
+
+    if not response_text_after_surface_semantically_equals(after_landing, text):
+        # Dev hard invariant: surface must not append sentences / banned closers
+        import os
+
+        if os.environ.get("MOODYBOT_STRICT_SURFACE", "1") == "1" and os.environ.get(
+            "MOODYBOT_ENV", "development"
+        ) != "production":
+            raise AssertionError(
+                "SURFACE_INVARIANT: final_surface_render changed wording beyond typography"
+            )
+        # Production safety: strip banned patterns if surface somehow reintroduced them
+        from recognition_landing import strip_malformed_closers
+
+        text = strip_malformed_closers(text)
 
     finalization_rewrite = (
         epistemic_rewrite or generic_removed or closer_replaced or compressed or surface_cleaned
@@ -687,6 +713,7 @@ def finalize_response(
         "channel": plan.channel,
         "prompt_hash": prompt_hash or "",
         "git_commit": git_commit or "",
+        "landing_engine_version": LANDING_ENGINE_VERSION,
         "primary_capability": plan.primary_capability or "",
         "supporting_capability": plan.supporting_capability or "",
         "intervention": plan.intervention or "",
@@ -700,8 +727,32 @@ def finalize_response(
         "closer_replaced": str(closer_replaced).lower(),
         "surface_cleaned": str(surface_cleaned).lower(),
         "duration_ms": str(duration_ms),
+        "draft_last_sentence": draft_last[:240],
+        "after_epistemic_last_sentence": after_epistemic_last[:240],
+        "after_landing_last_sentence": after_landing_last[:240],
+        "after_surface_render_last_sentence": after_surface_last[:240],
+        "final_http_last_sentence": after_surface_last[:240],
     }
+    if (plan.mode or "").lower() == "dynamic":
+        logger.info("DYNAMIC_TRACE_START")
+        logger.info(
+            "DYNAMIC_TRACE %s",
+            {
+                "git_commit": git_commit or "",
+                "prompt_hash": prompt_hash or "",
+                "route": f"{plan.channel}/finalize_response",
+                "generation_function": "finalize_response",
+                "landing_engine_version": LANDING_ENGINE_VERSION,
+                "draft_last_sentence": draft_last[:240],
+                "after_epistemic_last_sentence": after_epistemic_last[:240],
+                "after_landing_last_sentence": after_landing_last[:240],
+                "after_surface_render_last_sentence": after_surface_last[:240],
+                "final_http_last_sentence": after_surface_last[:240],
+            },
+        )
+        logger.info("DYNAMIC_TRACE_END")
     logger.info("finalization %s", diagnostics)
+    logger.info("landing_engine_version=%s", LANDING_ENGINE_VERSION)
 
     return FinalizeResult(
         text=text,

@@ -231,46 +231,9 @@ def evolve_anchor_callback(
     if "stuck" in blob:
         return "Where are you still stuck now that the pattern has a name?"
 
-    if "dirty talk" in blob or ("dirty" in blob and "talk" in blob):
-        if "script" in blob or "script" in insight_hint.lower() or any(
-            a == "script" for a in anchors.draft_anchors
-        ):
-            return (
-                "So what got clearer for you reading that - "
-                "your definition of dirty talk, or how much the script itself changed?"
-            )
-        return "What changed in your sense of what now counts as ordinary dirty talk?"
-
-    if "porn" in p or "pornography" in p or "porn" in blob:
-        return "What part of the porn influence story stopped looking like the whole cause?"
-
-    if "influence" in blob:
-        return "Which influence suddenly looks louder once you stop hunting for a single cause?"
-
-    if "language" in blob or "vocabulary" in blob:
-        return "What in that language shift stopped sounding like edge and started sounding ordinary?"
-
-    if "intimacy" in blob:
-        return "What got wider in your definition of intimacy after reading that?"
-
-    if "boundary" in blob:
-        return "What boundary got sharper once the pattern had words around it?"
-
-    if "pattern" in blob:
-        return "Where have you seen this pattern before without naming it?"
-
-    if "changed" in p or "change" in p or "shift" in p:
-        other = next(
-            (
-                a for a in anchors.user_anchors
-                if a.lower() not in WEAK_ALONE
-            ),
-            None,
-        )
-        if other:
-            return f"What part of {other} stopped looking fixed once the change was visible?"
-        return "What part of that change stopped feeling abstract and started feeling personal?"
-
-    if subject and primary.lower() not in subject.lower():
-        return f"What shifted in how you hold {primary} once {subject} came into focus?"
-    return f"What about {primary} looks different now that you've seen it named?"
+    # Topic-noun / cultural closers are NOT generated here.
+    # Authoritative landings live in recognition_landing.py only.
+    _ = subject
+    _ = insight_hint
+    _ = p
+    return None
