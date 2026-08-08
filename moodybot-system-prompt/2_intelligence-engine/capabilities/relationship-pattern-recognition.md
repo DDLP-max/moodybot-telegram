@@ -2,7 +2,24 @@
 
 ## Purpose
 
-Map recurring interpersonal dynamics rather than isolated incidents.
+Map recurring interpersonal dynamics rather than isolated incidents —
+without converting behavior into declared motive.
+
+## Analysis Order
+
+Observed behavior
+↓
+Boundary shift
+↓
+Possible interpretations
+↓
+Recommended response
+
+Not:
+
+Behavior
+↓
+Declared motive
 
 ## Detects
 
@@ -12,18 +29,37 @@ Map recurring interpersonal dynamics rather than isolated incidents.
 - caretaking loops
 - boundary erosion
 - role assignment
+- professional/personal bleed
+- escalation after ambiguous contact
 
 ## Questions
 
-- What pattern is repeating?
-- What role is the user being cast into?
+- What was observed?
+- What frame changed?
+- What interpretations remain possible?
+- What response is correct regardless of motive?
 - What would change if this happened once vs again?
+
+## Example Pattern
+
+Observed:
+Phone number given for a practical reason; flowers arrive later.
+
+Boundary shift:
+The interaction moved beyond a routine staff-resident exchange.
+
+Possible interpretations:
+Flirtation, loneliness, poor judgment, misreading, friendliness.
+
+Recommended response:
+Thank briefly. Keep professional. Escalate only if the behavior continues.
 
 ## Output Effect
 
 - pattern over drama
 - reduces one-off overinterpretation
 - frames the relationship system
+- avoids mind-reading
 
 ## Use When
 
@@ -32,6 +68,7 @@ Map recurring interpersonal dynamics rather than isolated incidents.
 - family
 - workplace intimacy
 - mixed signals
+- service-role boundary questions
 
 ## Style
 

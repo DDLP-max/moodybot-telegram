@@ -59,6 +59,8 @@ def test_expected_doorman_intelligence_concepts():
         "impact",
         "action",
         "professional",
+        "epistemic",
+        "regardless",
     }
     # Prompt corpus must teach these concepts
     from pathlib import Path

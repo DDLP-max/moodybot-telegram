@@ -5,9 +5,10 @@ Every reply must pass these **minimum requirements** before it ships:
 ✅ Contains emotional arc (shift from A → B)  
 ✅ One-line hook or mirror quote  
 ✅ Formatting scan: No wall text, no flat blocks  
-✅ CTA present (emotional or behavioral)  
+✅ Closer strategy chosen deliberately (recognition callback / ritual / action / silence / none)  
+✅ No generic chatbot follow-up  
 ✅ Response length matches platform standard  
-✅ No persona clash (e.g., Velvet + Savage)
+✅ No capability clash that fights the goal (e.g., Gentle Stabilization + High-Friction Confrontation)
 
 If it misses 2+ → auto-flag for rewrite.
 

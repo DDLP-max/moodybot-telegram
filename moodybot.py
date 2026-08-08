@@ -28,6 +28,11 @@ from pytube import Search
 from structure_prompts import STRUCTURE_PROMPTS
 from postprocessing import process_bot_output, process_user_input
 from message_utils import send_message, send_simple_message, resolve_mode, maybe_append_cta, strip_cta_from_text
+from recognition_callbacks import (
+    closer_instruction,
+    is_generic_followup,
+    select_closing_strategy,
+)
 
 # Initialize logging first
 logging.basicConfig(
@@ -716,6 +721,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "content": STRUCTURE_PROMPTS[selected_command]
         })
 
+    # Closing strategy: recognition callbacks over generic chatbot follow-ups.
+    # Questions are optional; strategy is injected as guidance, not as a forced menu.
+    roast_mode = selected_command in {"/roast", "/savage", "/cut"}
+    technical_only = selected_command in {"/dev", "/clinical", "/tighten"}
+    grief_or_trauma = selected_command in {"/ghost", "/numb"} or any(
+        p in user_input.lower()
+        for p in ("he's dead", "she left", "i didn't say goodbye", "funeral", "died")
+    )
+    # /thoughts is the dynamic fallback — prefer recognition callbacks as the question closer.
+    insight_path = selected_command in {
+        "/thoughts", "/velvet", "/contrast", "/cinema", "/noir", "/sensory"
+    }
+    closing_strategy = select_closing_strategy(
+        user_message=user_input,
+        roast_mode=roast_mode,
+        technical_only=technical_only,
+        grief_or_trauma=grief_or_trauma,
+        created_reframe=insight_path,
+    )
+    messages.insert(
+        0,
+        {"role": "system", "content": closer_instruction(closing_strategy)},
+    )
+    logger.info("Closing strategy: %s", closing_strategy)
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -756,6 +786,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             is_trial = chat.id == FREE_GROUP_CHAT_ID or chat.type == "private"
             log_interaction(user_input, content, is_trial=is_trial)
+
+            # Optional closer telemetry (strategy + generic-followup flag only)
+            try:
+                diag = {
+                    "closing_strategy": closing_strategy.lower(),
+                    "generic_followup_detected": str(is_generic_followup(content)).lower(),
+                }
+                logger.info("Closing diagnosis: %s", diag)
+                if diag["generic_followup_detected"] == "true":
+                    logger.warning("Generic chatbot follow-up detected in closer zone")
+            except Exception as diag_err:
+                logger.debug("Closing diagnosis skipped: %s", diag_err)
 
             # Clean up response
             if content.lower().startswith("ah,"):
