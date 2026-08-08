@@ -818,19 +818,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 prompt_hash=p_hash,
                 git_commit=git_commit,
             )
+            # Immutable after final_surface_render inside finalize_response.
             content = finalized.text
             logger.info("Finalization diagnostics: %s", finalized.diagnostics)
 
             is_trial = chat.id == FREE_GROUP_CHAT_ID or chat.type == "private"
             log_interaction(user_input, content, is_trial=is_trial)
-            
-            # Note: grammar_polish removed - now handled by post-processing pipeline
 
-            # Add whiskey emoji (always add this)
-            if not content.strip().endswith("🥃"):
-                content += " 🥃"
-            
-            # Apply safe emoji handling
+            # Encoding safety only — do not alter closer/typography after surface render.
             content = safe_emoji(content)
 
             # Send response using new message utilities

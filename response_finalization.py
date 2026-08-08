@@ -3,8 +3,15 @@
 
 ANALYZE → ROUTE → GENERATE DRAFT → FINALIZE → USER
 
-Deterministic gates run always. No second LLM pass unless a caller opts in later.
-Web and Telegram must call finalize_response() — do not duplicate this logic.
+Pipeline:
+  epistemic rewrite
+  → generic CTA strip
+  → recognition callback / closing strategy
+  → anchor enforcement
+  → compression
+  → FINAL SURFACE RENDER (immutable after this)
+
+Deterministic gates run always. Web and Telegram must call finalize_response().
 """
 
 from __future__ import annotations
@@ -17,11 +24,19 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from typing import Deque, Dict, List, Optional, Tuple
 
+from conversation_anchors import (
+    ConversationAnchors,
+    callback_echoes_anchor,
+    evolve_anchor_callback,
+    extract_conversation_anchors,
+    is_generic_reflective,
+)
 from recognition_callbacks import (
     closer_instruction,
     is_generic_followup,
     select_closing_strategy,
 )
+from surface_render import final_surface_render
 
 logger = logging.getLogger("moodybot.finalization")
 
@@ -57,9 +72,11 @@ GENERIC_CTA_PATTERNS = [
 POPULATION_MARKERS = [
     "generations", "men", "women", "society", "culture", "bedrooms",
     "porn", "relationships", "workplaces", "mainstream", "everyone",
-    "people now", "people today", "in 1995", "in 2026",
+    "people now", "people today", "in 1995", "in 2026", "the average",
+    "millennials", "generation", "gen z", "gen x",
 ]
 
+# Phrase-level unsupported causal / motive claims (applied first).
 UNSUPPORTED_CAUSAL = [
     (r"\bthe shift is real\b", "There does seem to be a change in the reference library"),
     (
@@ -79,6 +96,58 @@ UNSUPPORTED_CAUSAL = [
     (r"\b[Hh]e wanted control\b", "His motive is uncertain. The boundary shift isn't"),
     (r"\b[Hh]e wanted\b", "His motive is uncertain; he may have wanted"),
     (r"\b[Hh]e meant\b", "His intent is uncertain; he may have meant"),
+]
+
+# Broad cultural monocausal / invented-certainty patterns.
+BROAD_CULTURAL_CAUSAL = [
+    (
+        r"\b[Tt]he language changed because the consumption changed\b",
+        "Part of the shift tracks with how consumption changed - alongside broader internet culture and wider exposure to explicit language",
+    ),
+    (
+        r"\b[Tt]he average person'?s sexual vocabulary has been trained by thousands of hours\b",
+        "For many people, sexual vocabulary has been shaped by a much larger online reference library",
+    ),
+    (
+        r"\b[Tt]he average person'?s\b",
+        "For many people, ",
+    ),
+    (
+        r"\bthousands of hours\b",
+        "a lot of exposure",
+    ),
+    (
+        r"\b(?:almost )?everyone\b",
+        "a lot of people",
+    ),
+    (
+        r"\bmost people\b",
+        "many people",
+    ),
+    (
+        r"\balmost all\b",
+        "a large share of",
+    ),
+    (
+        r"\b[Pp]orn changed dirty talk\b",
+        "Porn is probably one of the biggest influences on dirty talk, alongside broader internet culture, changing erotica, and much wider exposure to explicit sexual language",
+    ),
+    (
+        r"\b[Ss]ociety (?:has )?(?:now )?(?:became|become|is)\b",
+        "A major cultural pattern appears to be",
+    ),
+    (
+        r"\b[Pp]eople now\b",
+        "A lot of people now",
+    ),
+    (
+        r"\b[Tt]he culture (?:has )?(?:made|turned|caused)\b",
+        "Part of the cultural shift appears to have",
+    ),
+    (
+        r"\b[Tt]he camera needs\s+(\w+)",
+        r"Camera-facing sex culture often leans on \1",
+    ),
 ]
 
 
@@ -101,6 +170,7 @@ class ResponsePlan:
     channel: str = "telegram"
     mode: str = "dynamic"
     selected_command: str = "/thoughts"
+    anchors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -111,6 +181,7 @@ class FinalizeResult:
     generic_cta_removed: bool = False
     finalization_rewrite: bool = False
     closer_replaced: bool = False
+    surface_cleaned: bool = False
     diagnostics: Dict[str, str] = field(default_factory=dict)
 
 
@@ -124,7 +195,6 @@ def _strategy_to_plan_value(strategy: str) -> str:
 
 def extract_original_subject(user_message: str) -> str:
     text = re.sub(r"^/\w+\s*", "", (user_message or "").strip())
-    # Prefer first clause / question body
     chunk = re.split(r"[.?!\n]", text)[0].strip()
     words = [w for w in re.findall(r"[A-Za-z']+", chunk) if len(w) > 2]
     stop = {
@@ -158,7 +228,6 @@ def extract_high_signal_vocabulary(user_message: str, draft: str = "") -> List[s
 
 
 def infer_central_insight(user_message: str, draft: str) -> str:
-    # Prefer a mid/late substantive sentence from the draft as the "insight" anchor.
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", draft or "") if s.strip()]
     candidates = [s for s in sentences if 40 <= len(s) <= 180 and not s.endswith("?")]
     if candidates:
@@ -227,6 +296,7 @@ def is_cultural_or_insight(user_message: str) -> bool:
             "culture", "cultural", "between", "influence", "pattern",
             "what changed", "why does", "what does it mean", "porn",
             "dirty talk", "relationship", "is this normal", "society",
+            "stretched", "carrying", "cracked", "script",
         )
     )
 
@@ -259,7 +329,6 @@ def build_response_plan(
         missing_required_info=missing,
     )
 
-    # Clarification exception: allow a real question, but not a recognition callback.
     if missing:
         allow_q = True
         strategy = "NONE"
@@ -293,6 +362,7 @@ def build_response_plan(
         primary = "Emotional State Recognition"
 
     subject = extract_original_subject(user_message)
+    anchors = extract_conversation_anchors(user_message)
     return ResponsePlan(
         intent=intent,
         primary_capability=primary,
@@ -309,6 +379,7 @@ def build_response_plan(
         channel=channel,
         mode=mode,
         selected_command=selected_command or "/thoughts",
+        anchors=list(anchors.all_anchors),
     )
 
 
@@ -334,12 +405,10 @@ def strip_generic_cta(text: str) -> Tuple[str, bool]:
     if len(parts) >= 2 and detect_generic_cta(parts[-1]):
         return "\n\n".join(parts[:-1]).rstrip(), True
 
-    # Single-block: strip last sentence if it matches.
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     if len(sentences) >= 2 and detect_generic_cta(sentences[-1]):
         return " ".join(sentences[:-1]).rstrip(), True
 
-    # Fallback: truncate at first generic marker in closer zone
     closer_start = max(0, len(text) - 320)
     head, tail = text[:closer_start], text[closer_start:]
     for pat in GENERIC_CTA_PATTERNS:
@@ -350,17 +419,17 @@ def strip_generic_cta(text: str) -> Tuple[str, bool]:
 
 
 def run_epistemic_check(draft: str, plan: ResponsePlan) -> Tuple[str, bool]:
-    """Recalibrate unsupported causal / motive claims without hedge-soup."""
+    """Recalibrate unsupported causal / motive / quantitative claims without hedge-soup."""
     text = draft or ""
     changed = False
 
-    for pattern, replacement in UNSUPPORTED_CAUSAL:
+    for pattern, replacement in UNSUPPORTED_CAUSAL + BROAD_CULTURAL_CAUSAL:
         new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
             text = new_text
             changed = True
 
-    # Population-level absolute certainty softeners (light touch).
+    # Population-level absolute certainty softeners.
     if any(m in text.lower() for m in POPULATION_MARKERS):
         soft, n = re.subn(
             r"\b(?:everyone|all (?:men|women|people))\b",
@@ -379,6 +448,23 @@ def run_epistemic_check(draft: str, plan: ResponsePlan) -> Tuple[str, bool]:
         if n:
             text, changed = soft, True
 
+    # Invented quantitative certainty
+    soft, n = re.subn(
+        r"\b\d{2,}\s*%\b",
+        "a sizable share",
+        text,
+    )
+    if n:
+        text, changed = soft, True
+    soft, n = re.subn(
+        r"\b(?:hundreds|thousands|millions) of (?:hours|people|times)\b",
+        "a lot of exposure",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if n:
+        text, changed = soft, True
+
     if plan.evidence_confidence in {"low", "medium"} and re.search(
         r"\bthe shift is real\b", text, flags=re.IGNORECASE
     ):
@@ -390,6 +476,12 @@ def run_epistemic_check(draft: str, plan: ResponsePlan) -> Tuple[str, bool]:
             flags=re.IGNORECASE,
         )
         changed = True
+
+    # Avoid introducing hedge-soup tokens if a prior rewrite somehow added them
+    for weak in (r"\bone might argue\b", r"\bperhaps\b", r"\bpossibly\b"):
+        if re.search(weak, text, flags=re.IGNORECASE):
+            text = re.sub(weak, "Part of the pattern is", text, count=1, flags=re.IGNORECASE)
+            changed = True
 
     return text, changed
 
@@ -404,61 +496,62 @@ def _recent_closer_collision(candidate: str) -> bool:
     return False
 
 
-def generate_recognition_callback(user_message: str, plan: ResponsePlan, draft: str = "") -> str:
-    """Generate a one-sentence recognition callback from this exchange (not a canned library)."""
+def generate_recognition_callback(
+    user_message: str,
+    plan: ResponsePlan,
+    draft: str = "",
+    anchors: Optional[ConversationAnchors] = None,
+) -> str:
+    """Generate a recognition callback. Priority: user anchor → subject → insight → vocab."""
+    anchors = anchors or extract_conversation_anchors(user_message, draft)
     subject = plan.original_subject or extract_original_subject(user_message)
     vocab = extract_high_signal_vocabulary(user_message, draft)
     insight = plan.central_insight or infer_central_insight(user_message, draft)
 
-    # Pull a concrete noun phrase from subject/vocab for specificity.
-    anchor = subject
-    for v in vocab:
-        if v.lower() not in anchor.lower() and len(v) > 4:
-            anchor = f"{subject} / {v}"
-            break
-
-    # Structural shapes — filled from this conversation's vocabulary.
-    shapes = [
-        f"What changed in your sense of {subject} once that was visible?",
-        f"Which part of {subject} stopped sounding extreme once you saw where the script came from?",
-        f"What got wider in your definition of {vocab[0] if vocab else subject} after reading that?",
-        f"What stopped looking innocent once the incentive behind {subject} was visible?",
-        f"Which assumption about {subject} just lost some oxygen?",
-        f"What became obvious once you separated the behavior in {subject} from the motive?",
-    ]
-
-    # Prefer a shape that mentions a high-signal token from the user question.
-    preferred = None
-    um = (user_message or "").lower()
-    for shape in shapes:
-        if any(v in shape.lower() for v in vocab[:3]):
-            preferred = shape
-            break
-    candidate = preferred or shapes[hash(subject) % len(shapes)]
-
-    # Novelty: rotate if recently used.
-    if _recent_closer_collision(candidate):
+    # 1) User anchor first
+    anchored = evolve_anchor_callback(
+        anchors,
+        subject=subject,
+        insight_hint=insight,
+    )
+    if anchored and callback_echoes_anchor(anchored, anchors, user_only=True):
+        candidate = anchored
+    else:
+        # 2–5) Fallback generator using subject / insight / vocabulary
+        shapes = [
+            f"What changed in your sense of {subject} once that was visible?",
+            f"Which part of {subject} stopped sounding extreme once you saw where the script came from?",
+            f"What got wider in your definition of {vocab[0] if vocab else subject} after reading that?",
+            f"What stopped looking innocent once the incentive behind {subject} was visible?",
+            f"Which assumption about {subject} just lost some oxygen?",
+            f"What became obvious once you separated the behavior in {subject} from the motive?",
+        ]
+        preferred = None
         for shape in shapes:
-            if not _recent_closer_collision(shape):
-                candidate = shape
+            if any(v in shape.lower() for v in vocab[:3]):
+                preferred = shape
                 break
+        candidate = preferred or shapes[hash(subject) % len(shapes)]
 
-    # Keep one sentence, end with ?
+    if _recent_closer_collision(candidate):
+        alt = evolve_anchor_callback(anchors, subject=subject, insight_hint=insight + " alt")
+        if alt and not _recent_closer_collision(alt):
+            candidate = alt
+
     candidate = candidate.strip()
     if not candidate.endswith("?"):
         candidate += "?"
-    # Soft length cap
-    if len(candidate.split()) > 28:
-        candidate = f"What shifted in how you see {subject}?"
-    # Avoid sounding like the banned service desk
+    # Soft length: dual-anchor questions may be longer
+    if len(candidate.split()) > 40:
+        if anchors.primary:
+            candidate = f"What about {anchors.primary} looks different now?"
+        else:
+            candidate = f"What shifted in how you see {subject}?"
     if detect_generic_cta(candidate):
-        candidate = f"What part of {subject} looks different now?"
-    _ = insight  # retained for future richer generation / logging
-    _ = anchor
-    if "porn" in um or "dirty talk" in um:
-        alt = "What changed in your sense of what now counts as ordinary dirty talk?"
-        if not _recent_closer_collision(alt):
-            candidate = alt
+        if anchors.primary:
+            candidate = f"What about {anchors.primary} looks different now?"
+        else:
+            candidate = f"What part of {subject} looks different now?"
     return candidate
 
 
@@ -466,18 +559,38 @@ def validate_recognition_callback_quality(
     question: str,
     user_message: str,
     plan: ResponsePlan,
+    anchors: Optional[ConversationAnchors] = None,
 ) -> Dict[str, bool]:
     q = (question or "").strip()
     lower = q.lower()
-    subject_bits = re.findall(r"[A-Za-z']{4,}", (plan.original_subject or "") + " " + (user_message or ""))
+    anchors = anchors or extract_conversation_anchors(user_message)
+    subject_bits = re.findall(
+        r"[A-Za-z']{4,}",
+        (plan.original_subject or "") + " " + (user_message or ""),
+    )
     subject_hit = any(tok.lower() in lower for tok in subject_bits if len(tok) > 3)
+    anchor_hit = (
+        callback_echoes_anchor(q, anchors, user_only=True)
+        if anchors.user_anchors
+        else True
+    )
+    if is_generic_reflective(q):
+        anchor_hit = False
     return {
-        "specificity": subject_hit or bool(re.search(r"\b(that|this|now|once|after)\b", lower)),
-        "callback": subject_hit or "that" in lower or "this" in lower,
-        "shift": any(w in lower for w in ("changed", "shift", "wider", "stopped", "looks", "sense", "assumption", "obvious", "oxygen")),
+        "specificity": subject_hit or anchor_hit,
+        "callback": subject_hit or "that" in lower or "this" in lower or anchor_hit,
+        "anchor": anchor_hit,
+        "shift": any(
+            w in lower
+            for w in (
+                "changed", "shift", "wider", "stopped", "looks", "sense",
+                "assumption", "obvious", "oxygen", "stretched", "carrying",
+                "cracked", "clearer", "different", "named",
+            )
+        ),
         "not_generic": not detect_generic_cta(q),
         "novel": not _recent_closer_collision(q),
-        "brief": len(q.split()) <= 32,
+        "brief": len(q.split()) <= 42,
         "is_question": q.endswith("?"),
     }
 
@@ -496,28 +609,25 @@ def _apply_closing_strategy(
     text: str,
     plan: ResponsePlan,
     user_message: str,
+    anchors: Optional[ConversationAnchors] = None,
 ) -> Tuple[str, bool]:
-    """Enforce closing strategy. Returns (text, closer_replaced)."""
+    """Enforce closing strategy + anchor check. Returns (text, closer_replaced)."""
     strategy = plan.closing_strategy
     body, closer = _split_body_and_closer(text)
-    replaced = False
+    anchors = anchors or extract_conversation_anchors(user_message, body or text)
 
     if strategy in {"silence", "none"}:
         if closer and (closer.endswith("?") or detect_generic_cta(closer)):
             return body, True
-        # Also strip trailing questions glued to last paragraph
         if body.endswith("?") and strategy == "silence":
             sentences = re.split(r"(?<=[.!?])\s+", body)
             if len(sentences) >= 2:
                 return " ".join(sentences[:-1]).rstrip(), True
-        return text if not replaced else body, replaced
+        return text, False
 
     if strategy == "action_line":
-        if detect_generic_cta(closer) or (closer.endswith("?") and not plan.needs_practical_action):
-            # Keep body; drop generic question closer
+        if closer and (detect_generic_cta(closer) or closer.endswith("?")):
             return body if body else text, True
-        if closer and detect_generic_cta(closer):
-            return body, True
         return text, False
 
     if strategy == "ritual_line":
@@ -526,29 +636,39 @@ def _apply_closing_strategy(
         return text, False
 
     if strategy == "recognition_callback":
-        # Clarification exception handled upstream via strategy none + allow_question
         quality_ok = False
         if closer.endswith("?") and not detect_generic_cta(closer):
-            checks = validate_recognition_callback_quality(closer, user_message, plan)
+            checks = validate_recognition_callback_quality(closer, user_message, plan, anchors)
             quality_ok = all(
                 [
                     checks["not_generic"],
                     checks["is_question"],
                     checks["brief"],
                     checks["shift"] or checks["callback"],
+                    checks["anchor"],
                 ]
             )
         if quality_ok:
             _RECENT_CLOSERS.append(re.sub(r"\s+", " ", closer.lower()))
             return text, False
 
-        callback = generate_recognition_callback(user_message, plan, draft=body or text)
-        checks = validate_recognition_callback_quality(callback, user_message, plan)
+        callback = generate_recognition_callback(
+            user_message, plan, draft=body or text, anchors=anchors
+        )
+        checks = validate_recognition_callback_quality(callback, user_message, plan, anchors)
         if not checks["not_generic"] or not checks["is_question"]:
             return body or text, True
+        # Anchor enforcement: rewrite if still not echoing user language when anchors exist
+        if anchors.all_anchors and not checks["anchor"]:
+            callback = evolve_anchor_callback(
+                anchors,
+                subject=plan.original_subject or "",
+                insight_hint=plan.central_insight or "",
+            ) or callback
+            if not callback.endswith("?"):
+                callback += "?"
         _RECENT_CLOSERS.append(re.sub(r"\s+", " ", callback.lower()))
         base = body or text
-        # Remove existing trailing question before attaching
         if base.rstrip().endswith("?"):
             sentences = re.split(r"(?<=[.!?])\s+", base.rstrip())
             if len(sentences) >= 2:
@@ -577,7 +697,10 @@ def finalize_response(
     prompt_hash: str = "",
     git_commit: str = "",
 ) -> FinalizeResult:
-    """Run the authoritative finalization gates. Draft must not go to users raw."""
+    """Run the authoritative finalization gates. Draft must not go to users raw.
+
+    After final_surface_render, text is immutable for this pass.
+    """
     t0 = time.time()
     plan = plan or build_response_plan(
         user_message,
@@ -588,28 +711,36 @@ def finalize_response(
     plan.central_insight = plan.central_insight or infer_central_insight(user_message, draft)
     plan.original_subject = plan.original_subject or extract_original_subject(user_message)
 
+    anchors = extract_conversation_anchors(user_message, draft)
+    plan.anchors = list(anchors.all_anchors)
+
     text = (draft or "").strip()
     epistemic_rewrite = False
     generic_removed = False
     closer_replaced = False
+    surface_cleaned = False
 
-    # 1) Epistemic / motivation calibration
+    # 1) Epistemic / motivation / cultural / quantitative calibration
     text, epistemic_rewrite = run_epistemic_check(text, plan)
 
     # 2) Generic continuation CTA — hard failure → remove
-    # Exception: true clarification when missing info and body is short.
     if plan.missing_required_info and len(text.split()) < 40:
-        pass  # allow clarification question in body
+        pass
     else:
         text, generic_removed = strip_generic_cta(text)
 
-    # 3) Closing strategy enforcement
-    text, closer_replaced = _apply_closing_strategy(text, plan, user_message)
+    # 3) Closing strategy + recognition callback + anchor enforcement
+    text, closer_replaced = _apply_closing_strategy(text, plan, user_message, anchors)
 
-    # 4) Overwrite / compression
+    # 4) Compression
     text, compressed = compress_if_overwritten(text)
 
-    finalization_rewrite = epistemic_rewrite or generic_removed or closer_replaced or compressed
+    # 5) FINAL SURFACE RENDER — nothing may modify text after this
+    text, surface_cleaned = final_surface_render(text)
+
+    finalization_rewrite = (
+        epistemic_rewrite or generic_removed or closer_replaced or compressed or surface_cleaned
+    )
     duration_ms = int((time.time() - t0) * 1000)
 
     diagnostics = {
@@ -623,21 +754,24 @@ def finalize_response(
         "intervention": plan.intervention or "",
         "voice": plan.voice or "",
         "closing_strategy": plan.closing_strategy,
+        "anchors": ",".join(plan.anchors[:6]),
         "epistemic_rewrite": str(epistemic_rewrite).lower(),
         "generic_cta_removed": str(generic_removed).lower(),
         "finalization_rewrite": str(finalization_rewrite).lower(),
         "closer_replaced": str(closer_replaced).lower(),
+        "surface_cleaned": str(surface_cleaned).lower(),
         "duration_ms": str(duration_ms),
     }
     logger.info("finalization %s", diagnostics)
 
     return FinalizeResult(
-        text=text.strip(),
+        text=text,
         plan=plan,
         epistemic_rewrite=epistemic_rewrite,
         generic_cta_removed=generic_removed,
         finalization_rewrite=finalization_rewrite,
         closer_replaced=closer_replaced,
+        surface_cleaned=surface_cleaned,
         diagnostics=diagnostics,
     )
 

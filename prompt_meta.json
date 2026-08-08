@@ -1,8 +1,8 @@
 {
   "section_count": 208,
-  "char_count": 201931,
-  "prompt_hash": "ad9bcd3976585522",
-  "prompt_hash_sha256": "ad9bcd39765855226ac25ead6b2d0eb24ec334f4996ae70d0d5911cb7f64513b",
+  "char_count": 202080,
+  "prompt_hash": "847c1e780fd7afbf",
+  "prompt_hash_sha256": "847c1e780fd7afbf877fb8c70788afa2c84ae3dc56cebcaa088358f4bc4eaf50",
   "final_20_sections": [
     "9_response-engine/mode-escalation.md",
     "9_response-engine/persona-compatibility-matrix.md",

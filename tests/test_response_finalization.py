@@ -70,14 +70,23 @@ def test_dirty_talk_regression_strips_generic_cta_and_calibrates():
     )
     result = finalize_response(draft, user, selected_command="/thoughts")
     lower = result.text.lower()
+    closer = result.text.strip().split("\n\n")[-1].lower()
+    closer_q = closer.replace("🥃", "").strip()
     assert "say the word" not in lower
     assert "if you want examples" not in lower
     assert result.generic_cta_removed or not detect_generic_cta(result.text)
     assert result.plan.closing_strategy == "recognition_callback"
-    assert result.text.rstrip().endswith("?")
+    assert closer_q.endswith("?")
+    assert result.text.rstrip().endswith("🥃")
     assert "the shift is real" not in lower
     # Should not force sole-cause certainty
     assert not re.search(r"\bporn(?:ography)? caused\b", lower)
+    # Callback must echo user language (dirty talk / influence / language / script)
+    assert any(
+        tok in closer
+        for tok in ("dirty talk", "influence", "language", "script", "porn")
+    )
+    assert " ." not in result.text
 
 
 def test_doorman_prefers_action_and_calibrates_motive():
