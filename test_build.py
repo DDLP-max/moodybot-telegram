@@ -31,7 +31,7 @@ if prompt_dir.exists():
     
     # Check specific sections
     print("\n🔍 Checking specific sections:")
-    sections = ["8_response-engine", "1_emotional-architecture", "2_personality-engine"]
+    sections = ["9_response-engine", "1_emotional-architecture", "2_intelligence-engine", "3_voice-engine"]
     
     for section in sections:
         section_path = prompt_dir / section
@@ -41,10 +41,10 @@ if prompt_dir.exists():
             md_files = list(section_path.glob("*.md"))
             print(f"     Contains {len(md_files)} .md files")
             
-            # Check for dynamic persona files
-            if section == "8_response-engine":
-                dynamic_files = [f for f in md_files if "dynamic" in f.name.lower()]
-                print(f"     Dynamic persona files: {[f.name for f in dynamic_files]}")
+            # Check for dynamic intelligence files
+            if section == "9_response-engine":
+                dynamic_files = [f for f in md_files if "dynamic" in f.name.lower() or "capability" in f.name.lower()]
+                print(f"     Intelligence routing files: {[f.name for f in dynamic_files]}")
         else:
             print(f"  ❌ {section} not found")
 else:

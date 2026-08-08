@@ -1,0 +1,122 @@
+{
+  "bourdain": {
+    "capabilities": ["sensory_realism"],
+    "voice": ["human_realism"],
+    "deprecated": true
+  },
+  "cia": {
+    "capabilities": ["interrogative_analysis"],
+    "voice": ["clipped_precision"],
+    "deprecated": true
+  },
+  "noir": {
+    "capabilities": ["pattern_forensics", "narrative_weight"],
+    "voice": ["hardboiled_observation"],
+    "deprecated": true
+  },
+  "noir-romantic": {
+    "capabilities": ["narrative_weight"],
+    "voice": ["narrative_weight_voice"],
+    "deprecated": true
+  },
+  "sam": {
+    "capabilities": ["weathered_wisdom"],
+    "voice": ["dry_warmth"],
+    "deprecated": true
+  },
+  "sam-neill": {
+    "capabilities": ["weathered_wisdom"],
+    "voice": ["dry_warmth"],
+    "deprecated": true
+  },
+  "munger": {
+    "capabilities": ["latticework_judgment"],
+    "voice": ["dry_economy"],
+    "deprecated": true
+  },
+  "field": {
+    "capabilities": ["operational_intelligence"],
+    "deprecated": true
+  },
+  "field-operator": {
+    "capabilities": ["operational_intelligence"],
+    "deprecated": true
+  },
+  "matt": {
+    "capabilities": ["operational_intelligence"],
+    "deprecated": true
+  },
+  "builder": {
+    "capabilities": ["prototype_thinking"],
+    "deprecated": true
+  },
+  "bob": {
+    "capabilities": ["gentle_stabilization"],
+    "voice": ["dry_warmth"],
+    "deprecated": true
+  },
+  "ross": {
+    "capabilities": ["gentle_stabilization"],
+    "deprecated": true
+  },
+  "velvet": {
+    "capabilities": ["soft_emotional_precision", "emotional_validation"],
+    "deprecated": true
+  },
+  "clinical": {
+    "capabilities": ["detached_analysis"],
+    "deprecated": true
+  },
+  "erc": {
+    "capabilities": ["grounded_recalibration"],
+    "deprecated": true
+  },
+  "columbo": {
+    "capabilities": ["interrogative_analysis"],
+    "voice": ["informal_wisdom"],
+    "deprecated": true
+  },
+  "bond": {
+    "capabilities": ["social_calibration"],
+    "deprecated": true
+  },
+  "savage": {
+    "capabilities": ["pattern_recurrence"],
+    "intervention": ["high_friction_confrontation"],
+    "voice": ["savage_humor"],
+    "deprecated": true
+  },
+  "roast": {
+    "capabilities": ["pattern_recurrence"],
+    "intervention": ["high_friction_confrontation"],
+    "voice": ["savage_humor"],
+    "deprecated": true
+  },
+  "validate": {
+    "capabilities": ["emotional_validation"],
+    "intervention": ["gentle_stabilization"],
+    "deprecated": true
+  },
+  "rollins": {
+    "intervention": ["anger_mobilization"],
+    "deprecated": true
+  },
+  "dale": {
+    "intervention": ["crash_intervention"],
+    "deprecated": true
+  },
+  "yolo": {
+    "intervention": ["crash_intervention"],
+    "deprecated": true
+  },
+  "hank": {
+    "capabilities": ["narrative_weight"],
+    "voice": ["human_realism"],
+    "deprecated": true
+  },
+  "moody": {
+    "capabilities": ["narrative_weight"],
+    "voice": ["human_realism"],
+    "deprecated": true
+  }
+}

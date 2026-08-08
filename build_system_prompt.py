@@ -20,14 +20,15 @@ import re
 ROOT = pathlib.Path.cwd()
 ORDER = [
     "1_emotional-architecture",
-    "2_personality-engine", 
-    "3_formatting-structure",
-    "4_safety-protocols",
-    "5_engagement-conversion",
-    "6_design-process",
-    "7_emotional-modulation",
-    "8_response-engine",
-    "9_testing-quality"
+    "2_intelligence-engine",
+    "3_voice-engine",
+    "4_formatting-structure",
+    "5_safety-protocols",
+    "6_engagement-conversion",
+    "7_design-process",
+    "8_emotional-modulation",
+    "9_response-engine",
+    "10_testing-quality",
 ]
 
 chunks = []
