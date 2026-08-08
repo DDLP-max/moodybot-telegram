@@ -26,15 +26,19 @@ from typing import Deque, Dict, List, Optional, Tuple
 
 from conversation_anchors import (
     ConversationAnchors,
-    callback_echoes_anchor,
-    evolve_anchor_callback,
     extract_conversation_anchors,
-    is_generic_reflective,
 )
 from recognition_callbacks import (
     closer_instruction,
     is_generic_followup,
     select_closing_strategy,
+)
+from signature_language import (
+    belongs_only_to_this_conversation,
+    extract_signature_language,
+    remember_signature_use,
+    rhetorical_callback_quality,
+    transform_signature_callback,
 )
 from surface_render import final_surface_render
 
@@ -501,57 +505,49 @@ def generate_recognition_callback(
     plan: ResponsePlan,
     draft: str = "",
     anchors: Optional[ConversationAnchors] = None,
+    *,
+    conversation_id: str = "",
 ) -> str:
-    """Generate a recognition callback. Priority: user anchor → subject → insight → vocab."""
-    anchors = anchors or extract_conversation_anchors(user_message, draft)
+    """Generate a RHETORICAL recognition callback from signature language.
+
+    Priority: protected signature phrase → transform → callback.
+    Never synonymize distinctive authorial wording into topical reflections.
+    """
+    _ = anchors  # retained for callers; rhetorical path uses signature_language
+    _ = draft
+    signatures = extract_signature_language(user_message)
     subject = plan.original_subject or extract_original_subject(user_message)
-    vocab = extract_high_signal_vocabulary(user_message, draft)
-    insight = plan.central_insight or infer_central_insight(user_message, draft)
 
-    # 1) User anchor first
-    anchored = evolve_anchor_callback(
-        anchors,
-        subject=subject,
-        insight_hint=insight,
-    )
-    if anchored and callback_echoes_anchor(anchored, anchors, user_only=True):
-        candidate = anchored
+    # 1) Rhetorical transform from protected signature language
+    if signatures.protected:
+        candidate = transform_signature_callback(
+            signatures, conversation_id=conversation_id
+        )
+        if candidate:
+            candidate = candidate.strip()
+            if not candidate.endswith("?"):
+                candidate += "?"
+            quality = rhetorical_callback_quality(candidate, user_message, signatures)
+            if quality["preserves_signature"] and quality["no_synonym_destruction"]:
+                remember_signature_use(conversation_id or "default", candidate, signatures)
+                return candidate
+
+    # 2) No signature available — subject echo WITHOUT synonymizing missing fingerprints
+    # Prefer literal subject words over "what changed / what shifted" templates.
+    subject_words = [w for w in re.findall(r"[A-Za-z']+", subject) if len(w) > 3][:4]
+    if subject_words:
+        focus = " ".join(subject_words[:3])
+        candidate = f"What about {focus} looks different now that you've seen it named?"
     else:
-        # 2–5) Fallback generator using subject / insight / vocabulary
-        shapes = [
-            f"What changed in your sense of {subject} once that was visible?",
-            f"Which part of {subject} stopped sounding extreme once you saw where the script came from?",
-            f"What got wider in your definition of {vocab[0] if vocab else subject} after reading that?",
-            f"What stopped looking innocent once the incentive behind {subject} was visible?",
-            f"Which assumption about {subject} just lost some oxygen?",
-            f"What became obvious once you separated the behavior in {subject} from the motive?",
-        ]
-        preferred = None
-        for shape in shapes:
-            if any(v in shape.lower() for v in vocab[:3]):
-                preferred = shape
-                break
-        candidate = preferred or shapes[hash(subject) % len(shapes)]
-
-    if _recent_closer_collision(candidate):
-        alt = evolve_anchor_callback(anchors, subject=subject, insight_hint=insight + " alt")
-        if alt and not _recent_closer_collision(alt):
-            candidate = alt
+        candidate = "What part of that still has a fingerprint on you?"
 
     candidate = candidate.strip()
     if not candidate.endswith("?"):
         candidate += "?"
-    # Soft length: dual-anchor questions may be longer
     if len(candidate.split()) > 40:
-        if anchors.primary:
-            candidate = f"What about {anchors.primary} looks different now?"
-        else:
-            candidate = f"What shifted in how you see {subject}?"
+        candidate = f"What about {subject_words[0] if subject_words else 'that'} still holds?"
     if detect_generic_cta(candidate):
-        if anchors.primary:
-            candidate = f"What about {anchors.primary} looks different now?"
-        else:
-            candidate = f"What part of {subject} looks different now?"
+        candidate = f"What about {subject_words[0] if subject_words else 'that'} still holds?"
     return candidate
 
 
@@ -561,37 +557,23 @@ def validate_recognition_callback_quality(
     plan: ResponsePlan,
     anchors: Optional[ConversationAnchors] = None,
 ) -> Dict[str, bool]:
+    """Rhetorical quality gate — signature preservation beats topical relevance."""
+    _ = anchors
+    _ = plan
     q = (question or "").strip()
-    lower = q.lower()
-    anchors = anchors or extract_conversation_anchors(user_message)
-    subject_bits = re.findall(
-        r"[A-Za-z']{4,}",
-        (plan.original_subject or "") + " " + (user_message or ""),
-    )
-    subject_hit = any(tok.lower() in lower for tok in subject_bits if len(tok) > 3)
-    anchor_hit = (
-        callback_echoes_anchor(q, anchors, user_only=True)
-        if anchors.user_anchors
-        else True
-    )
-    if is_generic_reflective(q):
-        anchor_hit = False
+    signatures = extract_signature_language(user_message)
+    rq = rhetorical_callback_quality(q, user_message, signatures)
     return {
-        "specificity": subject_hit or anchor_hit,
-        "callback": subject_hit or "that" in lower or "this" in lower or anchor_hit,
-        "anchor": anchor_hit,
-        "shift": any(
-            w in lower
-            for w in (
-                "changed", "shift", "wider", "stopped", "looks", "sense",
-                "assumption", "obvious", "oxygen", "stretched", "carrying",
-                "cracked", "clearer", "different", "named",
-            )
-        ),
-        "not_generic": not detect_generic_cta(q),
+        "specificity": rq["conversation_specific"],
+        "callback": rq["preserves_signature"] or not signatures.protected,
+        "anchor": rq["preserves_signature"] or not signatures.protected,
+        "rhetorical": rq["conversation_specific"],
+        "no_synonym_destruction": rq["no_synonym_destruction"],
+        "shift": rq["preserves_signature"] or rq["conversation_specific"],
+        "not_generic": not detect_generic_cta(q) and rq["not_generic_reflective"],
         "novel": not _recent_closer_collision(q),
-        "brief": len(q.split()) <= 42,
-        "is_question": q.endswith("?"),
+        "brief": rq["brief"],
+        "is_question": rq["is_question"],
     }
 
 
@@ -636,6 +618,7 @@ def _apply_closing_strategy(
         return text, False
 
     if strategy == "recognition_callback":
+        signatures = extract_signature_language(user_message)
         quality_ok = False
         if closer.endswith("?") and not detect_generic_cta(closer):
             checks = validate_recognition_callback_quality(closer, user_message, plan, anchors)
@@ -644,29 +627,28 @@ def _apply_closing_strategy(
                     checks["not_generic"],
                     checks["is_question"],
                     checks["brief"],
-                    checks["shift"] or checks["callback"],
+                    checks["rhetorical"],
+                    checks["no_synonym_destruction"],
                     checks["anchor"],
                 ]
             )
         if quality_ok:
+            remember_signature_use("default", closer, signatures)
             _RECENT_CLOSERS.append(re.sub(r"\s+", " ", closer.lower()))
             return text, False
 
         callback = generate_recognition_callback(
             user_message, plan, draft=body or text, anchors=anchors
         )
+        # Hard rhetorical enforcement when signature language exists
+        if signatures.protected and not belongs_only_to_this_conversation(callback, signatures):
+            callback = transform_signature_callback(signatures) or callback
+            if callback and not callback.endswith("?"):
+                callback += "?"
         checks = validate_recognition_callback_quality(callback, user_message, plan, anchors)
         if not checks["not_generic"] or not checks["is_question"]:
             return body or text, True
-        # Anchor enforcement: rewrite if still not echoing user language when anchors exist
-        if anchors.all_anchors and not checks["anchor"]:
-            callback = evolve_anchor_callback(
-                anchors,
-                subject=plan.original_subject or "",
-                insight_hint=plan.central_insight or "",
-            ) or callback
-            if not callback.endswith("?"):
-                callback += "?"
+        remember_signature_use("default", callback, signatures)
         _RECENT_CLOSERS.append(re.sub(r"\s+", " ", callback.lower()))
         base = body or text
         if base.rstrip().endswith("?"):

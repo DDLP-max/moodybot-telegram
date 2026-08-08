@@ -64,11 +64,9 @@ def test_dirty_talk_callback_uses_user_anchors():
     assert "the language changed because the consumption changed" not in lower
     assert result.plan.closing_strategy == "recognition_callback"
     assert closer_q.endswith("?")
-    # Must echo a user/conversation anchor, not a generic reflective closer
-    assert any(
-        tok in closer
-        for tok in ("stretch", "dirty talk", "script", "influence", "language", "porn")
-    )
+    # Rhetorical: must preserve signature language (stretch), not topical synonyms
+    assert "stretch" in closer
+    assert "what changed in your sense" not in closer
     assert "familiar or alien" not in closer
 
 
@@ -79,7 +77,8 @@ def test_generic_reflective_closer_fails_anchor_check():
     generic = "What part of that shift felt most familiar or alien to you?"
     assert callback_echoes_anchor(generic, anchors) is False
     cb = generate_recognition_callback(user, plan, anchors=anchors)
-    assert "stretch" in cb.lower() or "dirty talk" in cb.lower()
+    assert "stretch" in cb.lower()
+    assert "what changed" not in cb.lower()
 
 
 def test_broad_cultural_and_quantitative_rewrite():
