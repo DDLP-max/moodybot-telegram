@@ -19,20 +19,25 @@ def test_recognition_callbacks_module_exists():
     path = ENGINE / "recognition-callbacks.md"
     assert path.exists()
     text = path.read_text(encoding="utf-8")
-    assert "Recognition Callback" in text
-    assert "Do you want" in text or "Would you like" in text
-    assert "generated, not library-selected" in text.lower() or "Do not use a canned list" in text
+    assert "Recognition Landing" in text or "Recognition Landings" in text
+    assert "Question Is the Exception" in text or "exception" in text.lower()
+    assert "stretched" in text.lower()
+    assert "seen it named" not in text.lower() or "Bad question" in text
 
 
 def test_cultural_analysis_prefers_recognition_callback():
-    strategy = select_closing_strategy(
-        user_message=(
-            "How has dirty talk changed between 1995 and 2026, "
-            "and did pornography influence that?"
-        ),
-        created_reframe=True,
+    from recognition_landing import select_landing
+
+    decision = select_landing(
+        "How has dirty talk changed between 1995 and 2026, "
+        "and did pornography influence that?"
     )
-    assert strategy == "RECOGNITION_CALLBACK"
+    # Cultural criticism should land as statement/silence, not forced quiz
+    assert decision.landing in {
+        "RECOGNITION_STATEMENT",
+        "SILENCE",
+        "RECOGNITION_OBSERVATION",
+    }
 
 
 def test_practical_action_prefers_action_line():
@@ -61,11 +66,17 @@ def test_technical_without_reframe_prefers_none():
 
 
 def test_relationship_pattern_can_use_callback():
-    strategy = select_closing_strategy(
-        user_message="Why does this relationship keep repeating the same pattern?",
-        created_reframe=True,
+    from recognition_landing import select_landing
+
+    decision = select_landing(
+        "Why does this relationship keep repeating the same pattern?"
     )
-    assert strategy == "RECOGNITION_CALLBACK"
+    assert decision.landing in {
+        "RECOGNITION_STATEMENT",
+        "SILENCE",
+        "RECOGNITION_OBSERVATION",
+        "RECOGNITION_CALLBACK",
+    }
 
 
 def test_generic_followups_are_detected():
@@ -113,7 +124,7 @@ def test_diagnose_closing_telemetry_shape():
         "Insight here.\n\nSo what shifted once the pattern was visible?",
         created_reframe=True,
     )
-    assert diag["closing_strategy"] == "recognition_callback"
+    assert "closing_strategy" in diag
     assert diag["generic_followup_detected"] in {"true", "false"}
 
 

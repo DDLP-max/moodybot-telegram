@@ -62,6 +62,7 @@ def test_finalize_rewrites_semantic_closer_to_rhetorical():
     assert "stretch" in closer
     assert not closer.startswith("what changed")
     assert "what shifted" not in closer
+    assert "seen it named" not in closer
 
 
 def test_carrying_callback():

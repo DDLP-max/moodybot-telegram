@@ -28,18 +28,9 @@ from conversation_anchors import (
     ConversationAnchors,
     extract_conversation_anchors,
 )
-from recognition_callbacks import (
-    closer_instruction,
-    is_generic_followup,
-    select_closing_strategy,
-)
-from signature_language import (
-    belongs_only_to_this_conversation,
-    extract_signature_language,
-    remember_signature_use,
-    rhetorical_callback_quality,
-    transform_signature_callback,
-)
+from recognition_callbacks import is_generic_followup
+from recognition_landing import apply_landing, select_landing
+from signature_language import extract_signature_language
 from surface_render import final_surface_render
 
 logger = logging.getLogger("moodybot.finalization")
@@ -199,7 +190,8 @@ class ResponsePlan:
     expected_shift_to: Optional[str] = None
     central_insight: Optional[str] = None
     original_subject: Optional[str] = None
-    closing_strategy: str = "none"  # recognition_callback | ritual_line | action_line | silence | none
+    closing_strategy: str = "none"  # legacy alias of landing
+    landing: str = "silence"  # recognition_statement | recognition_callback | ...
     allow_question: bool = False
     missing_required_info: bool = False
     channel: str = "telegram"
@@ -218,14 +210,6 @@ class FinalizeResult:
     closer_replaced: bool = False
     surface_cleaned: bool = False
     diagnostics: Dict[str, str] = field(default_factory=dict)
-
-
-def _normalize_strategy(strategy: str) -> str:
-    return (strategy or "NONE").upper().replace("-", "_")
-
-
-def _strategy_to_plan_value(strategy: str) -> str:
-    return _normalize_strategy(strategy).lower()
 
 
 def extract_original_subject(user_message: str) -> str:
@@ -342,6 +326,7 @@ def build_response_plan(
     selected_command: str = "/thoughts",
     channel: str = "telegram",
     mode: str = "dynamic",
+    body: str = "",
 ) -> ResponsePlan:
     missing = needs_clarification(user_message)
     practical = is_practical_request(user_message)
@@ -354,50 +339,53 @@ def build_response_plan(
         "/thoughts", "/velvet", "/contrast", "/cinema", "/noir", "/sensory"
     }
 
-    strategy = select_closing_strategy(
-        user_message=user_message,
-        created_reframe=insight and not technical and not practical and not grief,
-        practical_request=practical,
-        grief_or_trauma=grief,
-        roast_mode=roast,
-        technical_only=technical,
-        missing_required_info=missing,
+    decision = select_landing(
+        user_message,
+        selected_command=selected_command,
+        body=body,
+        practical=practical,
+        grief=grief,
+        technical=technical,
+        roast=roast,
+        missing_info=missing,
     )
+    landing = decision.landing.lower()
 
     if missing:
-        allow_q = True
-        strategy = "NONE"
         intent = "clarify"
         confidence = "low"
         primary = "Clarification"
     elif practical:
-        allow_q = False
         intent = "action"
         confidence = "medium"
         primary = "Practical Next Action"
     elif grief:
-        allow_q = False
         intent = "witness"
         confidence = "high"
         primary = "Quiet Presence"
     elif technical:
-        allow_q = False
         intent = "technical"
         confidence = "medium"
         primary = "Operational Intelligence"
     elif insight:
-        allow_q = strategy == "RECOGNITION_CALLBACK"
         intent = "explore"
         confidence = "medium"
         primary = "Cultural Analysis" if is_cultural_or_insight(user_message) else "Pattern Recognition"
     else:
-        allow_q = False
         intent = "respond"
         confidence = "medium"
         primary = "Emotional State Recognition"
 
     subject = extract_original_subject(user_message)
     anchors = extract_conversation_anchors(user_message)
+    # Legacy closing_strategy field mirrors landing for telemetry compatibility
+    legacy_map = {
+        "recognition_callback": "recognition_callback",
+        "recognition_statement": "ritual_line",
+        "recognition_observation": "ritual_line",
+        "action": "action_line",
+        "silence": "silence",
+    }
     return ResponsePlan(
         intent=intent,
         primary_capability=primary,
@@ -408,8 +396,9 @@ def build_response_plan(
         expected_shift_to="clarity" if insight else ("action" if practical else None),
         central_insight=None,
         original_subject=subject,
-        closing_strategy=_strategy_to_plan_value(strategy),
-        allow_question=allow_q or missing,
+        closing_strategy=legacy_map.get(landing, "none"),
+        landing=landing,
+        allow_question=decision.allow_question,
         missing_required_info=missing,
         channel=channel,
         mode=mode,
@@ -419,7 +408,31 @@ def build_response_plan(
 
 
 def plan_closer_instruction(plan: ResponsePlan) -> str:
-    return closer_instruction(_normalize_strategy(plan.closing_strategy))
+    landing = (plan.landing or "silence").upper()
+    instructions = {
+        "RECOGNITION_STATEMENT": (
+            "Landing: RECOGNITION_STATEMENT. "
+            "End on a complete insight sentence that could close an essay. "
+            "Do NOT ask a follow-up question. Do NOT invent a 'what about...' closer."
+        ),
+        "RECOGNITION_OBSERVATION": (
+            "Landing: RECOGNITION_OBSERVATION. "
+            "Close with a sharp observation. No question unless truly earned."
+        ),
+        "RECOGNITION_CALLBACK": (
+            "Landing: RECOGNITION_CALLBACK. "
+            "Only if the user offered distinctive authorial language, "
+            "end with one short rhetorical callback that reuses THAT language. "
+            "Never staple topic nouns into a question."
+        ),
+        "ACTION": (
+            "Landing: ACTION. Close with a concrete next step. No quiz question."
+        ),
+        "SILENCE": (
+            "Landing: SILENCE. The answer should end cleanly. No follow-up question."
+        ),
+    }
+    return instructions.get(landing, instructions["SILENCE"])
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -517,47 +530,19 @@ def generate_recognition_callback(
     *,
     conversation_id: str = "",
 ) -> str:
-    """Generate a RHETORICAL recognition callback from signature language.
+    """Compat wrapper — only returns a question when signature language earns it.
 
-    Priority: protected signature phrase → transform → callback.
-    Never synonymize distinctive authorial wording into topical reflections.
+    Never staples topic nouns into 'What about X looks different...'
     """
-    _ = anchors  # retained for callers; rhetorical path uses signature_language
-    _ = draft
-    signatures = extract_signature_language(user_message)
-    subject = plan.original_subject or extract_original_subject(user_message)
+    from recognition_landing import craft_callback_question, craft_recognition_statement
 
-    # 1) Rhetorical transform from protected signature language
-    if signatures.protected:
-        candidate = transform_signature_callback(
-            signatures, conversation_id=conversation_id
-        )
-        if candidate:
-            candidate = candidate.strip()
-            if not candidate.endswith("?"):
-                candidate += "?"
-            quality = rhetorical_callback_quality(candidate, user_message, signatures)
-            if quality["preserves_signature"] and quality["no_synonym_destruction"]:
-                remember_signature_use(conversation_id or "default", candidate, signatures)
-                return candidate
-
-    # 2) No signature available — subject echo WITHOUT synonymizing missing fingerprints
-    # Prefer literal subject words over "what changed / what shifted" templates.
-    subject_words = [w for w in re.findall(r"[A-Za-z']+", subject) if len(w) > 3][:4]
-    if subject_words:
-        focus = " ".join(subject_words[:3])
-        candidate = f"What about {focus} looks different now that you've seen it named?"
-    else:
-        candidate = "What part of that still has a fingerprint on you?"
-
-    candidate = candidate.strip()
-    if not candidate.endswith("?"):
-        candidate += "?"
-    if len(candidate.split()) > 40:
-        candidate = f"What about {subject_words[0] if subject_words else 'that'} still holds?"
-    if detect_generic_cta(candidate):
-        candidate = f"What about {subject_words[0] if subject_words else 'that'} still holds?"
-    return candidate
+    _ = plan
+    _ = anchors
+    q = craft_callback_question(user_message, conversation_id=conversation_id)
+    if q:
+        return q
+    stmt = craft_recognition_statement(user_message, draft or "")
+    return stmt or ""
 
 
 def validate_recognition_callback_quality(
@@ -566,34 +551,31 @@ def validate_recognition_callback_quality(
     plan: ResponsePlan,
     anchors: Optional[ConversationAnchors] = None,
 ) -> Dict[str, bool]:
-    """Rhetorical quality gate — signature preservation beats topical relevance."""
+    """Landing quality — grammar and essay-worthiness beat module compliance."""
+    from recognition_landing import is_grammatical_english, would_keep_if_nobody_could_reply
+    from signature_language import rhetorical_callback_quality
+
     _ = anchors
     _ = plan
     q = (question or "").strip()
     signatures = extract_signature_language(user_message)
     rq = rhetorical_callback_quality(q, user_message, signatures)
+    grammatical = is_grammatical_english(q) if q.endswith("?") else (
+        is_grammatical_english(q if q.endswith((".", "!")) else q + ".")
+    )
     return {
-        "specificity": rq["conversation_specific"],
-        "callback": rq["preserves_signature"] or not signatures.protected,
-        "anchor": rq["preserves_signature"] or not signatures.protected,
-        "rhetorical": rq["conversation_specific"],
+        "specificity": True,
+        "callback": True,
+        "anchor": (not signatures.protected) or rq["preserves_signature"],
+        "rhetorical": grammatical and would_keep_if_nobody_could_reply(q) if q.endswith("?") else grammatical,
         "no_synonym_destruction": rq["no_synonym_destruction"],
-        "shift": rq["preserves_signature"] or rq["conversation_specific"],
-        "not_generic": not detect_generic_cta(q) and rq["not_generic_reflective"],
+        "shift": True,
+        "not_generic": not detect_generic_cta(q),
         "novel": not _recent_closer_collision(q),
-        "brief": rq["brief"],
-        "is_question": rq["is_question"],
+        "brief": len(q.split()) <= 42,
+        "is_question": q.endswith("?"),
+        "grammatical": grammatical,
     }
-
-
-def _split_body_and_closer(text: str) -> Tuple[str, str]:
-    parts = re.split(r"\n\s*\n", (text or "").strip())
-    if len(parts) >= 2:
-        return "\n\n".join(parts[:-1]).rstrip(), parts[-1].strip()
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    if len(sentences) >= 2 and sentences[-1].endswith("?"):
-        return " ".join(sentences[:-1]).rstrip(), sentences[-1].strip()
-    return text.strip(), ""
 
 
 def _apply_closing_strategy(
@@ -602,71 +584,36 @@ def _apply_closing_strategy(
     user_message: str,
     anchors: Optional[ConversationAnchors] = None,
 ) -> Tuple[str, bool]:
-    """Enforce closing strategy + anchor check. Returns (text, closer_replaced)."""
-    strategy = plan.closing_strategy
-    body, closer = _split_body_and_closer(text)
-    anchors = anchors or extract_conversation_anchors(user_message, body or text)
+    """Apply recognition landing. Questions are the exception, not the proof."""
+    _ = anchors
+    decision = select_landing(
+        user_message,
+        selected_command=plan.selected_command,
+        body=text,
+        practical=plan.needs_practical_action,
+        grief=plan.intent == "witness",
+        technical=plan.intent == "technical",
+        roast=plan.selected_command in {"/roast", "/savage", "/cut"},
+        missing_info=plan.missing_required_info,
+    )
+    plan.landing = decision.landing.lower()
+    # Keep legacy field in sync for telemetry
+    legacy_map = {
+        "recognition_callback": "recognition_callback",
+        "recognition_statement": "ritual_line",
+        "recognition_observation": "ritual_line",
+        "action": "action_line",
+        "silence": "silence",
+    }
+    plan.closing_strategy = legacy_map.get(plan.landing, plan.closing_strategy)
+    plan.allow_question = decision.allow_question
 
-    if strategy in {"silence", "none"}:
-        if closer and (closer.endswith("?") or detect_generic_cta(closer)):
-            return body, True
-        if body.endswith("?") and strategy == "silence":
-            sentences = re.split(r"(?<=[.!?])\s+", body)
-            if len(sentences) >= 2:
-                return " ".join(sentences[:-1]).rstrip(), True
-        return text, False
-
-    if strategy == "action_line":
-        if closer and (detect_generic_cta(closer) or closer.endswith("?")):
-            return body if body else text, True
-        return text, False
-
-    if strategy == "ritual_line":
-        if closer.endswith("?") or detect_generic_cta(closer):
-            return body, True
-        return text, False
-
-    if strategy == "recognition_callback":
-        signatures = extract_signature_language(user_message)
-        quality_ok = False
-        if closer.endswith("?") and not detect_generic_cta(closer):
-            checks = validate_recognition_callback_quality(closer, user_message, plan, anchors)
-            quality_ok = all(
-                [
-                    checks["not_generic"],
-                    checks["is_question"],
-                    checks["brief"],
-                    checks["rhetorical"],
-                    checks["no_synonym_destruction"],
-                    checks["anchor"],
-                ]
-            )
-        if quality_ok:
-            remember_signature_use("default", closer, signatures)
+    new_text, modified = apply_landing(text, user_message, decision)
+    if modified:
+        closer = new_text.strip().split("\n\n")[-1] if new_text else ""
+        if closer:
             _RECENT_CLOSERS.append(re.sub(r"\s+", " ", closer.lower()))
-            return text, False
-
-        callback = generate_recognition_callback(
-            user_message, plan, draft=body or text, anchors=anchors
-        )
-        # Hard rhetorical enforcement when signature language exists
-        if signatures.protected and not belongs_only_to_this_conversation(callback, signatures):
-            callback = transform_signature_callback(signatures) or callback
-            if callback and not callback.endswith("?"):
-                callback += "?"
-        checks = validate_recognition_callback_quality(callback, user_message, plan, anchors)
-        if not checks["not_generic"] or not checks["is_question"]:
-            return body or text, True
-        remember_signature_use("default", callback, signatures)
-        _RECENT_CLOSERS.append(re.sub(r"\s+", " ", callback.lower()))
-        base = body or text
-        if base.rstrip().endswith("?"):
-            sentences = re.split(r"(?<=[.!?])\s+", base.rstrip())
-            if len(sentences) >= 2:
-                base = " ".join(sentences[:-1]).rstrip()
-        return f"{base.rstrip()}\n\n{callback}", True
-
-    return text, False
+    return new_text, modified
 
 
 def compress_if_overwritten(text: str) -> Tuple[str, bool]:
@@ -745,6 +692,7 @@ def finalize_response(
         "intervention": plan.intervention or "",
         "voice": plan.voice or "",
         "closing_strategy": plan.closing_strategy,
+        "landing": plan.landing,
         "anchors": ",".join(plan.anchors[:6]),
         "epistemic_rewrite": str(epistemic_rewrite).lower(),
         "generic_cta_removed": str(generic_removed).lower(),

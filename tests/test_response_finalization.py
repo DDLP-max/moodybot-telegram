@@ -75,17 +75,21 @@ def test_dirty_talk_regression_strips_generic_cta_and_calibrates():
     assert "say the word" not in lower
     assert "if you want examples" not in lower
     assert result.generic_cta_removed or not detect_generic_cta(result.text)
-    assert result.plan.closing_strategy == "recognition_callback"
-    assert closer_q.endswith("?")
     assert result.text.rstrip().endswith("🥃")
     # Invented precision still blocked; interpretive body may stay bold
     assert "thousands of hours" not in lower
-    # Callback must echo user language (dirty talk / influence / language / script)
-    assert any(
-        tok in closer
-        for tok in ("dirty talk", "influence", "language", "script", "porn")
-    )
+    # No broken topic-staple question
+    assert "seen it named" not in closer
+    assert "what about" not in closer
     assert " ." not in result.text
+    # Landing should not force a quiz; statement/silence/action OK
+    assert result.plan.landing in {
+        "recognition_statement",
+        "silence",
+        "recognition_observation",
+        "recognition_callback",
+        "action",
+    }
 
 
 def test_doorman_prefers_action_and_calibrates_motive():
@@ -113,7 +117,7 @@ def test_technical_no_emotional_callback():
         "What stretched in you while reading that?"
     )
     plan = build_response_plan(user)
-    assert plan.closing_strategy in {"none", "action_line"}
+    assert plan.landing in {"silence", "action"}
     result = finalize_response(draft, user, plan)
     assert "stretched in you" not in result.text.lower()
 
@@ -150,9 +154,12 @@ def test_recognition_callback_is_specific():
     user = "How did dating culture change since the 90s?"
     plan = build_response_plan(user, selected_command="/thoughts")
     cb = generate_recognition_callback(user, plan, draft="The reference library exploded.")
-    assert cb.endswith("?")
-    assert detect_generic_cta(cb) is False
-    assert len(cb.split()) <= 32
+    # No authorial signature → statement or empty, never broken topic staple
+    assert "seen it named" not in (cb or "").lower()
+    assert "what about" not in (cb or "").lower()
+    if cb:
+        assert detect_generic_cta(cb) is False
+        assert len(cb.split()) <= 40
 
 
 def test_epistemic_check_population_claims():

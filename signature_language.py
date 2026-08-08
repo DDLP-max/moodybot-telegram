@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Rhetorical signature language for MoodyBot recognition callbacks.
+"""Authorial signature language for MoodyBot landings.
 
-ChatGPT remembers the topic.
-MoodyBot remembers the language.
+Preserve AUTHORIAL LANGUAGE — beautiful verbs, metaphors, unexpected phrasing.
 
-Callbacks are RHETORICAL — they reuse distinctive authorial wording.
-They are not semantic, topical, or generic reflective questions.
+Do NOT preserve topic nouns:
+feminism, women, men, dirty talk, porn, politics, people, culture...
+
+Those are subjects. Subjects are not fingerprints.
 """
 
 from __future__ import annotations
@@ -13,38 +14,44 @@ from __future__ import annotations
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Deque, Dict, List, Optional, Set  # noqa: F401
 
 
-# Distinctive lexicon — preserve these; never reduce to synonyms.
+# Distinctive authorial lexicon only.
 SIGNATURE_LEXICON = {
     "stretch", "stretched", "stretching", "unfold", "unfolded", "unfolding",
     "carry", "carrying", "carried", "gravity", "weather", "room", "door",
     "map", "current", "script", "oxygen", "mirror", "shadow", "weight",
     "temperature", "signal", "anchor", "fingerprints", "fingerprint",
     "backstage", "crack", "cracked", "cracking", "bruise", "bruised",
-    "haunt", "haunted", "ghost", "echo", "scar", "wound", "thread",
-    "bridge", "mask", "stage", "library", "intimacy", "boundary",
+    "haunt", "haunted", "echo", "scar", "wound", "thread", "bridge",
+    "mask", "stage",
 }
 
-# Generic topical/reflective language — never treat as signature.
-GENERIC_LEXICON = {
+# Topic / entity / ordinary language — never signature.
+TOPIC_BLACKLIST = {
+    "feminist", "feminists", "feminism", "woman", "women", "man", "men",
+    "male", "female", "girl", "boy", "porn", "pornography", "dirty", "talk",
+    "sex", "sexual", "politics", "political", "culture", "cultural", "society",
+    "people", "person", "relationship", "dating", "language", "vocabulary",
+    "influence", "between", "about", "praise", "praising", "hate", "hating",
+    "loyalty", "equality", "gender", "doorman", "flowers", "wine", "number",
+    "manager", "boss", "workplace", "partner", "boyfriend", "girlfriend",
+}
+
+GENERIC_LEXICON = TOPIC_BLACKLIST | {
     "change", "changed", "changing", "shift", "shifted", "shifting",
-    "feel", "felt", "feeling", "think", "thought", "about", "what",
-    "part", "sense", "aspect", "topic", "thing", "something", "really",
-    "just", "like", "want", "need", "know", "mean", "means", "question",
-    "answer", "explore", "discuss", "talk", "dirty", "porn", "pornography",
-    "language", "culture", "relationship", "people", "between", "influence",
+    "feel", "felt", "feeling", "think", "thought", "what", "part", "sense",
+    "aspect", "topic", "thing", "something", "really", "just", "like",
+    "want", "need", "know", "mean", "means", "question", "answer",
+    "explore", "discuss", "why", "how", "does", "did", "are", "the",
 }
 
-# If a signature term is protected, these substitutes DESTROY the fingerprint.
 SYNONYM_DESTRUCTION = {
     "stretch": {"change", "changed", "shift", "shifted", "differ", "different"},
     "stretched": {"change", "changed", "shift", "shifted", "differ", "different"},
-    "stretching": {"change", "changed", "shift", "shifted"},
     "carry": {"hold", "holding", "bear", "bearing", "deal"},
     "carrying": {"holding", "bearing", "dealing"},
-    "carried": {"held", "bore"},
     "crack": {"break", "broke", "broken", "open"},
     "cracked": {"broke", "broken", "opened"},
     "gravity": {"weight", "heaviness", "importance"},
@@ -64,11 +71,11 @@ GENERIC_REFLECTIVE = [
     r"what changed in your sense",
     r"what shifted in how you",
     r"what part of that (?:shift|change)",
+    r"^what about\b",
 ]
 
-SIGNATURE_THRESHOLD = 0.55
+SIGNATURE_THRESHOLD = 0.62
 
-# Per-conversation memory: conversation_id -> recent signature stems used in closers
 _CONVERSATION_SIGNATURE_TERMS: Dict[str, Deque[str]] = defaultdict(lambda: deque(maxlen=32))
 
 
@@ -77,7 +84,7 @@ class SignaturePhrase:
     phrase: str
     stem: str
     score: float
-    kind: str  # verb | image | construction | metaphor
+    kind: str
     protected: bool = False
 
 
@@ -100,68 +107,44 @@ class SignatureSet:
         return [p.stem for p in self.phrases if p.protected]
 
 
-def _stem(word: str) -> str:
-    w = (word or "").lower()
-    for suffix in ("ing", "ed", "es", "s"):
-        if len(w) > len(suffix) + 2 and w.endswith(suffix):
-            return w[: -len(suffix)] if suffix != "ing" or not w.endswith("ning") else w[:-3]
-    return w
-
-
 def _normalize_stem(word: str) -> str:
     w = (word or "").lower()
-    # Prefer lexicon roots
     for root in (
         "stretch", "unfold", "carry", "crack", "haunt", "bruise",
         "fingerprint", "shadow", "mirror", "gravity", "oxygen", "script",
         "room", "door", "weather", "current", "weight", "bridge", "thread",
-        "wound", "scar", "mask", "stage", "library", "intimacy", "boundary",
-        "anchor", "signal", "temperature", "backstage", "map",
+        "wound", "scar", "mask", "stage", "anchor", "signal", "temperature",
+        "backstage", "map", "echo",
     ):
-        if w.startswith(root) or root.startswith(w[: max(4, len(w) - 1)]):
-            if root in w or w in root or w.startswith(root[:4]):
-                if w.startswith(root) or root.startswith(w):
-                    return root
-    return _stem(w)
+        if w.startswith(root) or root.startswith(w[: max(4, min(len(w), len(root)))]):
+            if w.startswith(root) or root.startswith(w):
+                return root
+    return w
 
 
 def signature_score(phrase: str, *, in_lexicon: bool, kind: str) -> float:
-    """Score distinctive / authorial feel. Higher = more protected."""
     p = (phrase or "").strip().lower()
-    if not p or p in GENERIC_LEXICON:
+    if not p:
+        return 0.0
+    words = re.findall(r"[a-z']+", p)
+    if any(w in TOPIC_BLACKLIST for w in words):
+        return 0.0
+    if p in GENERIC_LEXICON:
         return 0.0
 
     score = 0.0
-    words = re.findall(r"[a-z']+", p)
-
-    # Rarity / lexicon membership
     if in_lexicon:
-        score += 0.45
+        score += 0.5
     if any(w in SIGNATURE_LEXICON for w in words):
         score += 0.25
-
-    # Imagery / metaphor feel
     if kind in {"image", "metaphor", "construction"}:
         score += 0.15
-
-    # Multi-word construction (authorial phrasing)
     if len(words) >= 2:
         score += 0.2
     if len(words) >= 3:
         score += 0.1
-
-    # Novelty vs generic reflective vocabulary
-    if not any(w in GENERIC_LEXICON for w in words):
-        score += 0.15
-    else:
-        # Penalize if mostly generic
-        generic_ratio = sum(1 for w in words if w in GENERIC_LEXICON) / max(len(words), 1)
-        score -= 0.25 * generic_ratio
-
-    # Unexpected verbs / vivid wording
     if kind == "verb" and in_lexicon:
         score += 0.1
-
     return max(0.0, min(1.0, score))
 
 
@@ -192,39 +175,31 @@ def _extract_constructions(text: str) -> List[str]:
 
 
 def extract_signature_language(user_message: str) -> SignatureSet:
-    """Extract distinctive authorial language — not topics, nouns-as-entities, or keywords."""
     text = re.sub(r"^/\w+\s*", "", (user_message or "").strip())
     lower = text.lower()
     constructions = _extract_constructions(lower)
     words = re.findall(r"[A-Za-z']+", lower)
-
     phrases: List[SignaturePhrase] = []
 
     for cons in constructions:
-        stem = "stretch" if "stretch" in cons else _normalize_stem(cons.split()[0])
-        for w in re.findall(r"[a-z']+", cons):
-            if w in SIGNATURE_LEXICON or _normalize_stem(w) in SIGNATURE_LEXICON:
+        # Skip constructions polluted by topic nouns
+        cons_words = re.findall(r"[a-z']+", cons)
+        if any(w in TOPIC_BLACKLIST for w in cons_words):
+            continue
+        stem = "stretch" if "stretch" in cons else _normalize_stem(cons_words[0])
+        for w in cons_words:
+            if w in SIGNATURE_LEXICON:
                 stem = _normalize_stem(w)
                 break
         score = signature_score(cons, in_lexicon=True, kind="construction")
         phrases.append(
-            SignaturePhrase(
-                phrase=cons,
-                stem=stem,
-                score=max(score, 0.85),
-                kind="construction",
-                protected=True,
-            )
+            SignaturePhrase(cons, stem, max(score, 0.9), "construction", True)
         )
 
     for w in words:
-        if w in GENERIC_LEXICON and w not in SIGNATURE_LEXICON:
+        if w in TOPIC_BLACKLIST or w in GENERIC_LEXICON:
             continue
-        in_lex = w in SIGNATURE_LEXICON
-        if not in_lex and len(w) < 5:
-            continue
-        # Only keep non-lexicon words if they appear in vivid constructions already handled
-        if not in_lex:
+        if w not in SIGNATURE_LEXICON:
             continue
         stem = _normalize_stem(w)
         kind = "verb" if stem in {
@@ -232,31 +207,20 @@ def extract_signature_language(user_message: str) -> SignatureSet:
         } else "image"
         score = signature_score(w, in_lexicon=True, kind=kind)
         phrases.append(
-            SignaturePhrase(
-                phrase=w,
-                stem=stem,
-                score=score,
-                kind=kind,
-                protected=score >= SIGNATURE_THRESHOLD,
-            )
+            SignaturePhrase(w, stem, score, kind, score >= SIGNATURE_THRESHOLD)
         )
 
-    # Quoted fragments = authorial
     for m in re.finditer(r"[\"']([^\"']{3,40})[\"']", text):
         frag = m.group(1).strip()
+        frag_words = re.findall(r"[A-Za-z']+", frag.lower())
+        if any(w in TOPIC_BLACKLIST for w in frag_words):
+            continue
         score = signature_score(frag, in_lexicon=False, kind="metaphor") + 0.2
-        stem = _normalize_stem(re.findall(r"[A-Za-z']+", frag)[0]) if re.findall(r"[A-Za-z']+", frag) else frag
+        stem = _normalize_stem(frag_words[0]) if frag_words else frag
         phrases.append(
-            SignaturePhrase(
-                phrase=frag,
-                stem=stem,
-                score=min(1.0, score),
-                kind="metaphor",
-                protected=score >= SIGNATURE_THRESHOLD,
-            )
+            SignaturePhrase(frag, stem, min(1.0, score), "metaphor", score >= SIGNATURE_THRESHOLD)
         )
 
-    # Deduplicate by stem, keep highest score / longest phrase
     best: Dict[str, SignaturePhrase] = {}
     for p in phrases:
         cur = best.get(p.stem)
@@ -265,12 +229,7 @@ def extract_signature_language(user_message: str) -> SignatureSet:
 
     ordered = sorted(best.values(), key=lambda p: (-p.score, -len(p.phrase)))
     protected = [p.phrase for p in ordered if p.protected]
-
-    return SignatureSet(
-        phrases=ordered,
-        protected=protected,
-        raw_constructions=constructions,
-    )
+    return SignatureSet(ordered, protected, constructions)
 
 
 def is_generic_reflective(question: str) -> bool:
@@ -279,41 +238,30 @@ def is_generic_reflective(question: str) -> bool:
 
 
 def loses_protected_language(callback: str, signatures: SignatureSet) -> bool:
-    """True if a beautiful protected phrase disappeared into a synonym."""
     if not signatures.protected:
         return False
     lower = (callback or "").lower()
-    # Must keep at least one protected stem literally (rhetorical echo)
-    if any(p.stem in lower or p.phrase in lower for p in signatures.phrases if p.protected):
-        # Also fail if synonym destruction present WITHOUT the stem
-        return False
-    return True
+    return not any(
+        p.stem in lower or p.phrase in lower for p in signatures.phrases if p.protected
+    )
 
 
 def uses_synonym_destruction(callback: str, signatures: SignatureSet) -> bool:
-    """True if callback replaced signature language with a fingerprint-killing synonym."""
     lower = (callback or "").lower()
     words = set(re.findall(r"[a-z']+", lower))
     for p in signatures.phrases:
         if not p.protected:
             continue
-        banned = SYNONYM_DESTRUCTION.get(p.stem, set()) | SYNONYM_DESTRUCTION.get(p.phrase, set())
-        if not banned:
-            continue
-        # Destruction: banned synonym used AND signature stem absent
+        banned = SYNONYM_DESTRUCTION.get(p.stem, set())
         if any(b in words for b in banned) and p.stem not in lower and p.phrase not in lower:
             return True
     return False
 
 
 def belongs_only_to_this_conversation(callback: str, signatures: SignatureSet) -> bool:
-    """Could this final sentence only belong to THIS conversation?"""
-    if not callback:
-        return False
-    if is_generic_reflective(callback):
+    if not callback or is_generic_reflective(callback):
         return False
     if not signatures.protected:
-        # No signature available — topical fallback is allowed but weak
         return True
     if loses_protected_language(callback, signatures):
         return False
@@ -349,13 +297,7 @@ def transform_signature_callback(
         return None
 
     recent = recently_used_stems(conversation_id)
-
-    # Prefer protected constructions / high-score phrases not mechanically overused
-    candidates = [p for p in signatures.phrases if p.protected]
-    if not candidates:
-        candidates = list(signatures.phrases)
-
-    # Evolve: prefer a stem not used last if alternatives exist
+    candidates = [p for p in signatures.phrases if p.protected] or list(signatures.phrases)
     ordered = sorted(
         candidates,
         key=lambda p: (
@@ -369,7 +311,6 @@ def transform_signature_callback(
     stem = primary.stem
     phrase = primary.phrase
 
-    # Rhetorical transformations — keep the actual language
     if stem == "stretch" or "stretch" in phrase:
         variants = [
             "So what actually got stretched out in you reading that?",
@@ -377,70 +318,44 @@ def transform_signature_callback(
             "What part of your definition got stretched furthest?",
             "What got stretched out in you while you were reading that?",
         ]
-        # Evolve across the conversation — avoid mechanical identical reuse.
         mem = list(_CONVERSATION_SIGNATURE_TERMS.get(conversation_id, []))
         idx = sum(1 for m in mem if m == "stretch") % len(variants)
         return variants[idx]
 
-    if stem == "carry" or "carry" in phrase:
-        return "What are you still carrying now that you've named it?"
-
-    if stem == "crack" or "crack" in phrase:
-        return "What actually cracked?"
-
-    if stem == "room" or "room" in phrase:
-        return "What changed in the room after you saw it differently?"
-
-    if stem == "script" or "script" in phrase:
-        return "What part of the script stopped feeling inevitable?"
-
-    if stem == "gravity" or "gravity" in phrase:
-        return "What changed once the gravity shifted?"
-
-    if stem == "mirror" or "mirror" in phrase:
-        return "What did the mirror show you that the story was hiding?"
-
-    if stem == "oxygen" or "oxygen" in phrase:
-        return "What got harder to breathe around once the oxygen thinned?"
-
-    if stem == "weather" or "weather" in phrase:
-        return "What shifted in the weather of that moment once you named it?"
-
-    if stem == "door" or "door" in phrase:
-        return "What was on the other side of that door once you stopped pretending it was locked?"
-
-    if stem == "weight" or "weight" in phrase:
-        return "What part of the weight got more honest once you stopped decorating it?"
-
-    if stem == "shadow" or "shadow" in phrase:
-        return "What in the shadow stopped looking like mystery and started looking like pattern?"
-
-    if stem == "fingerprint" or "fingerprints" in phrase:
-        return "Whose fingerprints are still on this now that you can see them?"
-
-    if stem == "backstage" or "backstage" in phrase:
-        return "What did you notice backstage that the performance was hiding?"
-
-    if stem == "current" or "current" in phrase:
-        return "Where is the current actually taking you now that you feel it?"
-
-    if stem == "anchor" or "anchor" in phrase:
-        return "What are you still using as an anchor that might be a weight?"
-
-    if stem == "unfold" or "unfold" in phrase:
-        return "What unfolded that you weren't ready to name yet?"
-
-    if stem == "map" or "map" in phrase:
-        return "What part of the map no longer matches the territory?"
-
-    if stem == "signal" or "signal" in phrase:
-        return "What signal got clearer once the noise dropped?"
-
-    if stem == "temperature" or "temperature" in phrase:
-        return "What changed in the temperature of the room once the truth landed?"
-
-    # Generic rhetorical echo — still preserve the phrase itself
-    return f"What about '{phrase}' still holds now that you've heard it answered?"
+    table = {
+        "carry": "What are you still carrying now that you've named it?",
+        "crack": "What actually cracked?",
+        "room": "What changed in the room after you saw it differently?",
+        "script": "What part of the script stopped feeling inevitable?",
+        "gravity": "What changed once the gravity shifted?",
+        "mirror": "What did the mirror show you that the story was hiding?",
+        "oxygen": "What got harder to breathe around once the oxygen thinned?",
+        "weather": "What shifted in the weather of that moment once you named it?",
+        "door": "What was on the other side of that door once you stopped pretending it was locked?",
+        "weight": "What part of the weight got more honest once you stopped decorating it?",
+        "shadow": "What in the shadow stopped looking like mystery and started looking like pattern?",
+        "fingerprint": "Whose fingerprints are still on this now that you can see them?",
+        "backstage": "What did you notice backstage that the performance was hiding?",
+        "current": "Where is the current actually taking you now that you feel it?",
+        "anchor": "What are you still using as an anchor that might be a weight?",
+        "unfold": "What unfolded that you weren't ready to name yet?",
+        "map": "What part of the map no longer matches the territory?",
+        "signal": "What signal got clearer once the noise dropped?",
+        "temperature": "What changed in the temperature of the room once the truth landed?",
+        "echo": "What echo stayed after the performance ended?",
+        "bridge": "What collapsed on the bridge once you stopped calling it solid?",
+        "thread": "Which thread were you pretending wasn't already frayed?",
+        "haunt": "What still haunts the room after you named it?",
+        "bruise": "Where is the bruise more honest than the story?",
+        "mask": "What was the mask protecting that the face can't?",
+        "stage": "What dies when the stage lights go down?",
+        "wound": "What does the wound know that the explanation doesn't?",
+        "scar": "What did the scar keep after the story moved on?",
+    }
+    if stem in table:
+        return table[stem]
+    # Never fall back to topic-noun stapling
+    return None
 
 
 def rhetorical_callback_quality(

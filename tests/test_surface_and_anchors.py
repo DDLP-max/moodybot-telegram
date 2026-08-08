@@ -61,12 +61,12 @@ def test_dirty_talk_callback_uses_user_anchors():
     assert "say the word" not in lower
     assert "thousands of hours" not in lower
     assert "the average person" not in lower or "vastly more exposure" in lower
-    assert result.plan.closing_strategy == "recognition_callback"
     assert closer_q.endswith("?")
-    # Rhetorical: must preserve signature language (stretch), not topical synonyms
+    # Authorial stretch earns a question; topic stapling does not
     assert "stretch" in closer
-    assert "what changed in your sense" not in closer
+    assert "seen it named" not in closer
     assert "familiar or alien" not in closer
+    assert result.plan.landing == "recognition_callback"
 
 
 def test_generic_reflective_closer_fails_anchor_check():
@@ -132,7 +132,8 @@ def test_finalize_ends_with_surface_quality():
     result = finalize_response(draft, user)
     assert " ." not in result.text
     assert "\n\n\n" not in result.text
-    assert "script" in result.text.lower().split("\n\n")[-1]
+    assert "seen it named" not in result.text.lower()
+    assert "felt familiar" not in result.text.lower()
 
 
 def test_no_hedge_soup_introduced():
