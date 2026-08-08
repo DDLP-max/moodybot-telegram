@@ -37,7 +37,7 @@ def test_malformed_landing_family_rejected():
 
 
 def test_landing_engine_version():
-    assert LANDING_ENGINE_VERSION == "recognition-landing-v1"
+    assert LANDING_ENGINE_VERSION == "signature-line-v2"
 
 
 def test_politics_prefers_statement_not_question():
@@ -51,8 +51,8 @@ def test_politics_prefers_statement_not_question():
     assert "what about feminists" not in closer.lower()
     assert "seen it named" not in closer.lower()
     assert not closer.endswith("?") or "stretch" in closer.lower()
-    # Prefer a statement landing
     assert result.plan.landing in {
+        "signature_line",
         "recognition_statement",
         "silence",
         "recognition_observation",
@@ -115,11 +115,7 @@ def test_apply_landing_strips_broken_closer():
 
 def test_build_plan_landing_field():
     plan = build_response_plan("Why do feminists hate women praising men?")
-    assert plan.landing in {
-        "recognition_statement",
-        "silence",
-        "recognition_observation",
-    }
+    assert plan.landing == "signature_line"
     assert plan.allow_question is False
 
 

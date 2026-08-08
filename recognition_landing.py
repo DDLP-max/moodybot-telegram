@@ -1,35 +1,42 @@
 # -*- coding: utf-8 -*-
-"""Recognition Landing — how a MoodyBot response comes to rest.
+"""Landing selection — which single ending mechanism wins.
 
-A Landing is the final movement of the piece.
-It is NOT a required question template.
+MoodyBot is a writer. The preferred last sentence is a Signature Line.
 
-Landing types:
-  RECOGNITION_STATEMENT
-  RECOGNITION_CALLBACK   (question — exception, not default)
-  RECOGNITION_OBSERVATION
-  ACTION
-  SILENCE
+Recognition Landing / Recognition Callback is one alternate implementation
+when the user's own language deserves to return.
 
-The user should never notice the architecture.
-They should only notice that the ending feels inevitable.
+Decision order at finalization (only ONE wins):
+  1. Signature Line   — analysis, criticism, pattern, psychology, politics...
+  2. Recognition Callback — distinctive authorial language returns
+  3. Action           — practical guidance
+  4. Silence          — grief / shock / nothing improves the ending
+
+Legacy aliases: RECOGNITION_STATEMENT, RECOGNITION_OBSERVATION → Signature Line.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from signature_language import (
     extract_signature_language,
     remember_signature_use,
     transform_signature_callback,
 )
+from signature_line import (
+    craft_signature_line,
+    ensure_signature_line,
+    generate_signature_line,
+    last_line_is_signature,
+    validate_signature_line,
+)
 
 LandingType = str
 
-LANDING_ENGINE_VERSION = "recognition-landing-v1"
+LANDING_ENGINE_VERSION = "signature-line-v2"
 
 # Patterns that prove the closer is machine-stapled topic debris.
 BROKEN_CLOSER_PATTERNS = [
@@ -172,43 +179,13 @@ def extract_best_statement_from_body(body: str) -> Optional[str]:
 
 
 def craft_recognition_statement(user_message: str, body: str) -> Optional[str]:
-    """Build a statement landing — never a topic-noun question template."""
-    # If body already has a strong ending, do not invent a new one.
-    if body_already_lands(body):
-        return None  # signal: keep body as-is
-
-    existing = extract_best_statement_from_body(body)
-    if existing and would_keep_if_nobody_could_reply(existing):
-        # Reuse as landing only if it isn't already the final line
-        last = re.split(r"\n\s*\n", (body or "").strip())[-1].strip()
-        if existing in last and last.endswith(existing[-1] if existing else ""):
-            return None
-        return existing
-
-    um = (user_message or "").lower()
-    # Topic-aware statement bank — literary landings, not templates glued to nouns
-    if any(w in um for w in ("feminist", "feminism", "praising men", "loyalty")):
-        return "Once gratitude becomes defection, the conversation has already changed."
-    if any(w in um for w in ("dirty talk", "porn", "1995", "sexual language")):
-        return "The interesting shift isn't that the language got dirtier — it's that the script library got larger."
-    if any(w in um for w in ("doorman", "flowers", "wine")):
-        return "The move is clear. The next line is hers."
-    if any(w in um for w in ("cancel", "late at night", "low priority", "only calls")):
-        return "Convenience dressed as connection is still just convenience."
-    if any(w in um for w in ("manager", "credit", "workplace", "boss")):
-        return "They're protecting position. Your move is about visibility, not their inner life."
-
-    # Generic strong landing when insight work happened but no specialty match
-    if existing:
-        return existing
-    return None
+    """Compat wrapper — Signature Line is the authoritative statement ending."""
+    return craft_signature_line(user_message, body)
 
 
 def craft_recognition_observation(body: str) -> Optional[str]:
-    existing = extract_best_statement_from_body(body)
-    if existing and would_keep_if_nobody_could_reply(existing):
-        return existing
-    return None
+    """Observation landings defer to Signature Line extraction."""
+    return craft_signature_line("", body)
 
 
 def craft_callback_question(user_message: str, conversation_id: str = "") -> Optional[str]:
@@ -242,10 +219,11 @@ def select_landing(
     roast: bool = False,
     missing_info: bool = False,
 ) -> LandingDecision:
-    """Choose how the response should come to rest. Questions are the exception."""
+    """Choose the single ending mechanism. Never append two."""
     um = (user_message or "").lower()
     signatures = extract_signature_language(user_message)
 
+    # Silence — nothing improves the ending
     if missing_info:
         return LandingDecision("SILENCE", False, "clarification belongs in the body")
 
@@ -255,52 +233,40 @@ def select_landing(
     if roast or selected_command in {"/roast", "/savage", "/cut"}:
         return LandingDecision("SILENCE", False, "killshot should stand")
 
+    if technical:
+        return LandingDecision("SILENCE", False, "technical — no Signature Line")
+
+    # Action — practical guidance is the goal
     if practical or any(
         p in um
         for p in ("what should i do", "what do i say", "how should i handle", "what now")
     ):
         return LandingDecision("ACTION", False, "practical request")
 
-    if technical:
-        return LandingDecision("SILENCE", False, "technical — no emotional closer")
-
-    # Authorial signature phrase present → question can earn its place
-    if signatures.protected and any(
-        s in um for s in ("stretch", "carrying", "cracked", "got stretched")
-    ):
+    # Recognition Callback — SPECIAL: user's own language returns
+    authorial_hooks = (
+        "stretch",
+        "stretched",
+        "carrying",
+        "cracked",
+        "got stretched",
+        "the room changed",
+        "room changed",
+    )
+    if signatures.protected and any(s in um for s in authorial_hooks):
         return LandingDecision(
             "RECOGNITION_CALLBACK",
             True,
-            "authorial signature invites rhetorical callback",
+            "authorial language returns as callback",
         )
 
-    # Politics / cultural criticism / relationship analysis → statement preferred
-    if any(
-        w in um
-        for w in (
-            "feminist", "feminism", "politics", "political", "culture", "cultural",
-            "society", "porn", "dirty talk", "relationship", "why do", "why does",
-            "praising", "loyalty",
-        )
-    ):
-        if body_already_lands(body):
-            return LandingDecision("SILENCE", False, "insight already landed")
-        return LandingDecision(
-            "RECOGNITION_STATEMENT",
-            False,
-            "criticism/insight — statement beats question",
-        )
-
-    if body_already_lands(body):
-        return LandingDecision("SILENCE", False, "body already complete")
-
-    # Confession / soft emotional — observation or statement, question optional
-    if selected_command in {"/validate", "/velvet"} or any(
-        w in um for w in ("i feel", "i'm scared", "confession", "i hate that i")
-    ):
-        return LandingDecision("RECOGNITION_OBSERVATION", False, "emotional — observe, don't quiz")
-
-    return LandingDecision("RECOGNITION_STATEMENT", False, "default: land, don't quiz")
+    # Signature Line — preferred last sentence for analytic writing
+    _ = body  # generate_signature_line reacts to body at apply time
+    return LandingDecision(
+        "SIGNATURE_LINE",
+        False,
+        "write the sentence the reader remembers tomorrow",
+    )
 
 
 def apply_landing(
@@ -309,12 +275,9 @@ def apply_landing(
     decision: LandingDecision,
     *,
     conversation_id: str = "",
+    plan: Any = None,
 ) -> Tuple[str, bool]:
-    """Apply landing to draft. Returns (text, modified).
-
-    May REMOVE a bad closer without replacing it.
-    Never append a broken question to prove the module exists.
-    """
+    """Apply exactly one landing. Signature Line is generated from the body."""
     parts = re.split(r"\n\s*\n", (text or "").strip())
     if len(parts) >= 2:
         body, closer = "\n\n".join(parts[:-1]).rstrip(), parts[-1].strip()
@@ -382,39 +345,35 @@ def apply_landing(
         q = craft_callback_question(user_message, conversation_id=conversation_id)
         base = _strip_trailing_question(body or text)
         if not q:
-            # Fall back to statement — never invent topic-noun questions
-            stmt = craft_recognition_statement(user_message, base)
-            if stmt and would_keep_if_nobody_could_reply(stmt):
-                # Only append if not already present
-                if stmt not in base:
-                    return _finish(f"{base.rstrip()}\n\n{stmt}", True)
-            return _finish(base, True)
+            # Fall back to Signature Line — never invent topic-noun questions
+            out, mod, _sig = ensure_signature_line(base, user_message, plan=plan)
+            return _finish(out, True if mod or modified_strip else modified_strip)
         if q in base:
             return _finish(base, True)
         return _finish(f"{base.rstrip()}\n\n{q}", True)
 
-    if landing in {"RECOGNITION_STATEMENT", "RECOGNITION_OBSERVATION"}:
+    if landing in {
+        "SIGNATURE_LINE",
+        "RECOGNITION_STATEMENT",
+        "RECOGNITION_OBSERVATION",
+    }:
         base = _strip_trailing_question(body or text)
-        if body_already_lands(base):
-            return _finish(base, True if (closer or modified_strip) else modified_strip)
-
-        if landing == "RECOGNITION_OBSERVATION":
-            stmt = craft_recognition_observation(base) or craft_recognition_statement(
-                user_message, base
-            )
-        else:
-            stmt = craft_recognition_statement(user_message, base)
-
-        if not stmt:
-            return _finish(base, True if (closer or modified_strip) else modified_strip)
-        if not would_keep_if_nobody_could_reply(stmt) or not is_grammatical_english(
-            stmt if stmt.endswith((".", "!", "?")) else stmt + "."
+        # Keep if last line already earns Signature Line status
+        if last_line_is_signature(base, user_message=user_message) or (
+            closer and last_line_is_signature(closer, user_message=user_message)
         ):
-            return _finish(base, True if (closer or modified_strip) else modified_strip)
-        if not stmt.endswith((".", "!", "?")):
-            stmt += "."
-        if stmt in base:
-            return _finish(base, True if (closer or modified_strip) else modified_strip)
-        return _finish(f"{base.rstrip()}\n\n{stmt}", True)
+            kept = base
+            if closer and last_line_is_signature(closer, user_message=user_message):
+                kept = f"{base.rstrip()}\n\n{closer}" if base else closer
+            return _finish(kept, modified_strip)
+
+        # Generate AFTER body exists — react to the draft
+        line = generate_signature_line(plan, base, user_message=user_message)
+        if line:
+            out, mod, sig = ensure_signature_line(base, user_message, plan=plan)
+            if sig:
+                return _finish(out, True if (mod or closer or modified_strip) else mod)
+        # Nothing earned — silence beats a manufactured slogan
+        return _finish(base, True if (closer or modified_strip) else modified_strip)
 
     return _finish(text, modified_strip)

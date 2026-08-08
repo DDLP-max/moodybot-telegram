@@ -1,10 +1,9 @@
 {
-  "section_count": 208,
-  "char_count": 200641,
-  "prompt_hash": "7abb7c142debd73d",
-  "prompt_hash_sha256": "7abb7c142debd73d8ba9b4ba85c534496e7250f43820e3dda51939db834e358a",
+  "section_count": 209,
+  "char_count": 202235,
+  "prompt_hash": "bca0ffe6ce795030",
+  "prompt_hash_sha256": "bca0ffe6ce79503034cafb82d649b8c492ae80ff5dc5476b9f63cc117a6edaa1",
   "final_20_sections": [
-    "9_response-engine/mode-escalation.md",
     "9_response-engine/persona-compatibility-matrix.md",
     "9_response-engine/persona-selection-algorithm.md",
     "9_response-engine/persona-stacking-logic.md",
@@ -21,16 +20,18 @@
     "2_intelligence-engine/capabilities/evidence-vs-inference.md",
     "2_intelligence-engine/capabilities/epistemic-calibration.md",
     "2_intelligence-engine/capabilities/practical-next-action.md",
+    "9_response-engine/signature-line.md",
     "9_response-engine/recognition-callbacks.md",
     "9_response-engine/response-generation-order.md",
     "10_testing-quality/final-quality-gates.md"
   ],
   "critical_module_positions": {
-    "epistemic-calibration": "204/208",
-    "evidence-vs-inference": "203/208",
-    "practical-next-action": "205/208",
-    "recognition-callbacks": "206/208",
-    "response-generation-order": "207/208",
-    "final-quality-gates": "208/208"
+    "epistemic-calibration": "204/209",
+    "evidence-vs-inference": "203/209",
+    "practical-next-action": "205/209",
+    "signature-line": "206/209",
+    "recognition-callbacks": "207/209",
+    "response-generation-order": "208/209",
+    "final-quality-gates": "209/209"
   }
 }

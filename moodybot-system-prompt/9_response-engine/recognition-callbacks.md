@@ -1,78 +1,33 @@
-# Recognition Landings
+# Recognition Callback (special case)
 
-## Purpose
+Recognition Callback is **one possible ending** — not the default.
 
-A Recognition Landing is how the answer comes to rest.
+The preferred last sentence is a **Signature Line**.
+See `signature-line.md`.
 
-It is NOT a required follow-up question.
-It is NOT proof that a module ran.
-It is the final movement of the piece.
+## When Callback wins
 
-Sometimes that's a question.
-Sometimes it's a statement.
-Sometimes it's an observation.
-Sometimes it's action.
-Sometimes it's silence.
+Only when the user authored unusually distinctive language:
 
-## Core Principle
+- "What got stretched out?"
+- "I'm still carrying this."
+- "It cracked something."
+- "The room changed."
 
-ChatGPT remembers the topic.
-MoodyBot remembers the language — when the language is authorial.
+Those deserve rhetorical return.
+Normal topic nouns do not.
 
-The ending should feel inevitable.
-The reader should never notice the architecture.
+## Selection order (only one wins)
 
-## Landing Types
+1. Signature Line
+2. Recognition Callback
+3. Action
+4. Silence
 
-1. **Recognition Statement** — complete insight sentence (preferred for criticism / analysis)
-2. **Recognition Callback** — question that reuses distinctive authorial language (exception)
-3. **Recognition Observation** — sharp notice without quiz
-4. **Action** — next step
-5. **Silence** — the answer already landed
+Never append both a Signature Line and a Callback.
 
-## Question Is the Exception
+## Banned endings
 
-Ask a question only when it genuinely improves the answer.
-
-Do NOT ask because of engagement, thread depth, Dynamic Mode, or retention.
-
-Good question (authorial language):
-“So what got stretched out in you reading that?”
-
-Bad pattern (topic stapling — never generate):
-“What about [ordinary topic nouns] looks different now that you've seen it named?”
-
-Do not quote or imitate malformed topic-staple questions.
-If a closer fails basic English, throw it away.
-
-## Signature Language
-
-Preserve AUTHORIAL language:
-
-stretched, carrying, cracked, weather, gravity, backstage, fingerprints, oxygen, room, current, map, mirror
-
-Do NOT preserve ordinary topic nouns:
-
-feminism, women, men, dirty talk, porn, politics, culture
-
-Those are subjects. Subjects are not fingerprints.
-
-## Preferred Order
-
-If the answer already contains a complete insight:
-**Recognition Statement beats Recognition Question.**
-
-## Quality Gate
-
-Before sending the ending, ask:
-
-- Does this make the answer stronger?
-- Would a good essay end this way?
-- Would I keep this sentence if nobody could reply?
-
-If no — delete or rewrite.
-
-## Telegram
-
-Same landing logic. No separate engagement question layer.
-A conversation can end naturally.
+Never staple topic nouns into "What about [topic] looks different..." questions.
+If an ending fails English or quality gates — delete it.
+Silence beats a slogan.

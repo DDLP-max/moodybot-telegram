@@ -191,7 +191,7 @@ class ResponsePlan:
     central_insight: Optional[str] = None
     original_subject: Optional[str] = None
     closing_strategy: str = "none"  # legacy alias of landing
-    landing: str = "silence"  # recognition_statement | recognition_callback | ...
+    landing: str = "silence"  # signature_line | recognition_callback | action | silence
     allow_question: bool = False
     missing_required_info: bool = False
     channel: str = "telegram"
@@ -380,6 +380,7 @@ def build_response_plan(
     anchors = extract_conversation_anchors(user_message)
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
+        "signature_line": "ritual_line",
         "recognition_callback": "recognition_callback",
         "recognition_statement": "ritual_line",
         "recognition_observation": "ritual_line",
@@ -410,29 +411,33 @@ def build_response_plan(
 def plan_closer_instruction(plan: ResponsePlan) -> str:
     landing = (plan.landing or "silence").upper()
     instructions = {
+        "SIGNATURE_LINE": (
+            "Write a Signature Line — the one sentence the reader remembers tomorrow. "
+            "Exactly one sentence (~18 words). Compress the insight; do not summarize. "
+            "No question, no CTA, no slogan. It must feel inevitable after YOUR body, "
+            "and could only belong to this conversation. Not a chatbot closer — a last sentence."
+        ),
         "RECOGNITION_STATEMENT": (
-            "Landing: RECOGNITION_STATEMENT. "
-            "End on a complete insight sentence that could close an essay. "
-            "Do NOT ask a follow-up question. Do NOT invent a 'what about...' closer."
+            "Ending: SIGNATURE_LINE. "
+            "One complete insight sentence that could be highlighted in a book. No question."
         ),
         "RECOGNITION_OBSERVATION": (
-            "Landing: RECOGNITION_OBSERVATION. "
-            "Close with a sharp observation. No question unless truly earned."
+            "Ending: SIGNATURE_LINE. Sharp observation as the fingerprint. No quiz."
         ),
         "RECOGNITION_CALLBACK": (
-            "Landing: RECOGNITION_CALLBACK. "
+            "Ending: RECOGNITION_CALLBACK. "
             "Only if the user offered distinctive authorial language, "
             "end with one short rhetorical callback that reuses THAT language. "
             "Never staple topic nouns into a question."
         ),
         "ACTION": (
-            "Landing: ACTION. Close with a concrete next step. No quiz question."
+            "Ending: ACTION. Close with a concrete next step. No quiz question."
         ),
         "SILENCE": (
-            "Landing: SILENCE. The answer should end cleanly. No follow-up question."
+            "Ending: SILENCE. The answer should end cleanly. No follow-up question."
         ),
     }
-    return instructions.get(landing, instructions["SILENCE"])
+    return instructions.get(landing, instructions["SIGNATURE_LINE"])
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -584,8 +589,10 @@ def _apply_closing_strategy(
     user_message: str,
     anchors: Optional[ConversationAnchors] = None,
 ) -> Tuple[str, bool]:
-    """Apply recognition landing. Questions are the exception, not the proof."""
-    _ = anchors
+    """Signature Line decision → callback → action/silence. Only one wins."""
+    if anchors is not None and not plan.anchors:
+        plan.anchors = list(anchors.all_anchors)
+
     decision = select_landing(
         user_message,
         selected_command=plan.selected_command,
@@ -599,6 +606,7 @@ def _apply_closing_strategy(
     plan.landing = decision.landing.lower()
     # Keep legacy field in sync for telemetry
     legacy_map = {
+        "signature_line": "ritual_line",
         "recognition_callback": "recognition_callback",
         "recognition_statement": "ritual_line",
         "recognition_observation": "ritual_line",
@@ -608,11 +616,13 @@ def _apply_closing_strategy(
     plan.closing_strategy = legacy_map.get(plan.landing, plan.closing_strategy)
     plan.allow_question = decision.allow_question
 
-    new_text, modified = apply_landing(text, user_message, decision)
+    new_text, modified = apply_landing(
+        text, user_message, decision, plan=plan
+    )
     if modified:
-        closer = new_text.strip().split("\n\n")[-1] if new_text else ""
-        if closer:
-            _RECENT_CLOSERS.append(re.sub(r"\s+", " ", closer.lower()))
+        last = new_text.strip().split("\n\n")[-1] if new_text else ""
+        if last:
+            _RECENT_CLOSERS.append(re.sub(r"\s+", " ", last.lower()))
     return new_text, modified
 
 

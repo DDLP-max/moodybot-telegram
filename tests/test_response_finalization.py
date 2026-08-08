@@ -82,8 +82,9 @@ def test_dirty_talk_regression_strips_generic_cta_and_calibrates():
     assert "seen it named" not in closer
     assert "what about" not in closer
     assert " ." not in result.text
-    # Landing should not force a quiz; statement/silence/action OK
+    # Landing should not force a quiz; signature line / silence / action OK
     assert result.plan.landing in {
+        "signature_line",
         "recognition_statement",
         "silence",
         "recognition_observation",
