@@ -14,50 +14,64 @@ Some rooms change temperature...”
 Why bad:
 
 - Beautiful but incomplete
-- Inference stated as fact
 - No action
 - No boundary analysis
-- No evidentiary calibration
 
-## ALSO BAD (reject)
+## ALSO BAD (reject) — invented hidden scheme
 
-“He was trying to seduce her.”
+“He used the lockout kit as a pretext to obtain her number.”
 
-“He decided he had access.”
+“He planned this from the beginning.”
 
-“He turned it into an invitation.”
+“He deliberately engineered the situation.”
+
+“He tricked her into giving him her number.”
 
 Why bad:
 
-- Mind-reading
-- Level 3/4 presented as Level 1
-- Motive treated as established fact
+- Distance 4 — invents planning / deception not implied by the facts
+- Fabrication, not perception
 
-## GOOD
+## ALLOWED — ordinary human inference
 
-“The flowers shift the interaction beyond a routine professional exchange.”
+“He's making a move.”
 
-## BETTER / TARGET
+“He clearly wants this to be more than a building-staff interaction.”
 
-“She took the number as a safety net.
+“He is likely romantically or sexually interested.”
 
-The flowers suggest he understood the interaction differently than she intended.
+“He probably interpreted the number as an opening.”
 
-Whether that came from flirtation, loneliness, poor judgment, or simple misreading doesn't actually change the important part.
+Why allowed:
 
-The professional boundary shifted.
+- Distance 1 — ordinary social inference from flowers + wine after a number
+- Perception, not a hidden scheme
 
-She can keep it clean:
+## GOOD / TARGET SHAPE
+
+Name the move.
+Name the boundary shift.
+Give her a clean next line.
+
+Example shape:
+
+“Yeah — he's making a move.
+
+The flowers take this past a normal staff-resident exchange.
+
+Whether he's lonely, bold, or just hopeful doesn't change the next step.
+
+Keep it clean:
 
 'Thank you for the thought, but I'd like to keep things professional with building staff.'
 
 No apology.
 
-No long explanation.
+No essay.
 
-If he respects that, the misunderstanding ends.
+If he respects that, it ends.
 
-If he doesn't, the pattern becomes the issue—not the flowers.”
+If he doesn't, the pattern becomes the issue — not the flowers.”
 
 ## EXPECTED INTELLIGENCE
 
@@ -72,13 +86,11 @@ Capabilities:
 
 Must:
 
-- recognize potential boundary shift
-- avoid claiming his motives as established fact
-- clarify intent vs impact
+- recognize the romantic/sexual move as ordinary inference
+- recognize the boundary shift
+- reject invented lockout schemes
 - recommend a clean professional boundary
-- explain what behavior would constitute escalation
 - remain decisive about the next move
-- preserve optional concise MoodyBot voice
 
 Expected action shape:
 

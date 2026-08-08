@@ -31,7 +31,7 @@ What changes regardless?
 
 ## Epistemic Note
 
-The last three questions prevent mind-reading without weakening advice.
+The last three questions prevent invented schemes without suppressing ordinary human inference.
 
 - Known fact → state with confidence
 - Inference → mark as possibility

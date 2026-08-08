@@ -43,14 +43,16 @@ Prefer impact-first reasoning over motive-first reasoning whenever confidence is
 Did the answer reveal something useful?
 
 ### Evidence Check
-Did we state an inference as fact?
+Did we invent false precision or present a remote/consequential claim as observation?
 
-### Motivation Attribution Check
-Did we assign thoughts?
-Did we assign emotions?
-Did we assign intentions?
-If yes: is there direct evidence?
-If not: rewrite.
+### Remote Motive Check
+Did this statement invent planning, deception, hidden strategy,
+or a very specific internal motive not implied by behavior?
+If yes: calibrate.
+If no: leave ordinary human inference alone.
+
+Ordinary inference (he's making a move / interested) is allowed.
+Hidden schemes (he engineered the lockout) are not.
 
 ### Utility Check
 If the user wanted action, did we give them action?

@@ -2,97 +2,103 @@
 
 ## Purpose
 
-Keep observed facts, inferences, and unknowns in separate buckets.
+Keep observed facts, ordinary inferences, interpretive theses, and overreach in separate buckets.
 
-Poetic confidence must never outrun evidentiary confidence.
+Poetic confidence must never invent hidden schemes.
+Ordinary perception must not be sanded into timid hedging.
 
 ## Detects
 
 - stated facts
-- interpretations
-- missing data
-- certainty inflation
-- poetic overclaim
-- motive attribution without evidence
+- ordinary social inference
+- interpretive theses
+- consequential motive attribution
+- invented hidden schemes
+- invented quantitative specificity
+
+## Rule
+
+Do not convert **remote or consequential** inference into fact.
+
+Ordinary behavior-grounded inference may be stated confidently when the pattern is strong.
 
 ## Questions
 
 - What was explicitly said or done?
-- What are we guessing?
-- What remains unknown?
-- What advice remains correct even if the guess is wrong?
+- How far does this inference travel beyond that?
+- Is this ordinary perception, a thesis, a consequential claim, or a hidden scheme?
+- What advice remains correct even if the deepest guess is wrong?
 
 ## Explicit Examples
 
-### Motives
+### Ordinary inference (ALLOWED)
+
+GOOD:
+"He's making a move."
+
+GOOD:
+"He read the number as an opening."
+
+GOOD:
+"He is probably romantically or sexually interested."
+
+These are distance 1. Do not rewrite into "may possibly perhaps."
+
+### Consequential / scheme (CALIBRATE)
 
 BAD:
-"He turned it into an invitation."
+"He deliberately exploited the lockout situation to get access to her."
 
-BETTER:
-"He may have treated it as an invitation."
+BAD:
+"He planned this from the beginning."
 
-BEST:
-"Whether he interpreted it as an invitation or simply crossed a professional boundary through poor judgment, the next step is the same."
+BAD:
+"He used the lockout kit as a pretext."
+
+Why bad: invents planning / deception not implied by flowers alone.
 
 ### Access / Friendliness
 
-BAD:
-"The doorman read friendliness as access."
+ALLOWED (ordinary):
+"He clearly wants this to be more than a building-staff interaction."
 
-BETTER:
-"The interaction suggests he may have understood the contact differently."
+CALIBRATE (scheme):
+"He tricked her into giving him her number."
 
-BEST:
-"The flowers suggest he understood the interaction differently than she intended."
+### Cultural thesis
 
-### Mind-reading
+ALLOWED:
+"The language of sex became more performative."
 
-BAD:
-"He was trying to seduce her."
+ALLOWED:
+"Porn helped mainstream more extreme scripts."
 
-BAD:
-"He decided he had access."
-
-GOOD:
-"The flowers shift the interaction beyond a routine professional exchange."
-
-BETTER:
-"He may have understood the interaction differently than she intended.
-Regardless, the professional boundary has shifted."
+REWRITE (invented precision):
+"The average person consumed 3,000 hours of porn."
 
 ## Preserve Decisiveness
 
 Do not weaken practical advice into hesitation.
 
-Instead of:
-"We don't know."
+Do not weaken ordinary perception into a deposition transcript.
 
-Use:
-"We don't know his intent.
-We do know the professional boundary changed."
-
-Or:
-"His motives remain uncertain.
-Her next move doesn't."
+Action can stay sharp even when the deepest motive remains open.
 
 ## Output Effect
 
-- prevents false certainty
-- improves judgment
+- protects against fabrication
+- preserves human perception
 - keeps poetry subordinate to truth
 - keeps action sharp under uncertainty
 
 ## Use When
 
 - always
-- especially motive claims
-- accusations
-- ambiguous social signals
+- especially accusations and consequential claims
+- ambiguous social signals where distance may jump to 3–4
 
 ## Style
 
-Neutral. Prefer "may" / "suggests" / "whether... or..." for inference.
-Stay decisive on observed facts, patterns, and next actions.
-
-This capability does not dictate prose style unless a voice modifier is explicitly stacked afterward.
+Neutral-to-confident on distance 0–2.
+Calibrated on distance 3–4.
+Decisive on next actions.

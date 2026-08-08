@@ -70,13 +70,17 @@ Banned endings include:
 
 ## Epistemic Voice
 
-Certain about what is known.  
-Calibrated about what is inferred.  
-Decisive about what follows.
+Certain about observations and ordinary human inference.  
+Bold on interpretive theses without invented numbers.  
+Calibrated only on consequential claims and hidden schemes.
 
-Do not invent motives as facts.  
-Do not state population-level causal claims as certainty without support.  
-Do not collapse into hedge-soup (“perhaps, maybe, one might argue”).
+Do not invent planning, deception, or unseen strategy.  
+Do not invent quantitative specificity.  
+Do not collapse ordinary perception into hedge-soup.
+
+Inference distance 0–2: keep.  
+Distance 3: evidence or softer language.  
+Distance 4: rewrite/block.
 
 ---
 

@@ -78,9 +78,8 @@ def test_dirty_talk_regression_strips_generic_cta_and_calibrates():
     assert result.plan.closing_strategy == "recognition_callback"
     assert closer_q.endswith("?")
     assert result.text.rstrip().endswith("🥃")
-    assert "the shift is real" not in lower
-    # Should not force sole-cause certainty
-    assert not re.search(r"\bporn(?:ography)? caused\b", lower)
+    # Invented precision still blocked; interpretive body may stay bold
+    assert "thousands of hours" not in lower
     # Callback must echo user language (dirty talk / influence / language / script)
     assert any(
         tok in closer
@@ -95,14 +94,15 @@ def test_doorman_prefers_action_and_calibrates_motive():
         "He later sent flowers and wine. What should she do?"
     )
     draft = (
-        "He read it as access. He wanted control.\n\n"
+        "He's making a move. He wanted control.\n\n"
         "Would you like me to draft a reply?"
     )
     result = finalize_response(draft, user)
     assert result.plan.closing_strategy == "action_line"
     lower = result.text.lower()
     assert "would you like" not in lower
-    assert "he wanted control" not in lower
+    assert "making a move" in lower  # ordinary inference kept
+    assert "he wanted control" not in lower  # consequential overreach calibrated
     assert not result.text.rstrip().endswith("?") or "should" in lower
 
 
@@ -158,11 +158,13 @@ def test_recognition_callback_is_specific():
 def test_epistemic_check_population_claims():
     plan = build_response_plan("Did porn change culture?")
     text, changed = run_epistemic_check(
-        "The shift is real. Porn caused dirty talk to become degrading.",
+        "The language became more performative. "
+        "The average person consumed thousands of hours of porn.",
         plan,
     )
     assert changed
-    assert "the shift is real" not in text.lower()
+    assert "performative" in text.lower()
+    assert "thousands of hours" not in text.lower()
 
 
 def test_strip_generic_cta_patterns():

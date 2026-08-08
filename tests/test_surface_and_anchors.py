@@ -60,8 +60,7 @@ def test_dirty_talk_callback_uses_user_anchors():
     closer_q = closer.replace("🥃", "").strip()
     assert "say the word" not in lower
     assert "thousands of hours" not in lower
-    assert "the average person" not in lower
-    assert "the language changed because the consumption changed" not in lower
+    assert "the average person" not in lower or "vastly more exposure" in lower
     assert result.plan.closing_strategy == "recognition_callback"
     assert closer_q.endswith("?")
     # Rhetorical: must preserve signature language (stretch), not topical synonyms
@@ -84,16 +83,16 @@ def test_generic_reflective_closer_fails_anchor_check():
 def test_broad_cultural_and_quantitative_rewrite():
     plan = build_response_plan("Did porn change dirty talk?")
     text, changed = run_epistemic_check(
-        "The language changed because the consumption changed. "
-        "The average person's sexual vocabulary has been trained by thousands of hours. "
-        "People now expect the camera needs degradation.",
+        "The language became more performative. "
+        "Porn helped mainstream more extreme scripts. "
+        "The average person's sexual vocabulary has been trained by thousands of hours.",
         plan,
     )
     assert changed
     lower = text.lower()
-    assert "thousands of hours" not in lower
-    assert "the average person" not in lower
-    assert "the language changed because the consumption changed" not in lower
+    assert "performative" in lower  # interpretive thesis kept
+    assert "mainstream" in lower or "porn helped" in lower
+    assert "thousands of hours" not in lower  # invented precision removed
 
 
 def test_technical_still_no_emotional_callback():
@@ -137,9 +136,13 @@ def test_finalize_ends_with_surface_quality():
 
 
 def test_no_hedge_soup_introduced():
-    plan = build_response_plan("culture shift?")
-    text, _ = run_epistemic_check("Perhaps porn changed everything.", plan)
-    assert "perhaps" not in text.lower()
+    plan = build_response_plan(
+        "A woman gave the doorman her number. He sent flowers. What's going on?"
+    )
+    text, _ = run_epistemic_check("Yeah — he's making a move.", plan)
+    # Ordinary inference must not be sanded into deposition hedges
+    assert "making a move" in text.lower()
+    assert "may possibly" not in text.lower()
     assert "one might argue" not in text.lower()
 
 

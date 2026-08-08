@@ -73,86 +73,117 @@ GENERIC_CTA_PATTERNS = [
     r"\bexplain more\b",
 ]
 
-POPULATION_MARKERS = [
-    "generations", "men", "women", "society", "culture", "bedrooms",
-    "porn", "relationships", "workplaces", "mainstream", "everyone",
-    "people now", "people today", "in 1995", "in 2026", "the average",
-    "millennials", "generation", "gen z", "gen x",
+# Distance 4 — invented hidden schemes / deception / engineered plots.
+HIDDEN_SCHEME_REWRITES = [
+    (
+        r"\b(?:he|she|they)\s+used the lockout(?: kit| issue| situation)? as a (?:pretext|setup|ruse)\b",
+        "He later made a move after getting her number - that doesn't prove the lockout itself was a setup",
+    ),
+    (
+        r"\b(?:deliberately|intentionally)\s+(?:engineered|exploited|manipulated|tricked)\b",
+        "the behavior shows a clear personal move - inventing a long game goes further than the facts",
+    ),
+    (
+        r"\b(?:he|she|they)\s+(?:tricked|cornered)\b",
+        "he made a personal move",
+    ),
+    (
+        r"\bplanned (?:this|it) from the (?:start|beginning)\b",
+        "made a clear personal move once he had the number",
+    ),
+    (
+        r"\bhad been planning\b",
+        "later made a personal move",
+    ),
+    (
+        r"\bengineered the (?:situation|lockout|encounter)\b",
+        "made a personal move after the number exchange",
+    ),
 ]
 
-# Phrase-level unsupported causal / motive claims (applied first).
-UNSUPPORTED_CAUSAL = [
-    (r"\bthe shift is real\b", "There does seem to be a change in the reference library"),
+# Distance 3 — consequential attributions that overreach ordinary pursuit.
+CONSEQUENTIAL_REWRITES = [
     (
-        r"(?:[Ii]nternet\s+)?porn(?:ography)?\s+(?:has\s+)?(?:turned|made)\s+dirty talk into a full script",
-        "Porn is one obvious influence on that shift - not the only one - and it helped give dirty talk a much larger script library",
+        r"\b[Hh]e wanted control\b",
+        "He's making a move - whether that includes a control dynamic is less certain than the romantic interest",
     ),
     (
-        r"\bporn(?:ography)?\s+(?:has\s+)?(?:turned|made|caused)\b",
-        "Porn amplified",
+        r"\b[Hh]e lied to get (?:her|his|their) number\b",
+        "He got the number in a practical frame, then made a personal move - lying isn't established",
     ),
-    (r"\bmainstream in a lot of bedrooms\b",
-     "much easier to encounter as ordinary sexual vocabulary"),
-    (r"\b[Hh]e (?:read|saw|took) (?:it|that|her(?: number)?) as access\b",
-     "The flowers suggest he understood the exchange more personally than she did"),
-    (r"\b[Hh]e (?:read|saw|took) (?:it|that|her) as\b",
-     "The exchange appears to have been read more personally than intended as"),
-    (r"\b[Hh]e wanted control\b", "His motive is uncertain. The boundary shift isn't"),
-    (r"\b[Hh]e wanted\b", "His motive is uncertain; he may have wanted"),
-    (r"\b[Hh]e meant\b", "His intent is uncertain; he may have meant"),
+    (
+        r"\bsecretly (?:has|have) another (?:partner|girlfriend|boyfriend)\b",
+        "they may want convenience more than commitment - a secret partner isn't established",
+    ),
+    (
+        r"\bplanned (?:your|their) termination\b",
+        "they are protecting their position - a termination plan isn't established",
+    ),
 ]
 
-# Broad cultural monocausal / invented-certainty patterns.
-BROAD_CULTURAL_CAUSAL = [
-    (
-        r"\b[Tt]he language changed because the consumption changed\b",
-        "Part of the shift tracks with how consumption changed - alongside broader internet culture and wider exposure to explicit language",
-    ),
+# Invented quantitative specificity only (distance-agnostic precision abuse).
+INVENTED_PRECISION_REWRITES = [
     (
         r"\b[Tt]he average person'?s sexual vocabulary has been trained by thousands of hours\b",
-        "For many people, sexual vocabulary has been shaped by a much larger online reference library",
+        "People now have vastly more exposure to explicit material than they did in 1995",
     ),
-    (
-        r"\b[Tt]he average person'?s\b",
-        "For many people, ",
-    ),
-    (
-        r"\bthousands of hours\b",
-        "a lot of exposure",
-    ),
-    (
-        r"\b(?:almost )?everyone\b",
-        "a lot of people",
-    ),
-    (
-        r"\bmost people\b",
-        "many people",
-    ),
-    (
-        r"\balmost all\b",
-        "a large share of",
-    ),
-    (
-        r"\b[Pp]orn changed dirty talk\b",
-        "Porn is probably one of the biggest influences on dirty talk, alongside broader internet culture, changing erotica, and much wider exposure to explicit sexual language",
-    ),
-    (
-        r"\b[Ss]ociety (?:has )?(?:now )?(?:became|become|is)\b",
-        "A major cultural pattern appears to be",
-    ),
-    (
-        r"\b[Pp]eople now\b",
-        "A lot of people now",
-    ),
-    (
-        r"\b[Tt]he culture (?:has )?(?:made|turned|caused)\b",
-        "Part of the cultural shift appears to have",
-    ),
-    (
-        r"\b[Tt]he camera needs\s+(\w+)",
-        r"Camera-facing sex culture often leans on \1",
-    ),
+    (r"\bthousands of hours\b", "vastly more exposure"),
+    (r"\b\d{1,3}(?:,\d{3})+\s+hours\b", "vastly more exposure"),
+    (r"\b(?:hundreds|thousands|millions) of (?:hours|times)\b", "vastly more exposure"),
+    (r"\b\d{2,}\s*%\b", "a sizable share"),
 ]
+
+# Absolute universals that invent coverage (keep light — not thesis-killing).
+UNIVERSAL_PRECISION_REWRITES = [
+    (r"\b(?:almost )?everyone\b", "a lot of people"),
+    (r"\balmost all\b", "a large share of"),
+]
+
+
+ClaimClass = str  # OBSERVATION | ORDINARY_INFERENCE | INTERPRETIVE_THESIS | CONSEQUENTIAL_ATTRIBUTION | HIDDEN_SCHEME
+
+
+def classify_inference_distance(sentence: str) -> Tuple[int, ClaimClass]:
+    """Return (distance 0-4, claim class) for a sentence."""
+    s = (sentence or "").lower()
+    if not s.strip():
+        return 0, "OBSERVATION"
+
+    scheme_markers = (
+        "pretext", "engineered", "tricked", "setup", "ruse", "from the start",
+        "from the beginning", "had been planning", "deliberately exploited",
+        "deliberately manipulated", "deliberately engineered", "cornered",
+        "planned your termination", "secretly has another", "secretly have another",
+    )
+    if any(m in s for m in scheme_markers):
+        return 4, "HIDDEN_SCHEME"
+
+    consequential_markers = (
+        "wanted control", "lied to get", "afraid of him", "afraid of her",
+        "gaslight", "predator", "groom",
+    )
+    if any(m in s for m in consequential_markers):
+        return 3, "CONSEQUENTIAL_ATTRIBUTION"
+
+    ordinary_markers = (
+        "making a move", "interested in", "wants her", "wants him",
+        "get laid", "romantically", "sexually interested", "personal move",
+        "more personal", "read the number as", "interpreted the number",
+        "low priority", "convenience more than commitment", "protecting their position",
+    )
+    if any(m in s for m in ordinary_markers):
+        return 1, "ORDINARY_INFERENCE"
+
+    thesis_markers = (
+        "performative", "industrialized", "mainstream", "optionality",
+        "monetized", "reference library", "cultural", "porn helped",
+        "online culture",
+    )
+    if any(m in s for m in thesis_markers):
+        return 2, "INTERPRETIVE_THESIS"
+
+    # Default: treat as observation/low-distance unless clearly speculative scheme language
+    return 0, "OBSERVATION"
 
 
 @dataclass
@@ -423,71 +454,49 @@ def strip_generic_cta(text: str) -> Tuple[str, bool]:
 
 
 def run_epistemic_check(draft: str, plan: ResponsePlan) -> Tuple[str, bool]:
-    """Recalibrate unsupported causal / motive / quantitative claims without hedge-soup."""
+    """Calibrate only overreach (distance 3–4) and invented precision.
+
+    Ordinary human inference and interpretive theses (distance 0–2) stay.
+    Do not auto-hedge perception into deposition language.
+    """
+    _ = plan
     text = draft or ""
     changed = False
 
-    for pattern, replacement in UNSUPPORTED_CAUSAL + BROAD_CULTURAL_CAUSAL:
+    # 1) Hidden schemes (distance 4) — always rewrite
+    for pattern, replacement in HIDDEN_SCHEME_REWRITES:
         new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
             text = new_text
             changed = True
 
-    # Population-level absolute certainty softeners.
-    if any(m in text.lower() for m in POPULATION_MARKERS):
-        soft, n = re.subn(
-            r"\b(?:everyone|all (?:men|women|people))\b",
-            "a lot of people",
-            text,
-            flags=re.IGNORECASE,
-        )
+    # 2) Consequential attributions (distance 3)
+    for pattern, replacement in CONSEQUENTIAL_REWRITES:
+        new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
-            text, changed = soft, True
-        soft, n = re.subn(
-            r"\bporn(?:ography)? (?:caused|created|invented)\b",
-            "porn amplified",
-            text,
-            flags=re.IGNORECASE,
-        )
+            text = new_text
+            changed = True
+
+    # 3) Invented quantitative / universal precision only
+    for pattern, replacement in INVENTED_PRECISION_REWRITES + UNIVERSAL_PRECISION_REWRITES:
+        new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
-            text, changed = soft, True
+            text = new_text
+            changed = True
 
-    # Invented quantitative certainty
-    soft, n = re.subn(
-        r"\b\d{2,}\s*%\b",
-        "a sizable share",
-        text,
-    )
-    if n:
-        text, changed = soft, True
-    soft, n = re.subn(
-        r"\b(?:hundreds|thousands|millions) of (?:hours|people|times)\b",
-        "a lot of exposure",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if n:
-        text, changed = soft, True
-
-    if plan.evidence_confidence in {"low", "medium"} and re.search(
-        r"\bthe shift is real\b", text, flags=re.IGNORECASE
-    ):
-        text = re.sub(
-            r"\bthe shift is real\b",
-            "there does seem to be a real shift in the reference library",
-            text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        changed = True
-
-    # Avoid introducing hedge-soup tokens if a prior rewrite somehow added them
-    for weak in (r"\bone might argue\b", r"\bperhaps\b", r"\bpossibly\b"):
+    # 4) Strip hedge-soup if present (do not introduce it)
+    for weak in (r"\bone might argue\b",):
         if re.search(weak, text, flags=re.IGNORECASE):
-            text = re.sub(weak, "Part of the pattern is", text, count=1, flags=re.IGNORECASE)
+            text = re.sub(weak, "The pattern is", text, count=1, flags=re.IGNORECASE)
             changed = True
 
     return text, changed
+
+
+def should_rewrite_claim(sentence: str) -> bool:
+    """True only for distance 3–4 (or invented precision handled separately)."""
+    distance, _claim = classify_inference_distance(sentence)
+    return distance >= 3
 
 
 def _recent_closer_collision(candidate: str) -> bool:
