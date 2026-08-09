@@ -6,12 +6,35 @@ Surface model:
 
 CUT → NAME → PROVE ONCE → STOP → 🥃
 
+Four layers (keep independent):
+
+1. Identity — interpretive lens / perspective selection (internally: *whose eyes?*)
+2. Intelligence — broad capability
+3. Writing — SNAP / KNIFE / STORY
+4. Editing — Gold compression only
+
+Pipeline:
+
+claim type → interpretive lens → capability → mechanism fit → structure → generate → Gold → 🥃
+
+Gold never decides what Moody thinks. Gold only decides how he says it.
+Gold must not become a co-author or pick the lens.
+
+McDonald's stack:
+claim_type = taste_preference
+lens = Bourdain
+capability = Everyday Preference Analysis (supporting: Sensory Realism)
+mechanism = familiarity vs quality
+structure = SNAP
+→ "That's like saying prison is just a room." 🥃
+Not rule-shopping.
+
 ## Separation of responsibilities
 
 | Layer | Job |
 |-------|-----|
-| Generation | Find the mechanism. Build the spear. Cash out the last line. Stop. |
-| Editorial pass | Remove drift, duplicate mechanisms, conference-talk closers. Never invent a better insight. Never rewrite a successful spear. Preserve voice and meaning. Append 🥃. |
+| Generation | Classify claim type. Select capability. Discover the fitting mechanism. Build the spear. Cash out the last line. Stop. |
+| Editorial pass | Remove drift, duplicate mechanisms, conference-talk closers. Flag mechanism_mismatch (favorite-drawer on non-social prompts) — do not invent a replacement insight. Never rewrite a successful spear. Preserve voice and meaning. Append 🥃. |
 
 Thinking may stay abstract. Surface must translate before stop —
 **unless the abstraction is itself the shortest accurate name for the mechanism.**

@@ -73,6 +73,15 @@ class DynamicPersonaEngine:
                 "hidden agenda", "what's really happening", "who benefits",
                 "ulterior motive",
             ],
+            "food_taste": [
+                "mcdonald", "burger", "fries", "pizza", "coffee", "restaurant",
+                "food", "sushi", "steak", "dessert", "espresso", "cuisine",
+                "best place for", "chef", "kitchen", "dining",
+            ],
+            "travel": [
+                "airport", "travel", "flight", "hotel", "passport", "abroad",
+                "tourist", "layover", "hostel", "road trip",
+            ],
         }
 
     def _load_state_mapping(self) -> Dict[str, Dict]:
@@ -139,6 +148,22 @@ class DynamicPersonaEngine:
                 "intervention": "Interrogative Analysis",
                 "voice": "Hardboiled Observation",
                 "reasoning": "Incentives and evidence before motive stories",
+                "score": 0.9,
+            },
+            "food_taste": {
+                "primary": "Everyday Preference Analysis",
+                "secondary": "Sensory Realism",
+                "intervention": None,
+                "voice": "Human Realism",
+                "reasoning": "Bourdain lens + Everyday Preference — familiarity ≠ quality",
+                "score": 0.93,
+            },
+            "travel": {
+                "primary": "Lived Experience Analysis",
+                "secondary": "Sensory Realism",
+                "intervention": None,
+                "voice": "Human Realism",
+                "reasoning": "Bourdain lens + Lived Experience — place over ideology",
                 "score": 0.9,
             },
         }

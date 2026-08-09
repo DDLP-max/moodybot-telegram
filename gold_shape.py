@@ -32,6 +32,25 @@ CONFERENCE_SIGNALS = re.compile(
     re.I,
 )
 
+STOCK_SOCIAL_MECHANISMS = re.compile(
+    r"\b(rule[- ]shopping|grievance script|resentment economy|"
+    r"loyalty program|collective (grievance|injury)|pick[- ]me enforcement|"
+    r"shared injury story|defection from the)\b",
+    re.I,
+)
+
+TASTE_DOMAIN_MARKERS = re.compile(
+    r"\b(mcdonald|burger|fries|pizza|coffee|food|taste|restaurant|"
+    r"delicious|sushi|steak|dessert|eat|dining|fries)\b",
+    re.I,
+)
+
+PREFERENCE_DOMAIN_MARKERS = re.compile(
+    r"\b(best|worst|overrated|underrated|favorite|familiar|consistency|"
+    r"convenience|nostalgia|value|brand|iphone|tesla)\b",
+    re.I,
+)
+
 ESSAY_NOUNS = CONFERENCE_SIGNALS  # shared detector; no hardcoded spoken swaps
 
 CTA_TAIL = re.compile(
@@ -71,6 +90,30 @@ class GoldShapeReport:
     spear_detected: bool = False
     whiskey_tail_present: bool = False
     spear_line: str = ""
+    mechanism_mismatch: bool = False
+
+
+SOCIAL_PROMPT_MARKERS = re.compile(
+    r"\b(feminist|feminism|patriarchy|pick[- ]me|misogyn|ideology|woke|"
+    r"privilege|oppression|gender|politics|culture war|grievance)\b",
+    re.I,
+)
+
+
+def detect_mechanism_mismatch(user_message: str, draft: str) -> bool:
+    """True when a stock social mechanism is applied to a non-social prompt.
+
+    Log / diagnose only — editorial pass must not invent a better mechanism.
+    """
+    body = strip_whiskey(draft)
+    if not STOCK_SOCIAL_MECHANISMS.search(body):
+        return False
+    um = user_message or ""
+    if SOCIAL_PROMPT_MARKERS.search(um):
+        return False
+    if TASTE_DOMAIN_MARKERS.search(um) or PREFERENCE_DOMAIN_MARKERS.search(um):
+        return True
+    return False
 
 
 def words(text: str) -> List[str]:
@@ -136,11 +179,20 @@ def _is_conference_talk_sentence(sentence: str) -> bool:
     return False
 
 
-def select_structure(user_message: str, draft: str) -> str:
-    """SNAP / KNIFE / STORY — soft selection from length + narrative cues."""
+def select_structure(
+    user_message: str,
+    draft: str,
+    preferred: Optional[str] = None,
+) -> str:
+    """SNAP / KNIFE / STORY — soft selection from length + narrative cues.
+
+    preferred comes from the Writing layer (plan.preferred_structure) — a hint,
+    not a hard force. Short taste/SNAP-biased drafts stay SNAP.
+    """
     wc = len(words(draft))
     ss = sentences(draft)
     paras = [p for p in (draft or "").split("\n") if p.strip()]
+    preferred = (preferred or "").upper() or None
     narrative = bool(
         re.search(
             r"\b(for (example|instance)|the time|last (week|night|year)|"
@@ -149,12 +201,23 @@ def select_structure(user_message: str, draft: str) -> str:
             re.I,
         )
     )
+    wants_story = bool(
+        re.search(
+            r"\b(tell me (the )?story|walk me through|what happened)\b",
+            user_message,
+            re.I,
+        )
+    )
+    if wants_story or len(paras) >= 3 or (narrative and (wc >= 70 or len(ss) >= 4)):
+        return "STORY"
+    if preferred == "SNAP" and wc <= 70 and len(ss) <= 3:
+        return "SNAP"
     if wc <= 45 and len(ss) <= 2:
         return "SNAP"
-    if len(paras) >= 3 or (narrative and (wc >= 70 or len(ss) >= 4)):
-        return "STORY"
-    if re.search(r"\b(tell me (the )?story|walk me through|what happened)\b", user_message, re.I):
-        return "STORY"
+    if preferred == "KNIFE":
+        return "KNIFE"
+    if preferred == "SNAP" and wc <= 90:
+        return "SNAP"
     return "KNIFE"
 
 
@@ -289,6 +352,10 @@ def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[s
     # Abstract closer: last sentence is conference-talk (cash-out failure)
     if _is_conference_talk_sentence(ss[-1]):
         failures.append("abstract_closer")
+
+    # Favorite-drawer social mechanism on a taste/preference prompt (route failure)
+    if detect_mechanism_mismatch(user_message, body):
+        failures.append("mechanism_mismatch")
 
     # Soft length by structure (not rigid)
     if structure == "SNAP" and wc > 70:
@@ -432,12 +499,16 @@ def apply_gold_shape_pass(
     draft: str,
     *,
     structure: Optional[str] = None,
+    preferred_structure: Optional[str] = None,
 ) -> Tuple[str, GoldShapeReport]:
     """
     draft → evaluate → at most one compression → ensure whiskey later in surface.
     Returns body WITHOUT requiring whiskey (surface_render adds it).
+    Editing layer only — never invents a lens or mechanism.
     """
-    structure = structure or select_structure(user_message, draft)
+    structure = structure or select_structure(
+        user_message, draft, preferred=preferred_structure
+    )
     body = strip_whiskey(draft)
     report = GoldShapeReport(
         selected_structure=structure,
@@ -447,8 +518,10 @@ def apply_gold_shape_pass(
 
     failures = evaluate_gold_shape(user_message, body, structure)
     report.quality_failures = list(failures)
+    report.mechanism_mismatch = "mechanism_mismatch" in failures
 
     # Failures that warrant rewrite
+    # mechanism_mismatch is diagnostic only — do not invent a better insight here.
     rewrite_triggers = {
         "premise_restatement",
         "thesis_repetition",
@@ -469,6 +542,7 @@ def apply_gold_shape_pass(
             body = strip_whiskey(compressed)
             # re-evaluate lightly (no second rewrite)
             report.quality_failures = evaluate_gold_shape(user_message, body, structure)
+            report.mechanism_mismatch = "mechanism_mismatch" in report.quality_failures
 
     spear_ok, spear, _ = detect_spear(sentences(body))
     report.spear_detected = spear_ok
@@ -494,4 +568,5 @@ def gold_shape_diagnostics(report: GoldShapeReport) -> dict:
         "spear_detected": str(report.spear_detected).lower(),
         "spear_line": (report.spear_line or "")[:240],
         "whiskey_tail_present": str(report.whiskey_tail_present).lower(),
+        "mechanism_mismatch": str(report.mechanism_mismatch).lower(),
     }

@@ -24,6 +24,18 @@ def test_practical_action_request():
     assert result["capabilities"]["primary"] == "Practical Next Action"
 
 
+def test_mcdonalds_routes_to_everyday_preference():
+    engine = DynamicPersonaEngine()
+    result = engine.process_user_input(
+        "McDonald's is easily the best place for burgers and fries.",
+        {},
+    )
+    assert result["capabilities"]["primary"] == "Everyday Preference Analysis"
+    assert result["capabilities"]["secondary"] == "Sensory Realism"
+    assert "Bourdain" in result["reasoning"]
+    assert result["analysis"]["state"] == "food_taste"
+
+
 def test_cia_alias_maps_to_interrogative_analysis():
     bundle = bundle_for_command("/cia")
     assert "interrogative_analysis" in bundle["capabilities"]
@@ -74,6 +86,7 @@ def test_expected_doorman_intelligence_concepts():
 if __name__ == "__main__":
     test_doorman_scenario_routes_to_relationship_and_boundary()
     test_practical_action_request()
+    test_mcdonalds_routes_to_everyday_preference()
     test_cia_alias_maps_to_interrogative_analysis()
     test_validate_alias_maps_to_validation_bundle()
     test_legacy_persona_names_are_deprecated_aliases()

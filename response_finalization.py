@@ -198,6 +198,12 @@ class ResponsePlan:
     governing_pattern: Optional[str] = None  # invisible rule — not a prose sentence
     central_insight: Optional[str] = None  # legacy alias of governing_pattern
     original_subject: Optional[str] = None
+    claim_domain: str = "general"  # taste_preference | social_power | relationship | ...
+    # Interpretive lens / perspective selection (code name). Internally: "whose eyes?"
+    # Identity layer — NOT a capability. Gold never picks this.
+    lens: str = ""  # Bourdain | Munger | Hank Moody | CIA | Noir Detective | ...
+    preferred_structure: str = ""  # SNAP | KNIFE | STORY — writing layer hint
+    mechanism_hint: str = ""  # expected mechanism family for diversity telemetry
     closing_strategy: str = "none"  # legacy alias of landing
     landing: str = "silence"  # body_ends_response | signature_line | callback | action | silence
     allow_question: bool = False
@@ -370,6 +376,318 @@ def is_cultural_or_insight(user_message: str) -> bool:
     )
 
 
+def classify_claim_domain(user_message: str) -> str:
+    """What kind of claim is this? Routes lens + capability — not just delivery."""
+    text = (user_message or "").lower()
+    if not text.strip():
+        return "general"
+
+    if is_grief_or_trauma(user_message):
+        return "grief"
+    if is_technical_question(user_message):
+        return "technical"
+    if is_practical_request(user_message):
+        return "practical"
+
+    taste = (
+        "mcdonald", "burger", "fries", "pizza", "coffee", "beer", "wine",
+        "restaurant", "taste", "delicious", "food", "sushi",
+        "steak", "dessert", "recipe", "hungry", "eat", "dining",
+        "best place for", "best burger", "best fries", "favorite food",
+        "espresso", "kitchen", "chef", "cuisine", "menu",
+    )
+    if any(t in text for t in taste):
+        return "taste_preference"
+
+    travel = (
+        "airport", "travel", "flight", "hotel", "passport", "abroad",
+        "backpacking", "tourist", "layover", "hostel", "road trip",
+    )
+    if any(t in text for t in travel):
+        return "travel"
+
+    if re.search(
+        r"\b(court|evidence|affidavit|testimony|prosecutor|cross[- ]examin)\b",
+        text,
+    ):
+        return "court"
+
+    if re.search(
+        r"\b(business|invest|roi|startup|market share|incentive structure|"
+        r"portfolio|acquisition|promotion|salary|tradeoff|trade-off|"
+        r"opportunity cost|compounds?|circle of competence)\b",
+        text,
+    ):
+        return "business"
+
+    consumer = (
+        "iphone", "android", "tesla", "nike", "adidas", "brand is",
+        "best phone", "best car", "worth buying", "overrated", "underrated",
+    )
+    if any(t in text for t in consumer):
+        return "consumer_preference"
+
+    social = (
+        "feminist", "feminism", "patriarchy", "pick me", "misogyn",
+        "society", "ideology", "woke", "privilege", "oppression",
+        "men are", "women are", "gender", "politics", "democrat",
+        "republican", "culture war",
+    )
+    if any(t in text for t in social):
+        return "social_power"
+
+    relationship = (
+        "girlfriend", "boyfriend", "wife", "husband", "ex ", "dating",
+        "relationship", "she said", "he said", "marriage", "cheat",
+        "situationship", "texted", "left me", "my friend", "friend only",
+        "only texts", "friendship", "best friend", "affection",
+    )
+    if any(t in text for t in relationship):
+        return "relationship"
+
+    if is_cultural_or_insight(user_message):
+        return "cultural_insight"
+
+    # Hot take / ranking opinion without social framing
+    if re.search(r"\b(best|worst|greatest|easily the|overrated|underrated)\b", text):
+        return "preference_claim"
+
+    return "general"
+
+
+def select_interpretive_lens(domain: str, user_message: str = "") -> dict:
+    """Perspective selection — Identity layer, separate from Intelligence.
+
+    Internally: "Whose eyes should Moody borrow?"
+    Code name: interpretive lens / perspective selection.
+
+    Lens = what world is Moody standing in? (Bourdain, Munger, Hank, CIA…)
+    Capability = what mental tool is he using? (broad buckets, not a taxonomy zoo)
+    Gold never picks the lens. Gold only compresses.
+    """
+    _ = user_message  # reserved for future override cues
+    # Broad capability buckets — keep generalizable, not one-bucket-per-topic.
+    table = {
+        "taste_preference": {
+            "lens": "Bourdain",
+            "primary": "Everyday Preference Analysis",
+            "supporting": "Sensory Realism",
+            "voice": "Human Realism",
+            "preferred_structure": "SNAP",
+            "mechanism_hint": "familiarity_vs_quality",
+        },
+        "travel": {
+            "lens": "Bourdain",
+            "primary": "Lived Experience Analysis",
+            "supporting": "Sensory Realism",
+            "voice": "Human Realism",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "place_texture_honesty",
+        },
+        "cultural_insight": {
+            "lens": "Bourdain",
+            "primary": "Lived Experience Analysis",
+            "supporting": "Sensory Realism",
+            "voice": "Human Realism",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "lived_culture",
+        },
+        "consumer_preference": {
+            "lens": "Munger",
+            "primary": "Business / Tradeoff Analysis",
+            "supporting": "Hidden Incentive Analysis",
+            "voice": "Dry Economy",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "status_lockin_hype",
+        },
+        "business": {
+            "lens": "Munger",
+            "primary": "Business / Tradeoff Analysis",
+            "supporting": "Hidden Incentive Analysis",
+            "voice": "Dry Economy",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "incentives_second_order",
+        },
+        "court": {
+            "lens": "CIA",
+            "primary": "Evidence / Contradiction Analysis",
+            "supporting": "Evidence vs Inference",
+            "voice": "Clipped Precision",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "evidence_vs_inference",
+        },
+        "social_power": {
+            "lens": "Noir Detective",
+            "primary": "Power / Incentive Analysis",
+            "supporting": "Pattern Forensics",
+            "voice": "Hardboiled Observation",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "power_incentives",
+        },
+        "relationship": {
+            "lens": "Hank Moody",
+            "primary": "Relationship Pattern Recognition",
+            "supporting": "Boundary Analysis",
+            "voice": "Human Realism",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "boundary_leverage",
+        },
+        "preference_claim": {
+            "lens": "Hank Moody",
+            "primary": "Everyday Preference Analysis",
+            "supporting": "Narrative Weight",
+            "voice": "Human Realism",
+            "preferred_structure": "SNAP",
+            "mechanism_hint": "overclaim_familiarity_status",
+        },
+        "practical": {
+            "lens": "Field Operator",
+            "primary": "Practical Next Action",
+            "supporting": "Evidence vs Inference",
+            "voice": None,
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "concrete_next_step",
+        },
+        "technical": {
+            "lens": "Builder",
+            "primary": "Operational Intelligence",
+            "supporting": "Prototype Thinking",
+            "voice": None,
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "cause_fix",
+        },
+        "grief": {
+            "lens": "Quiet Presence",
+            "primary": "Quiet Presence",
+            "supporting": "Narrative Weight",
+            "voice": "Atmospheric Reflection",
+            "preferred_structure": "SNAP",
+            "mechanism_hint": "witness",
+        },
+        "general": {
+            "lens": "Hank Moody",
+            "primary": "Emotional State Recognition",
+            "supporting": "Epistemic Calibration",
+            "voice": "Human Realism",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "prompt_specific",
+        },
+    }
+    return dict(table.get(domain, table["general"]))
+
+
+# Back-compat alias
+select_response_lens = select_interpretive_lens
+
+
+def domain_mechanism_guidance(
+    domain: str,
+    lens: str = "",
+    capability: str = "",
+) -> str:
+    """Mechanism discovery after perspective + capability — not a second brain."""
+    common = (
+        "\nFOUR LAYERS (mandatory — keep independent):\n"
+        "1) Identity / Interpretive lens — what world is Moody standing in?\n"
+        "2) Intelligence / Capability — what mental tool? (broad buckets)\n"
+        "3) Writing — SNAP / KNIFE / STORY\n"
+        "4) Editing — Gold compression only (never picks the lens)\n"
+        "Internally ask: whose eyes should Moody borrow? Code name: interpretive lens.\n"
+        "Pattern Recognition / Power analysis is NOT the default for food or everyday preference.\n"
+        "Gold never decides what Moody thinks. Gold only decides how he says it.\n"
+        "Do NOT optimize for finding the same social mechanism repeatedly.\n"
+        "If no social or ideological mechanism is present, do not invent one.\n"
+        "Do not open with 'The pattern is…' unless that pattern is evidenced in the prompt.\n"
+        "Banned recycling when unsupported: rule-shopping, grievance script, resentment economy, "
+        "loyalty program, pick-me enforcement, collective injury story.\n"
+        "Never name the lens in the reply text.\n"
+    )
+    cap = capability or ""
+    by_domain = {
+        "taste_preference": (
+            "CLAIM DOMAIN: taste / food.\n"
+            f"INTERPRETIVE LENS: {lens or 'Bourdain'} (Identity — not a capability).\n"
+            f"CAPABILITY: {cap or 'Everyday Preference Analysis'} "
+            "(tool within the lens; Sensory Realism may support).\n"
+            "MECHANISM FAMILY: familiarity vs quality / consistency ≠ excellence.\n"
+            "STRUCTURE BIAS: SNAP — one killing lived line.\n"
+            "PASS: \"That's like saying prison is just a room.\"\n"
+            "PASS: \"McDonald's doesn't make the best burger. It makes the safest decision.\"\n"
+            "FAIL: \"The pattern is rule-shopping.\"\n"
+        ),
+        "travel": (
+            "CLAIM DOMAIN: travel / place.\n"
+            f"INTERPRETIVE LENS: {lens or 'Bourdain'}.\n"
+            f"CAPABILITY: {cap or 'Lived Experience Analysis'}.\n"
+            "MECHANISM FAMILY: place, texture, honesty — not ideology.\n"
+        ),
+        "consumer_preference": (
+            "CLAIM DOMAIN: consumer / brand preference.\n"
+            f"INTERPRETIVE LENS: {lens or 'Munger'}.\n"
+            f"CAPABILITY: {cap or 'Business / Tradeoff Analysis'}.\n"
+            "MECHANISM FAMILY: status, lock-in, identity, convenience, hype.\n"
+            "Do not invent grievance or gender-politics mechanisms.\n"
+        ),
+        "business": (
+            "CLAIM DOMAIN: business.\n"
+            f"INTERPRETIVE LENS: {lens or 'Munger'}.\n"
+            f"CAPABILITY: {cap or 'Business / Tradeoff Analysis'}.\n"
+            "MECHANISM FAMILY: opportunity cost, incentives, second-order effects.\n"
+        ),
+        "court": (
+            "CLAIM DOMAIN: court / evidence.\n"
+            f"INTERPRETIVE LENS: {lens or 'CIA'}.\n"
+            f"CAPABILITY: {cap or 'Evidence / Contradiction Analysis'}.\n"
+            "MECHANISM FAMILY: evidence vs inference, missing information.\n"
+        ),
+        "preference_claim": (
+            "CLAIM DOMAIN: ranking / hot-take preference.\n"
+            f"INTERPRETIVE LENS: {lens or 'Hank Moody'}.\n"
+            f"CAPABILITY: {cap or 'Everyday Preference Analysis'}.\n"
+            "MECHANISM FAMILY: overclaim via familiarity, status, tribe, hyperbole.\n"
+        ),
+        "social_power": (
+            "CLAIM DOMAIN: social / power / ideology.\n"
+            f"INTERPRETIVE LENS: {lens or 'Noir Detective'}.\n"
+            f"CAPABILITY: {cap or 'Power / Incentive Analysis'}.\n"
+            "MECHANISM FAMILY: power, incentives, enforcement — only when evidenced.\n"
+        ),
+        "relationship": (
+            "CLAIM DOMAIN: relationship / interpersonal.\n"
+            f"INTERPRETIVE LENS: {lens or 'Hank Moody'}.\n"
+            f"CAPABILITY: {cap or 'Relationship Pattern Recognition'}.\n"
+            "MECHANISM FAMILY: move, boundary, leverage, avoidance.\n"
+        ),
+        "practical": (
+            "CLAIM DOMAIN: practical action.\n"
+            "CAPABILITY: Practical Next Action.\n"
+            "MECHANISM FAMILY: concrete next step.\n"
+        ),
+        "technical": (
+            "CLAIM DOMAIN: technical.\n"
+            "CAPABILITY: Operational Intelligence.\n"
+            "MECHANISM FAMILY: cause → fix.\n"
+        ),
+        "grief": (
+            "CLAIM DOMAIN: grief / weight.\n"
+            "CAPABILITY: Quiet Presence.\n"
+            "Witness. Do not force clever mechanisms.\n"
+        ),
+        "cultural_insight": (
+            "CLAIM DOMAIN: cultural insight.\n"
+            f"INTERPRETIVE LENS: {lens or 'Bourdain'}.\n"
+            f"CAPABILITY: {cap or 'Lived Experience Analysis'}.\n"
+            "Lived culture, not favorite-drawer social templates.\n"
+        ),
+        "general": (
+            "CLAIM DOMAIN: general.\n"
+            f"INTERPRETIVE LENS: {lens or 'Hank Moody'}.\n"
+            "Discover the mechanism from the prompt. Do not default to Power / Incentive Analysis.\n"
+        ),
+    }
+    return common + by_domain.get(domain, by_domain["general"])
+
+
 def build_response_plan(
     user_message: str,
     *,
@@ -385,9 +703,31 @@ def build_response_plan(
         "/dev", "/clinical", "/tighten"
     }
     roast = selected_command in {"/roast", "/savage", "/cut"}
-    insight = is_cultural_or_insight(user_message) or selected_command in {
-        "/thoughts", "/velvet", "/contrast", "/cinema", "/noir", "/sensory"
+    domain = classify_claim_domain(user_message)
+    lens_bundle = select_interpretive_lens(domain, user_message)
+    # /thoughts is not a free pass to force Power analysis on food opinions
+    bourdain_domains = {"taste_preference", "travel", "cultural_insight"}
+    non_pattern_domains = {
+        "taste_preference",
+        "travel",
+        "consumer_preference",
+        "preference_claim",
+        "business",
+        "court",
+        "technical",
+        "grief",
+        "practical",
     }
+    insight = (
+        is_cultural_or_insight(user_message)
+        or domain in {"social_power", "relationship"}
+        or (
+            selected_command in {
+                "/thoughts", "/velvet", "/contrast", "/cinema", "/noir", "/sensory"
+            }
+            and domain not in non_pattern_domains
+        )
+    )
 
     decision = select_landing(
         user_message,
@@ -401,30 +741,71 @@ def build_response_plan(
     )
     landing = decision.landing.lower()
 
+    preferred_structure = lens_bundle.get("preferred_structure") or "KNIFE"
+    mechanism_hint = lens_bundle.get("mechanism_hint") or "prompt_specific"
+
     if missing:
         intent = "clarify"
         confidence = "low"
         primary = "Clarification"
-    elif practical:
+        supporting = "Epistemic Calibration"
+        lens = "Clarification"
+        voice = None
+        preferred_structure = "SNAP"
+        mechanism_hint = "clarification"
+    elif practical or domain == "practical":
         intent = "action"
         confidence = "medium"
-        primary = "Practical Next Action"
-    elif grief:
+        primary = lens_bundle["primary"] if domain == "practical" else "Practical Next Action"
+        supporting = lens_bundle.get("supporting") or "Evidence vs Inference"
+        lens = lens_bundle["lens"] if domain == "practical" else "Field Operator"
+        voice = lens_bundle.get("voice")
+    elif grief or domain == "grief":
         intent = "witness"
         confidence = "high"
         primary = "Quiet Presence"
-    elif technical:
+        supporting = "Narrative Weight"
+        lens = "Quiet Presence"
+        voice = "Atmospheric Reflection"
+        preferred_structure = "SNAP"
+        mechanism_hint = "witness"
+    elif technical or domain == "technical":
         intent = "technical"
         confidence = "medium"
         primary = "Operational Intelligence"
+        supporting = "Prototype Thinking"
+        lens = "Builder"
+        voice = None
+        preferred_structure = "KNIFE"
+        mechanism_hint = "cause_fix"
+    elif domain in bourdain_domains or domain in {
+        "consumer_preference",
+        "preference_claim",
+        "business",
+        "court",
+        "social_power",
+        "relationship",
+    }:
+        intent = "explore"
+        confidence = "medium"
+        primary = lens_bundle["primary"]
+        supporting = lens_bundle.get("supporting") or "Epistemic Calibration"
+        lens = lens_bundle["lens"]
+        voice = lens_bundle.get("voice")
     elif insight:
         intent = "explore"
         confidence = "medium"
-        primary = "Cultural Analysis" if is_cultural_or_insight(user_message) else "Pattern Recognition"
+        primary = lens_bundle["primary"]
+        supporting = lens_bundle.get("supporting") or "Epistemic Calibration"
+        lens = lens_bundle["lens"]
+        voice = lens_bundle.get("voice")
     else:
         intent = "respond"
         confidence = "medium"
-        primary = "Emotional State Recognition"
+        primary = lens_bundle["primary"]
+        supporting = lens_bundle.get("supporting") or "Epistemic Calibration"
+        lens = lens_bundle["lens"]
+        voice = lens_bundle.get("voice")
 
     subject = extract_original_subject(user_message)
     anchors = extract_conversation_anchors(user_message)
@@ -441,14 +822,19 @@ def build_response_plan(
     return ResponsePlan(
         intent=intent,
         primary_capability=primary,
-        supporting_capability="Epistemic Calibration",
+        supporting_capability=supporting,
+        voice=voice,
         evidence_confidence=confidence,
         needs_practical_action=practical,
-        expected_shift_from="confusion" if insight else None,
-        expected_shift_to="clarity" if insight else ("action" if practical else None),
+        expected_shift_from="confusion" if insight or domain in bourdain_domains else None,
+        expected_shift_to="clarity" if insight or domain in bourdain_domains else ("action" if practical else None),
         governing_pattern=None,
         central_insight=None,
         original_subject=subject,
+        claim_domain=domain,
+        lens=lens,
+        preferred_structure=preferred_structure,
+        mechanism_hint=mechanism_hint,
         closing_strategy=legacy_map.get(landing, "none"),
         landing=landing,
         allow_question=decision.allow_question,
@@ -465,8 +851,49 @@ CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
 Surface geometry (mandatory): CUT → NAME → PROVE ONCE → STOP → 🥃
 Deep reasoning stays internal. External delivery is aggressive compression.
 
+Four independent layers (mandatory):
+1) Identity — interpretive lens (perspective selection). Internally: whose eyes?
+2) Intelligence — broad capability / mental tool
+3) Writing — SNAP / KNIFE / STORY
+4) Editing — Gold compression only
+
+Pipeline:
+claim type → interpretive lens → capability → mechanism fit → structure → generate → Gold → 🥃
+
+Gold never decides what Moody thinks. Gold only decides how he says it.
+Protect that boundary — Gold must not become a co-author or pick the lens.
+Do NOT jump straight to Power / Incentive Analysis for every prompt.
+
+INTERPRETIVE LENS (Identity — never name in the reply):
+Food / travel → Bourdain
+Relationships / life → Hank Moody
+Power / ideology → Noir Detective
+Business / brands → Munger
+Court / evidence → CIA
+
+BROAD CAPABILITIES (Intelligence — not a taxonomy zoo):
+taste/preference → Everyday Preference Analysis
+lived experience / travel → Lived Experience Analysis
+power / incentives → Power / Incentive Analysis
+relationships → Relationship Pattern Recognition
+evidence / contradiction → Evidence / Contradiction Analysis
+business / tradeoffs → Business / Tradeoff Analysis
+
+Within a lens, supporting tools may stack (e.g. Bourdain + Sensory Realism).
+Lens ≠ capability. Bourdain is the world. Everyday Preference Analysis is the tool.
+
 THINK abstractly. SPEAK concretely.
 MoodyBot sees systems. MoodyBot does not talk ABOUT systems.
+
+MECHANISM FIT (after lens + capability, before writing):
+Identify the dominant mechanism that best explains THIS specific prompt.
+Do NOT optimize for finding the same mechanism repeatedly (especially rule-shopping, grievance scripts, loyalty programs).
+If no social or ideological mechanism is present, do not invent one.
+Do not open with "The pattern is…" unless the pattern is evidenced by the prompt.
+Taste example: claim=taste_preference, lens=Bourdain, capability=Everyday Preference Analysis,
+mechanism=familiarity vs quality, structure=SNAP.
+PASS: "That's like saying prison is just a room."
+FAIL: "The pattern is rule-shopping."
 
 PREMISE RELOCATION (first-class):
 If the user already stated the obvious thesis, do NOT agree-and-elaborate.
@@ -560,8 +987,7 @@ If practical action was requested, include a concrete next step before 🥃.
 
 
 def plan_closer_instruction(plan: ResponsePlan) -> str:
-    """Generation guidance — Gold-shape delivery. Not a closer-module checklist."""
-    _ = plan
+    """Generation guidance — perspective → capability → mechanism → Gold."""
     extra = ""
     if plan.needs_practical_action:
         extra = "\nUser asked for action — include a concrete next step before 🥃. No quiz question."
@@ -569,7 +995,24 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         extra = "\nTechnical mode: cause → fix. KNIFE or SNAP. No poetry unless it helps."
     elif plan.intent == "witness":
         extra = "\nWitness mode: stay with the weight. No forced closer. Still end with 🥃."
-    return CORE_WRITE_DIRECTIVE + extra
+    domain = getattr(plan, "claim_domain", None) or classify_claim_domain("")
+    lens = getattr(plan, "lens", None) or select_interpretive_lens(domain).get("lens", "")
+    cap = getattr(plan, "primary_capability", None) or "Everyday Preference Analysis"
+    domain_block = domain_mechanism_guidance(domain, lens=lens, capability=cap)
+    voice = getattr(plan, "voice", None) or ""
+    structure = getattr(plan, "preferred_structure", None) or ""
+    mech = getattr(plan, "mechanism_hint", None) or ""
+    voice_bit = f" Voice: {voice}." if voice else ""
+    struct_bit = f" Preferred structure: {structure}." if structure else ""
+    mech_bit = f" Mechanism family: {mech}." if mech else ""
+    return (
+        CORE_WRITE_DIRECTIVE
+        + f"\nInterpretive lens (Identity): {lens}. Capability (Intelligence): {cap}."
+        + f"{voice_bit}{struct_bit}{mech_bit} Claim type: {domain}.\n"
+        + "Lens first, then tool, then mechanism. Gold only compresses. Never name the lens in prose.\n"
+        + domain_block
+        + extra
+    )
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -885,7 +1328,11 @@ def finalize_response(
         post_reasons.append("duplicate_removed")
 
     # 4b) Gold-shape quality pass — at most one structural compression
-    text, gold_report = apply_gold_shape_pass(user_message, text)
+    text, gold_report = apply_gold_shape_pass(
+        user_message,
+        text,
+        preferred_structure=getattr(plan, "preferred_structure", None) or None,
+    )
     if gold_report.quality_rewrite_triggered:
         post_reasons.append("gold_shape_compress")
     # Surface invariant baseline is post-gold (whiskey-only changes after this)
@@ -954,6 +1401,11 @@ def finalize_response(
         "creative_touch": str(creative_touch).lower(),
         "primary_capability": plan.primary_capability or "",
         "supporting_capability": plan.supporting_capability or "",
+        "claim_domain": plan.claim_domain or "",
+        "lens": plan.lens or "",
+        "interpretive_lens": plan.lens or "",
+        "preferred_structure": plan.preferred_structure or "",
+        "mechanism_hint": plan.mechanism_hint or "",
         "intervention": plan.intervention or "",
         "voice": plan.voice or "",
         "closing_strategy": plan.closing_strategy,

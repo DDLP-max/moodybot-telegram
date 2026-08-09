@@ -6,10 +6,17 @@ from pathlib import Path
 from gold_shape import (
     GOLD_SHAPE_VERSION,
     apply_gold_shape_pass,
+    detect_mechanism_mismatch,
     evaluate_gold_shape,
     select_structure,
 )
-from response_finalization import CORE_WRITE_DIRECTIVE, finalize_response
+from response_finalization import (
+    CORE_WRITE_DIRECTIVE,
+    build_response_plan,
+    classify_claim_domain,
+    finalize_response,
+    plan_closer_instruction,
+)
 from recognition_landing import LANDING_ENGINE_VERSION
 
 GOLD_DIR = Path("training/moodybot-gold")
@@ -28,6 +35,66 @@ def test_core_write_has_gold_geometry():
     assert "🥃" in CORE_WRITE_DIRECTIVE
     assert "stay dangerous" in lower  # banned example
     assert "resentment economy" in lower  # avoided diction
+    assert "mechanism fit" in lower
+    assert "rule-shopping" in lower
+    assert "claim type" in lower
+    assert "interpretive lens" in lower or "whose eyes" in lower
+    assert "everyday preference" in lower
+    assert "bourdain" in lower
+    assert "prison is just a room" in lower
+    assert "gold never" in lower
+
+
+def test_mcdonalds_routes_to_bourdain_not_pattern_recognition():
+    """Food: Bourdain lens + Everyday Preference Analysis + SNAP — not Power analysis."""
+    user = "McDonald's is easily the best place for burgers and fries."
+    assert classify_claim_domain(user) == "taste_preference"
+    plan = build_response_plan(user, selected_command="/thoughts")
+    assert plan.claim_domain == "taste_preference"
+    assert plan.lens == "Bourdain"
+    assert plan.primary_capability == "Everyday Preference Analysis"
+    assert plan.supporting_capability == "Sensory Realism"
+    assert plan.preferred_structure == "SNAP"
+    assert plan.mechanism_hint == "familiarity_vs_quality"
+    assert "Power" not in (plan.primary_capability or "")
+    guidance = plan_closer_instruction(plan).lower()
+    assert "bourdain" in guidance
+    assert "everyday preference" in guidance
+    assert "prison is just a room" in guidance
+    assert "rule-shopping" in guidance  # banned when unsupported
+    assert "interpretive lens" in guidance or "whose eyes" in CORE_WRITE_DIRECTIVE.lower()
+
+    bad = (
+        "The pattern is rule-shopping. People reach for the standard that "
+        "delivers the benefit and drop the one that demands the cost."
+    )
+    assert detect_mechanism_mismatch(user, bad) is True
+    failures = evaluate_gold_shape(user, bad, "KNIFE")
+    assert "mechanism_mismatch" in failures
+    out, report = apply_gold_shape_pass(user, bad, preferred_structure="SNAP")
+    assert report.mechanism_mismatch is True
+    # Diagnostic only — Gold must not invent a Bourdain line
+    assert "rule-shopping" in out.lower()
+    result = finalize_response(bad, user)
+    assert result.diagnostics.get("claim_domain") == "taste_preference"
+    assert result.diagnostics.get("lens") == "Bourdain"
+    assert result.diagnostics.get("interpretive_lens") == "Bourdain"
+    assert result.diagnostics.get("mechanism_mismatch") == "true"
+    assert result.diagnostics.get("primary_capability") == "Everyday Preference Analysis"
+    assert result.diagnostics.get("preferred_structure") == "SNAP"
+
+
+def test_social_prompt_allows_rule_shopping_name():
+    user = (
+        "Feminists want the authority of a man. The privileges of a woman. "
+        "And the responsibility of a child."
+    )
+    draft = (
+        "The pattern is rule-shopping. People reach for the standard that "
+        "delivers the benefit and drop the one that demands the cost."
+    )
+    assert detect_mechanism_mismatch(user, draft) is False
+    assert "mechanism_mismatch" not in evaluate_gold_shape(user, draft, "KNIFE")
 
 
 def test_gold_docs_present():
@@ -155,6 +222,8 @@ def test_gold_corpus_examples_end_clean_when_finalized():
 if __name__ == "__main__":
     test_protect_only_still_landing_engine()
     test_core_write_has_gold_geometry()
+    test_mcdonalds_routes_to_bourdain_not_pattern_recognition()
+    test_social_prompt_allows_rule_shopping_name()
     test_gold_docs_present()
     test_pick_me_amplification_compresses()
     test_clean_knife_ships_with_whiskey_minimal_touch()
