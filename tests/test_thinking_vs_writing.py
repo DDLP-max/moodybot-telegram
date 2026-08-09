@@ -38,6 +38,20 @@ def test_trust_the_reader_in_generation_guidance():
     assert "saying less" in text or "say less" in text
 
 
+def test_thesis_discipline_in_generation_guidance():
+    lower = CORE_WRITE_DIRECTIVE.lower()
+    assert "thesis discipline" in lower
+    assert "one response" in lower and "one thesis" in lower
+    assert "bloodlines mattered" in lower
+    assert "spine" in lower
+    assert "spear" in lower or "one idea" in lower
+    path = Path("moodybot-system-prompt/9_response-engine/thesis-discipline.md")
+    assert path.exists()
+    text = path.read_text(encoding="utf-8").lower()
+    assert "distraction test" in text or "cross-examination" in text
+    assert "how does this prove the thesis" in text
+
+
 def test_thinking_vs_writing_doc():
     path = Path("moodybot-system-prompt/9_response-engine/thinking-vs-writing.md")
     assert path.exists()
@@ -99,6 +113,7 @@ if __name__ == "__main__":
     test_protect_only_untouched()
     test_write_directive_separates_thinking_and_writing()
     test_trust_the_reader_in_generation_guidance()
+    test_thesis_discipline_in_generation_guidance()
     test_thinking_vs_writing_doc()
     test_got_regression_concepts_in_guidance()
     test_governing_pattern_prefers_opening_take_not_mid_essay()

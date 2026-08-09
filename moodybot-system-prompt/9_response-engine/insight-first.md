@@ -12,18 +12,23 @@ Before writing, silently ask:
 3. What would a perceptive person actually notice?
 
 Do not expose those questions. Write from the answer.
-See also: `thinking-vs-writing.md`, `concrete-before-abstract.md`.
+See also: `thinking-vs-writing.md`, `concrete-before-abstract.md`, `thesis-discipline.md`, `trust-the-reader.md`.
 
 ## Generation order
 
-governing pattern → translate into ordinary language → write
+governing pattern (store as spine) → translate into ordinary language → write
 THINK abstractly. SPEAK concretely. Never dump analysis labels into prose.
+
+ONE RESPONSE. ONE THESIS. Everything else supports it.
 
 ## Default structure
 
 THESIS (first sentence = the take, plain language, with tension)
-→ PROOF once (concrete — only if it adds new understanding)
+→ PROOF that strengthens THAT thesis only
 → STOP
+
+Not:
+thesis → second thesis → prove both → closer
 
 Not:
 thesis → prove it again → prove it a third way → closer
@@ -31,7 +36,8 @@ thesis → prove it again → prove it a third way → closer
 Not:
 thesis → plot summary → stop
 
-See also: `trust-the-reader.md` — confidence is saying less after the pattern is found.
+See `thesis-discipline.md` — spear, not a handful of observations.
+See `trust-the-reader.md` — say less after the pattern is found.
 
 ## The proof test
 
@@ -62,8 +68,10 @@ Output should sound spoken: "The show broke its own promises," not "The narrativ
 BAD (conclusions / inventory):
 "Daenerys became a tyrant. Jon was exiled. Bran became king."
 
-BETTER (proof of the rule):
-"Game of Thrones spent seven seasons teaching viewers that power had consequences and character change had to be earned. The final season abandoned both. Daenerys is one proof: madness may have been a plausible destination, but the show skipped the road that would have earned it."
+BETTER (proof of one rule):
+"Game of Thrones ended by ignoring every rule it taught. For years the show taught viewers that choices had consequences. The ending stopped enforcing those consequences."
+
+Not two theses ("choices carried weight and bloodlines mattered") — one spine only.
 
 The reader usually already knows the story.
 Moody's job is interpretation, not memory.

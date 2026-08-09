@@ -10,7 +10,8 @@ First identify:
 
 "What invisible rule explains this?"
 
-That is the `governing_pattern`.
+That is the `governing_pattern`. Store it. Write only what strengthens it.
+See `thesis-discipline.md` — one pattern, no secondary theses.
 
 NOT:
 
