@@ -22,22 +22,24 @@ THINK abstractly. SPEAK concretely. Never dump analysis labels into prose.
 ## Default structure
 
 THESIS (first sentence = the take, plain language, with tension)
-→ PROOF (concrete example that demonstrates the rule)
-→ PROOF (optional second proof — only if it adds a new facet)
+→ PROOF once (concrete — only if it adds new understanding)
 → STOP
+
+Not:
+thesis → prove it again → prove it a third way → closer
 
 Not:
 thesis → plot summary → stop
 
-Not:
-intro → inventory → synthesis → closer → CTA
+See also: `trust-the-reader.md` — confidence is saying less after the pattern is found.
 
 ## The proof test
 
 Before accepting every paragraph after the first, ask:
-"Does this paragraph prove the thesis?"
+"What NEW understanding does this add?"
 
-If the answer is "It reminds the reader what happened" → rewrite or delete.
+If it only strengthens or restates the previous sentence → delete it.
+If it only reminds the reader what happened → delete it.
 
 ## The "so what?" test
 

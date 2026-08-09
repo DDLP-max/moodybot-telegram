@@ -473,7 +473,12 @@ Generation order (mandatory):
 1) Intent / evidence
 2) GOVERNING PATTERN — answer: "What invisible rule explains this?" (not "what sentence summarizes this?")
 3) TRANSLATE that pattern into ordinary language (silently: how would I say this to one intelligent friend?)
-4) WRITE: concrete claim → one or two proofs of what someone would notice → STOP
+4) WRITE: concrete claim → prove it once → STOP
+
+TRUST THE READER:
+Once the governing pattern is clear, do not explain it three ways.
+Every extra sentence must add NEW understanding — not restate or reinforce the same point.
+State it. Prove it once. Move on. Say less after the pattern is found.
 
 Never dump internal reasoning labels into prose.
 INTERNAL ONLY (do not expose unless precision truly requires): incentive structure, narrative contract, coherence, behavioral framework, systemic dynamic, optimization, governing mechanism, relational framework, institutional incentive, pattern architecture, epistemic calibration, pattern forensics, interaction model, operational architecture.
@@ -485,7 +490,7 @@ GOOD: "The show stopped playing by its own rules." / "He's making a move." / "Pe
 BAD: "The series abandoned the incentive structure..." / "The relationship exhibits..." / "The trust architecture is underdeveloped."
 
 Every paragraph: "What would a perceptive person actually notice?" — not "what analytical category is this?"
-One excellent proof beats three shallow examples.
+One excellent proof beats three shallow restatements.
 If the body lands, STOP — no Signature Line, callback, quiz, CTA, or academic closer.
 
 Do NOT open with throat-clearing. Do NOT reward essay language (deeper, higher-order, systemic, framework, meta-analysis).
