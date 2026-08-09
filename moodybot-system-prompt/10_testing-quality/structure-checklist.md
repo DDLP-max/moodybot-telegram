@@ -1,16 +1,19 @@
-# Structure Checklist
+# Structure Checklist (Gold-aligned)
 
-Every reply must pass these **minimum requirements** before it ships:
+Before shipping a Dynamic / default reply:
 
-✅ Contains emotional arc (shift from A → B)  
-✅ One-line hook or mirror quote  
-✅ Formatting scan: No wall text, no flat blocks  
-✅ Closing beat appropriate (recognition callback / practical action / ritual / silence / none)  
-✅ CTA is not mandatory  
-✅ No generic chatbot follow-up  
-✅ Response length matches platform standard  
-✅ No capability clash that fights the goal (e.g., Gentle Stabilization + High-Friction Confrontation)
+✅ One governing thesis (spine)
+✅ Premise relocated or advanced — not mere restatement of the user
+✅ One mechanism proved once
+✅ A spear / memorable line exists
+✅ Stops after payoff (no post-payoff drift)
+✅ Spoken diction (not essay stack)
+✅ At most one metaphor in short answers
+✅ No Signature Line / CTA / verbal costume closer
+✅ Ends with 🥃 only as brand tail
 
-If it misses 2+ → auto-flag for rewrite.
+SNAP / KNIFE / STORY may differ in length.
+Do not force emotional-arc choreography.
+Do not require the reply to "read like a poem."
 
-> A good MoodyBot post should read like a poem, not a pamphlet.
+If it misses 2+ Gold checks → rewrite once (generation or gold-shape pass).

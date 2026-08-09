@@ -1,0 +1,126 @@
+# -*- coding: utf-8 -*-
+"""Gold-shape regression: delivery geometry from training/moodybot-gold/."""
+
+from pathlib import Path
+
+from gold_shape import (
+    GOLD_SHAPE_VERSION,
+    apply_gold_shape_pass,
+    evaluate_gold_shape,
+    select_structure,
+)
+from response_finalization import CORE_WRITE_DIRECTIVE, finalize_response
+from recognition_landing import LANDING_ENGINE_VERSION
+
+GOLD_DIR = Path("training/moodybot-gold")
+
+
+def test_protect_only_still_landing_engine():
+    assert LANDING_ENGINE_VERSION == "protect-only-v1"
+    assert GOLD_SHAPE_VERSION == "gold-shape-v1"
+
+
+def test_core_write_has_gold_geometry():
+    lower = CORE_WRITE_DIRECTIVE.lower()
+    assert "cut" in lower and "prove once" in lower
+    assert "premise relocation" in lower or "relocate" in lower
+    assert "spear" in lower
+    assert "🥃" in CORE_WRITE_DIRECTIVE
+    assert "stay dangerous" in lower  # banned example
+    assert "resentment economy" in lower  # avoided diction
+
+
+def test_gold_docs_present():
+    assert (GOLD_DIR / "gold.json").exists()
+    assert (GOLD_DIR / "style-guide.md").exists()
+    assert (GOLD_DIR / "pattern-analysis.md").exists()
+    assert Path("moodybot-system-prompt/9_response-engine/gold-shape.md").exists()
+
+
+def test_pick_me_amplification_compresses():
+    user = (
+        "Feminists hate when a woman genuinely appreciates her man. "
+        "The moment you praise him, they call you a pick me. "
+        "Apparently being grateful for your man is now a betrayal of womanhood."
+    )
+    draft = (
+        "The pick me label exists to punish women who break the script. "
+        "When a woman says her man improves her life, the movement loses a recruit "
+        "for the resentment economy. Gratitude is treated as defection because the "
+        "ideology needs every woman positioned as harmed. Praise for a specific man "
+        "makes the universal claim harder to maintain. So the group labels it betrayal "
+        "and moves on. The pressure isn't about her happiness. It's about keeping the "
+        "story intact. Stay dangerous."
+    )
+    failures = evaluate_gold_shape(user, draft, "KNIFE")
+    assert any(
+        f in failures
+        for f in (
+            "thesis_repetition",
+            "multi_mechanism_essay",
+            "essay_diction",
+            "post_payoff_drift",
+            "cta_or_costume_tail",
+            "knife_overlong",
+        )
+    )
+    out, report = apply_gold_shape_pass(user, draft)
+    assert report.quality_rewrite_triggered is True
+    assert "stay dangerous" not in out.lower()
+    result = finalize_response(draft, user)
+    assert result.text.rstrip().endswith("🥃")
+    assert result.diagnostics.get("gold_shape_version") == GOLD_SHAPE_VERSION
+    assert "selected_structure" in result.diagnostics
+    body = result.text.replace("🥃", "").strip()
+    assert len(body.split()) < len(draft.split())
+    assert "stay dangerous" not in body.lower()
+
+
+def test_clean_knife_ships_with_whiskey_minimal_touch():
+    user = "Why do people call grateful women pick-mes?"
+    draft = (
+        "Pick me isn't about womanhood. It's a penalty for leaving the grievance script. "
+        "A woman who says her man makes her life better is one less recruit for the shared "
+        "injury story. So the group calls it betrayal and moves on."
+    )
+    result = finalize_response(draft, user)
+    assert result.text.rstrip().endswith("🥃")
+    assert result.diagnostics.get("spear_detected") == "true"
+    # Should not invent Signature Line paragraph
+    assert result.text.count("\n\n") <= 1
+
+
+def test_stacked_metaphor_flagged():
+    user = "What is leadership?"
+    draft = (
+        "He's steering the ship, moving the chess pieces like a grandmaster, "
+        "and keeping the wolves outside the gate as if the night never ends."
+    )
+    failures = evaluate_gold_shape(user, draft, "KNIFE")
+    assert "stacked_metaphor" in failures
+
+
+def test_structure_selection_snap():
+    assert select_structure("hi", "You already know the answer.") == "SNAP"
+
+
+def test_gold_corpus_examples_end_clean_when_finalized():
+    import json
+
+    rows = json.loads((GOLD_DIR / "gold.json").read_text(encoding="utf-8"))
+    for row in rows[:5]:
+        result = finalize_response(row["assistant_response"], row["original_user_prompt"])
+        assert result.text.rstrip().endswith("🥃")
+        assert result.diagnostics.get("landing_added") == "false"
+
+
+if __name__ == "__main__":
+    test_protect_only_still_landing_engine()
+    test_core_write_has_gold_geometry()
+    test_gold_docs_present()
+    test_pick_me_amplification_compresses()
+    test_clean_knife_ships_with_whiskey_minimal_touch()
+    test_stacked_metaphor_flagged()
+    test_structure_selection_snap()
+    test_gold_corpus_examples_end_clean_when_finalized()
+    print("All gold-shape tests passed.")

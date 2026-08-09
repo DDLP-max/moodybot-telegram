@@ -26,29 +26,37 @@ Any future change to finalization must answer:
 3. Fix broken grammar/formatting  
 4. Remove duplicated ideas  
 5. Enforce safety  
+6. **One** Gold-shape structural compression pass (`gold_shape.py`) when the draft shows:
+   - premise restatement
+   - thesis / mechanism repetition
+   - post-payoff drift
+   - stacked metaphor
+   - CTA / verbal costume tail  
+   Max: `draft → quality pass → one rewrite → return`. Never loop.
+
+## Brand exception
+
+`🥃` is intentional brand infrastructure (watermark), not a Signature Line.
+It must remain the sole standard brand tail on normal replies.
+No catchphrase before it.
 
 ## Forbidden (authorship)
 
-- Improve / tighten / compress / rewrite prose  
-- Add conclusions, transitions, callbacks, signature lines  
-- Change cadence, rhythm, openings, endings, sentence order  
-- Insert or replace examples  
-- Score profoundness, memorability, landing quality, quotability  
+- Creative voice rewrite, ornament, new metaphors, new examples  
+- Add conclusions, callbacks, signature lines  
+- Change openings for style  
+- Score profoundness / quotability as a reason to rewrite  
 
 ## Ownership
 
-The LLM owns: voice, cadence, paragraphing, sentence length, metaphor, timing, humor, surprise, emotion, rhythm.
+The LLM owns: voice, cadence, metaphor choice, timing, humor, emotion.
 
-If a generated response is already coherent, insightful, and well-paced: **do not touch it.**
-
-## Success metric
-
-Average creative rewrites performed by finalization ≈ **0**.
-
-If finalization rewrites most responses, the generator/prompt is wrong. Fix generation — not the output.
+Gold-shape pass only deletes / lightly compresses structural defects.
+If generation is healthy, rewrite rate stays low — fix the prompt when it rises.
 
 ## Related modules
 
-- Telegram: `response_finalization.py`, `recognition_landing.py`, `surface_render.py`  
-- Web Dynamic: `utils/moodybotPostProcess.ts`, `utils/recognitionLanding.ts`  
+- Telegram: `response_finalization.py`, `gold_shape.py`, `recognition_landing.py`, `surface_render.py`  
+- Web Dynamic: `utils/moodybotPostProcess.ts`, `utils/goldShape.ts`  
+- Corpus: `training/moodybot-gold/`  
 - Cursor rule: `.cursor/rules/protect-only-finalizer.mdc`  

@@ -20,11 +20,10 @@ def test_write_directive_separates_thinking_and_writing():
     assert "think abstractly" in lower
     assert "speak concretely" in lower
     assert "governing pattern" in lower
-    assert "invisible rule" in lower
-    assert "translate" in lower
-    assert "incentive structure" in lower  # listed as internal-only
-    assert "narrative contract" in lower
-    assert "never looked at it like that" in lower or "perceptive person" in lower
+    assert "translate" in lower or "ordinary language" in lower
+    assert "spear" in lower
+    assert "cut" in lower and "prove once" in lower
+
 
 
 def test_trust_the_reader_in_generation_guidance():

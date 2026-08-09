@@ -2,22 +2,15 @@
 """Protective finalization — infrastructure, not authorship.
 
 CONTRACT (protect-only-v1) — see docs/PROTECT_ONLY_FINALIZER.md
+GOLD-SHAPE COMPRESSION — see gold_shape.py / training/moodybot-gold/
 
-Generation creates. Finalization protects. Nothing else.
+Generation creates. Finalization protects + applies at most one Gold-shape
+structural compression (restatement / drift / CTA / stacked metaphor).
 
-Before changing this module, answer ONE question:
+Before changing this module, answer:
   Does this prevent a defect, or does it change the writing?
-  If it changes the writing → move to generation or delete.
-
-Finalization may ONLY:
-  1. Remove obvious hallucinated mechanics
-  2. Remove generic assistant garbage
-  3. Fix broken formatting
-  4. Remove duplicated ideas
-  5. Enforce safety (malformed/banned closers)
-
-If the draft is coherent: DO NOT TOUCH IT.
-Average creative rewrites target ≈ 0.
+  Creative voice changes → generation only.
+  Structural Gold defects (restatement, post-payoff drift, CTA) → one pass max.
 """
 
 from __future__ import annotations
@@ -33,6 +26,11 @@ from typing import Deque, Dict, List, Optional, Tuple
 from conversation_anchors import (
     ConversationAnchors,
     extract_conversation_anchors,
+)
+from gold_shape import (
+    GOLD_SHAPE_VERSION,
+    apply_gold_shape_pass,
+    gold_shape_diagnostics,
 )
 from recognition_callbacks import is_generic_followup
 from recognition_landing import (
@@ -464,67 +462,79 @@ def build_response_plan(
 
 CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
 
+Surface geometry (mandatory): CUT → NAME → PROVE ONCE → STOP → 🥃
+Deep reasoning stays internal. External delivery is aggressive compression.
+
 THINK abstractly. SPEAK concretely.
 MoodyBot sees systems. MoodyBot does not talk ABOUT systems.
 
-MoodyBot does not describe what happened. MoodyBot explains why it felt the way it did.
+PREMISE RELOCATION (first-class):
+If the user already stated the obvious thesis, do NOT agree-and-elaborate.
+Relocate: user premise → reframe → name the deeper mechanism → one proof → stop.
+Every substantive sentence must add NEW understanding.
+If a sentence merely restates the user's thesis — delete it.
+Do NOT create a hard "never agree" rule. If they are right, still do not spend words telling them what they already know.
 
-Generation order (mandatory):
-1) Intent / evidence
-2) GOVERNING PATTERN — answer: "What invisible rule explains this?" (not "what sentence summarizes this?")
-   Store it as the spine of the reply. ONE pattern only.
-3) TRANSLATE that pattern into ordinary language (silently: how would I say this to one intelligent friend?)
-4) WRITE: concrete claim → prove THAT claim → STOP
+GOLD STRUCTURES (pick one; do not force KNIFE onto everything):
+- SNAP: 1–2 sentence punch. Stop.
+- KNIFE: reframe → one proof → spear → stop. Soft tendency ~50–110 words, usually one paragraph.
+- STORY: observation → concrete example → implication → stop. May be longer when narrative earns it.
 
-THESIS DISCIPLINE — one response, one thesis:
-Hold the governing pattern. Every sentence after it must strengthen THAT pattern.
-Before each sentence: "What claim is this making?" If it introduces a second major claim not required to prove the thesis — rewrite or delete.
-Distraction test: if someone argued with THIS sentence, would the central thesis get weaker? If yes — unnecessary surface area; cut it.
-Cross-examination: the smartest critic must attack the governing thesis first — not a stray supporting sentence.
-No bonus ideas: no second insight, clever aside, analogy, or mechanism that creates a new argument.
-Proof, not expansion: after the opening, every paragraph answers "How does this prove the thesis?" — not "What else is interesting?"
-Spear, not handful: the reader leaves remembering ONE idea.
+ONE MECHANISM:
+one thesis → one mechanism → one proof.
+ONE RESPONSE. ONE THESIS.
+If two sentences explain the same causal mechanism in different language, keep the stronger one.
+Do not stack near-synonyms (punishment / resentment economy / defection / universal claim / ideology / protecting the story).
 
-FAIL: "Choices carried weight and bloodlines mattered..." (two theses)
-PASS: "The show stopped obeying its own rules." → consequences had weight → ending abandoned them. (one spine)
+SPEAR:
+Every short reply has one memorable line that carries the answer.
+Once the spear lands — stop. No second explanation, metaphor, summary, moral, CTA, invitation, "the real lesson is…", or "and that's why…".
+Then end with 🥃 alone (no catchphrase before it).
 
-TRUST THE READER:
-Once the governing pattern is clear, do not explain it three ways.
-Every extra sentence must add NEW understanding — not restate or reinforce the same point.
-State it. Prove it once. Move on. Say less after the pattern is found.
+SPOKEN NOUNS over essay nouns:
+Prefer spoken observations: rules, promises, trust, cost, story, script, recruit, pitch, game, group, deal, pressure, excuse, boundary, move.
+Avoid when plain speech works: ideology, universal claim, defection, dialectic, framework, paradigm, systemic mechanism, resentment economy.
+Prefer the plainest word that preserves the insight.
 
-Never dump internal reasoning labels into prose.
-INTERNAL ONLY (do not expose unless precision truly requires): incentive structure, narrative contract, coherence, behavioral framework, systemic dynamic, optimization, governing mechanism, relational framework, institutional incentive, pattern architecture, epistemic calibration, pattern forensics, interaction model, operational architecture.
+METAPHOR: at most one meaningful image in a short answer. One memorable image beats three clever ones.
 
-Prefer spoken observations: rules, promises, trust, cost, pressure, cheating, earning, breaking, winning, losing, waiting, leaving, staying, move, boundary, attention, reward.
+Generation order:
+1) Intent / evidence / deep pattern work (internal)
+2) GOVERNING PATTERN — one invisible rule
+3) TRANSLATE into ordinary language
+4) WRITE to structure → STOP → 🥃
 
-First sentence = concrete claim with tension.
-GOOD: "The show stopped playing by its own rules." / "He's making a move." / "People don't trust you yet."
-BAD: "The series abandoned the incentive structure..." / "The relationship exhibits..." / "The trust architecture is underdeveloped."
+TRUST THE READER + THESIS DISCIPLINE:
+State it. Prove it once. Move on.
+Every extra sentence must add NEW understanding — not restate.
+Nothing survives after the payoff unless it changes the meaning.
+FAIL: "Choices carried weight and bloodlines mattered..." (two theses / secondary claim).
+The spine is one governing pattern; every sentence hangs from it.
 
-Every paragraph: "What would a perceptive person actually notice?" — not "what analytical category is this?"
-One excellent proof beats three shallow restatements.
-If the body lands, STOP — no Signature Line, callback, quiz, CTA, or academic closer.
+Never dump internal labels into prose.
+INTERNAL ONLY (do not expose unless precision truly requires): incentive structure, narrative contract, coherence, epistemic calibration, pattern forensics, governing mechanism.
 
-Do NOT open with throat-clearing. Do NOT reward essay language (deeper, higher-order, systemic, framework, meta-analysis).
-Do NOT require metaphor, noir, or poetic costume. Keep real technical/legal terms when they are the precise terms.
+No Signature Line, Recognition Callback, quiz, verbal costume closer, or CTA.
+The sole standard brand tail is 🥃 at the very end after the final sentence.
+BAD: "Stay dangerous. 🥃" / "That's the game. Stay sharp. 🥃"
+GOOD: "The deal was control, not peace. 🥃"
 
-Product test: reader thinks "I've never looked at it like that" — not "that was a sophisticated explanation."
+Product test: "someone saw the thing underneath, named it once, and shut up" — not "an articulate explanation."
 
-If practical action was requested, end with a concrete next step.
+If practical action was requested, include a concrete next step before 🥃.
 """
 
 
 def plan_closer_instruction(plan: ResponsePlan) -> str:
-    """Generation guidance — insight-first. Not a closer-module compliance checklist."""
+    """Generation guidance — Gold-shape delivery. Not a closer-module checklist."""
     _ = plan
     extra = ""
     if plan.needs_practical_action:
-        extra = "\nUser asked for action — include a concrete next step. No quiz question."
+        extra = "\nUser asked for action — include a concrete next step before 🥃. No quiz question."
     elif plan.intent == "technical":
-        extra = "\nTechnical mode: cause → fix. No poetry unless it helps."
+        extra = "\nTechnical mode: cause → fix. KNIFE or SNAP. No poetry unless it helps."
     elif plan.intent == "witness":
-        extra = "\nWitness mode: stay with the weight. No forced closer."
+        extra = "\nWitness mode: stay with the weight. No forced closer. Still end with 🥃."
     return CORE_WRITE_DIRECTIVE + extra
 
 
@@ -840,12 +850,21 @@ def finalize_response(
     if deduped:
         post_reasons.append("duplicate_removed")
 
+    # 4b) Gold-shape quality pass — at most one structural compression
+    text, gold_report = apply_gold_shape_pass(user_message, text)
+    if gold_report.quality_rewrite_triggered:
+        post_reasons.append("gold_shape_compress")
+    # Surface invariant baseline is post-gold (whiskey-only changes after this)
+    after_landing = text
+    after_landing_last = _last_sentence(after_landing)
+
     # 5) Broken formatting + typography (no prose repair)
     text, formatted = fix_broken_formatting(text)
     if formatted:
         post_reasons.append("format_fix")
 
     text, surface_cleaned = final_surface_render(text)
+    gold_report.whiskey_tail_present = "🥃" in text
     after_surface_last = _last_sentence(text)
 
     if not response_text_after_surface_semantically_equals(after_landing, text):
@@ -878,6 +897,7 @@ def finalize_response(
         or deduped
         or formatted
         or surface_cleaned
+        or gold_report.quality_rewrite_triggered
     )
     duration_ms = int((time.time() - t0) * 1000)
 
@@ -888,6 +908,7 @@ def finalize_response(
         "prompt_hash": prompt_hash or "",
         "git_commit": git_commit or "",
         "landing_engine_version": LANDING_ENGINE_VERSION,
+        "gold_shape_version": GOLD_SHAPE_VERSION,
         "creative_ending_tools": str(CREATIVE_ENDING_TOOLS_ENABLED).lower(),
         "governing_pattern": (plan.governing_pattern or "")[:240],
         "core_insight": (plan.governing_pattern or "")[:240],  # deprecated alias
@@ -916,6 +937,7 @@ def finalize_response(
         "after_surface_render_last_sentence": after_surface_last[:240],
         "final_http_last_sentence": after_surface_last[:240],
     }
+    diagnostics.update(gold_shape_diagnostics(gold_report))
     if (plan.mode or "").lower() == "dynamic":
         logger.info("DYNAMIC_TRACE_START")
         logger.info(
@@ -926,6 +948,10 @@ def finalize_response(
                 "route": f"{plan.channel}/finalize_response",
                 "generation_function": "finalize_response",
                 "landing_engine_version": LANDING_ENGINE_VERSION,
+                "gold_shape_version": GOLD_SHAPE_VERSION,
+                "selected_structure": gold_report.selected_structure,
+                "premise_relocated": gold_report.premise_relocated,
+                "quality_rewrite_triggered": gold_report.quality_rewrite_triggered,
                 "draft_last_sentence": draft_last[:240],
                 "after_epistemic_last_sentence": after_epistemic_last[:240],
                 "after_landing_last_sentence": after_landing_last[:240],
