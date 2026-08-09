@@ -444,6 +444,15 @@ def classify_claim_domain(user_message: str) -> str:
     if any(t in text for t in social):
         return "social_power"
 
+    # Dating advice about ease/trust/obsession → EI way of seeing (not Hank swagger)
+    if re.search(
+        r"\b(right person|guessing games|obsessed with you|really into you|"
+        r"shouldn'?t be this easy|waiting for a text|fake people|"
+        r"no guessing|when someone is really into)\b",
+        text,
+    ):
+        return "emotional"
+
     relationship = (
         "girlfriend", "boyfriend", "wife", "husband", "ex ", "dating",
         "relationship", "she said", "he said", "marriage", "cheat",
@@ -1209,11 +1218,13 @@ def lens_voice_guidance(lens: str) -> str:
             "\nLENS AUTHENTICITY — Emotional Intelligence (way of seeing, not a theme):\n"
             f"{q_line}"
             f"{family_line}"
-            "Notices first: feeling, boundary, motivation — in plain language.\n"
-            "Common failure: therapy-speak / validating everything.\n"
-            "Name the feeling or boundary. Don't pad with unconditional affirmation.\n"
+            "Notices first: feeling, boundary, motivation — the hidden emotional dynamic.\n"
+            "Not dating advice. Not therapy. Not validation. Not self-help.\n"
+            "Common failure: therapy-speak / validating everything / Hank cynicism costume.\n"
             "FAIL: \"It sounds like you're feeling a lot of feelings and that's valid…\"\n"
-            "PASS: plain recognition of the feeling or the crossed line.\n"
+            "PASS: \"The right person doesn't make you guess. They show up without a strategy. "
+            "Everything else is your history trying to sell you a harder story.\"\n"
+            "Relocate the premise. One emotional mechanism. Stop.\n"
         )
     if name == "Quiet Presence":
         return (

@@ -1,5 +1,5 @@
 {
-  "n": 18,
+  "n": 19,
   "source_pairs_scanned": 4909,
   "avg_sentence_length_words": 11.09,
   "avg_response_length_words": 75.17,
@@ -17,14 +17,14 @@
   "pct_with_physical_image": 44.4,
   "pct_with_short_memorable_sentence": 100.0,
   "structure_counts": {
-    "KNIFE": 11,
+    "KNIFE": 12,
     "SNAP": 2,
     "STORY": 5
   },
   "category_counts": {
     "culture_media": 1,
     "philosophy": 1,
-    "relationships": 8,
+    "relationships": 9,
     "psychology_self": 4,
     "money_work": 2,
     "social_critique": 1,
