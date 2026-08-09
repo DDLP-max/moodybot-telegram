@@ -1,8 +1,8 @@
 {
-  "section_count": 215,
-  "char_count": 222449,
-  "prompt_hash": "1f36173636f1e023",
-  "prompt_hash_sha256": "1f36173636f1e023f15aea442d627dd987992a09fa1cdc20fcfe9994ec09ae04",
+  "section_count": 216,
+  "char_count": 227925,
+  "prompt_hash": "666f8e641d8b293d",
+  "prompt_hash_sha256": "666f8e641d8b293d06053ee192f4d7f2429dfc08618470d9c11f79a7559f79e0",
   "final_20_sections": [
     "9_response-engine/response-length-tiers.md",
     "9_response-engine/response-type-mapping.md",
@@ -26,12 +26,12 @@
     "10_testing-quality/final-quality-gates.md"
   ],
   "critical_module_positions": {
-    "epistemic-calibration": "210/215",
-    "evidence-vs-inference": "209/215",
-    "practical-next-action": "211/215",
-    "signature-line": "212/215",
-    "recognition-callbacks": "213/215",
-    "response-generation-order": "214/215",
-    "final-quality-gates": "215/215"
+    "epistemic-calibration": "211/216",
+    "evidence-vs-inference": "210/216",
+    "practical-next-action": "212/216",
+    "signature-line": "213/216",
+    "recognition-callbacks": "214/216",
+    "response-generation-order": "215/216",
+    "final-quality-gates": "216/216"
   }
 }

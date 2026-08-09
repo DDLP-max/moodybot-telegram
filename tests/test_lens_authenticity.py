@@ -96,7 +96,7 @@ AUTHENTICITY_CASES = [
     (
         "I feel overwhelmed and my boundary keeps getting ignored.",
         "Emotional Intelligence",
-        "feeling or boundary is driving",
+        "without a sweeping group claim",
     ),
     (
         "If the girl or guy you're talking to isn't 100% obsessed with you, move on. "
@@ -145,7 +145,10 @@ def test_lens_guidance_is_not_interchangeable():
         "CIA": ("what do we actually know", "one fact and three assumptions"),
         "Hank Moody": ("human truth nobody wants to admit", "loneliest"),
         "Pattern Recognition": ("what pattern repeats", "same mechanism every time"),
-        "Emotional Intelligence": ("feeling or boundary is driving", "therapy-speak"),
+        "Emotional Intelligence": (
+            "without a sweeping group claim",
+            "people only use threats they believe would work on themselves",
+        ),
     }
     for name, (must_a, must_b) in tells.items():
         g = guides[name]
@@ -280,6 +283,28 @@ def test_persistence_invariant_documented():
     assert "gold cannot change it" in LENS_PERSISTENCE_INVARIANT.lower()
 
 
+def test_eat_substring_does_not_route_threatened_to_bourdain():
+    """Regression: 'eat' inside 'threatened' must not select taste/Bourdain."""
+    p = (
+        "It's amusing that men refuse to give up the 'cat lady' threat even though "
+        "women have never been threatened by it. It's a projection of his fears."
+    )
+    from response_finalization import classify_claim_domain
+
+    assert classify_claim_domain(p) == "emotional"
+    plan = build_response_plan(p)
+    assert plan.lens == "Emotional Intelligence"
+    assert plan.lens != "Bourdain"
+
+
+def test_ei_prefers_people_not_group_claims():
+    g = lens_voice_guidance("Emotional Intelligence").lower()
+    assert "without a sweeping claim" in g or "sweeping claim" in g
+    assert "people, not groups" in g or "begin with people" in g
+    assert "people only use threats they believe would work on themselves" in g
+    assert "women built lives with friends" in g  # FAIL example
+
+
 if __name__ == "__main__":
     test_core_lenses_have_unique_internal_questions()
     test_lens_guidance_is_not_interchangeable()
@@ -294,4 +319,6 @@ if __name__ == "__main__":
     test_distinctive_noticing_not_generic()
     test_lens_persistence_finalize_cannot_re_lens()
     test_persistence_invariant_documented()
+    test_eat_substring_does_not_route_threatened_to_bourdain()
+    test_ei_prefers_people_not_group_claims()
     print("All lens-authenticity tests passed.")

@@ -206,8 +206,13 @@ class ResponsePlan:
     routed_lens: str = ""
     # Invisible step after lens: the one internal question that opens many capabilities.
     lens_question: str = ""
-    preferred_structure: str = ""  # SNAP | KNIFE | STORY — writing layer hint
+    preferred_structure: str = ""  # SNAP | KNIFE | REFLECTION — writing shape
     mechanism_hint: str = ""  # expected mechanism family for diversity telemetry
+    # Depth dimension (Response Budget): low | medium | high
+    # Depth × Shape. Gold compresses within the allocated depth.
+    response_budget: str = "medium"
+    # expand | compress | neutral — topic mode for depth×shape routing
+    topic_mode: str = "neutral"
     # Lens persistence: True after routing. Generation/Gold/editorial must not change lens.
     lens_locked: bool = False
     closing_strategy: str = "none"  # legacy alias of landing
@@ -395,21 +400,25 @@ def classify_claim_domain(user_message: str) -> str:
     if is_practical_request(user_message):
         return "practical"
 
-    taste = (
-        "mcdonald", "burger", "fries", "pizza", "coffee", "beer", "wine",
-        "restaurant", "taste", "delicious", "food", "sushi",
-        "steak", "dessert", "recipe", "hungry", "eat", "dining",
-        "best place for", "best burger", "best fries", "favorite food",
-        "espresso", "kitchen", "chef", "cuisine", "menu",
-    )
-    if any(t in text for t in taste):
+    # Word-boundary for short tokens — "eat" must not match "threatened"
+    if re.search(
+        r"\b(mcdonald|burger|fries|pizza|coffee|beer|wine|restaurant|taste|"
+        r"delicious|food|sushi|steak|dessert|recipe|hungry|eat|dining|"
+        r"espresso|kitchen|chef|cuisine|menu)\b",
+        text,
+    ) or any(
+        p in text
+        for p in (
+            "best place for", "best burger", "best fries", "favorite food",
+        )
+    ):
         return "taste_preference"
 
-    travel = (
-        "airport", "travel", "flight", "hotel", "passport", "abroad",
-        "backpacking", "tourist", "layover", "hostel", "road trip",
-    )
-    if any(t in text for t in travel):
+    if re.search(
+        r"\b(airport|travel|flight|hotel|passport|abroad|backpacking|"
+        r"tourist|layover|hostel|road trip)\b",
+        text,
+    ):
         return "travel"
 
     if re.search(
@@ -435,11 +444,24 @@ def classify_claim_domain(user_message: str) -> str:
     if any(t in text for t in consumer):
         return "consumer_preference"
 
+    # Projection / threat-as-own-fear → EI before culture-war drawer
+    if re.search(
+        r"\b(projection of|projecting|biggest fear|"
+        r"threatening .+ with|threat of .+ (alone|single|lonely))\b",
+        text,
+    ) or (
+        "threat" in text
+        and any(w in text for w in ("fear", "fears", "afraid", "loneliness", "alone"))
+    ):
+        return "emotional"
+
     social = (
         "feminist", "feminism", "patriarchy", "pick me", "misogyn",
         "society", "ideology", "woke", "privilege", "oppression",
         "men are", "women are", "gender", "politics", "democrat",
-        "republican", "culture war",
+        "republican", "culture war", "cat lady", "loneliness epidemic",
+        "these men", "men refuse", "women don't", "women arent",
+        "women aren't", "single men", "singledom",
     )
     if any(t in text for t in social):
         return "social_power"
@@ -586,7 +608,7 @@ def select_interpretive_lens(domain: str, user_message: str = "") -> dict:
             "primary": "Quiet Presence",
             "supporting": "Narrative Weight",
             "voice": "Atmospheric Reflection",
-            "preferred_structure": "SNAP",
+            "preferred_structure": "REFLECTION",
             "mechanism_hint": "witness",
         },
         "general": {
@@ -613,6 +635,217 @@ def select_interpretive_lens(domain: str, user_message: str = "") -> dict:
 select_response_lens = select_interpretive_lens
 
 
+# Contemplative asks — deserve sitting-beside-you depth (REFLECTION).
+_EXPAND_TOPIC_RE = re.compile(
+    r"\b("
+    r"in (your|their|my) (20s|30s|40s|50s|60s|70s)|"
+    r"as (you|they|we) get older|get(ting)? older|growing older|aging|"
+    r"mortality|legacy|forgiveness|parenthood|parenting|"
+    r"purpose|meaning of (life|it)|who you are when|"
+    r"end of the chase|looking back|years down the road|"
+    r"invest (your )?youth|what (really )?matters|"
+    r"what changes (when|as|in)|don'?t realize will impact|"
+    r"people in their|something that people|"
+    r"grief|funeral|loss of|passed away|"
+    r"identity|midlife|who am i|"
+    r"failure(s)? (teach|taught|shape)|"
+    r"lasting love|love after|what love (becomes|means)"
+    r")\b",
+    re.I,
+)
+
+# Hot takes / politics / memes / food — compress; Gold knife, not midnight essay.
+_COMPRESS_TOPIC_RE = re.compile(
+    r"\b("
+    r"hot take|unpopular opinion|meme|ratio|timeline|"
+    r"cat lady|culture war|woke|feminist|feminism|patriarchy|"
+    r"misogyn|pick[- ]me|loneliness epidemic|singledom|"
+    r"best (burger|fries|pizza|phone|place)|overrated|underrated|"
+    r"easily the best|mcdonald"
+    r")\b",
+    re.I,
+)
+
+
+def normalize_structure(structure: str) -> str:
+    """SNAP | KNIFE | REFLECTION. STORY is a legacy alias for REFLECTION."""
+    s = (structure or "KNIFE").upper().strip()
+    if s == "STORY":
+        return "REFLECTION"
+    if s not in {"SNAP", "KNIFE", "REFLECTION"}:
+        return "KNIFE"
+    return s
+
+
+def classify_topic_mode(user_message: str, domain: str = "") -> str:
+    """expand | compress | neutral — which conversational gear to use."""
+    text = (user_message or "").strip()
+    domain = (domain or "").strip()
+
+    if domain == "grief" or is_grief_or_trauma(user_message):
+        return "expand"
+    if _EXPAND_TOPIC_RE.search(text):
+        return "expand"
+
+    if domain in {
+        "taste_preference",
+        "preference_claim",
+        "consumer_preference",
+        "social_power",
+        "business",
+    }:
+        return "compress"
+    if _COMPRESS_TOPIC_RE.search(text):
+        return "compress"
+
+    return "neutral"
+
+
+def classify_response_budget(
+    user_message: str,
+    domain: str = "",
+    topic_mode: str = "",
+) -> str:
+    """Depth dimension of Response Budget — not a word-count target.
+
+    Depth × Shape:
+      low    × SNAP
+      medium × KNIFE
+      high   × Extended KNIFE (compress/argument) or REFLECTION (expand/existential)
+
+    Topic mode matters more than length: a short aging question can be high;
+    a long political rant can be high KNIFE without becoming REFLECTION.
+    """
+    text = (user_message or "").strip()
+    if not text:
+        return "medium"
+    mode = (topic_mode or classify_topic_mode(user_message, domain)).lower()
+    wc = len(text.split())
+    sentences = len(re.findall(r"[.!?]+", text)) or (1 if wc else 0)
+    paras = len([p for p in text.splitlines() if p.strip()])
+    claim_cues = len(
+        re.findall(
+            r"\b(because|even though|that'?s why|the biggest|there'?s no|"
+            r"the sooner|not because|instead|however|although|"
+            r"women |men |people |it'?s a projection|the mistake|"
+            r"the moment you|assuming)\b",
+            text,
+            re.I,
+        )
+    )
+    longish = (
+        wc >= 160
+        or (wc >= 100 and sentences >= 5)
+        or (wc >= 100 and claim_cues >= 4)
+        or (paras >= 3 and wc >= 80)
+    )
+
+    # Contemplative / existential / grief — always high depth (REFLECTION shape)
+    if mode == "expand":
+        return "high"
+
+    if mode == "compress":
+        if domain == "taste_preference" and wc <= 55:
+            return "low"
+        if domain in {"preference_claim", "consumer_preference"} and wc <= 40:
+            return "low"
+        if wc <= 35 and sentences <= 2:
+            return "low"
+        if longish:
+            return "high"  # Extended KNIFE — develop, don't lyricize
+        return "medium"
+
+    # neutral — length heuristics
+    if longish:
+        return "high"
+    if wc <= 35 and sentences <= 2:
+        return "low"
+    return "medium"
+
+
+def apply_budget_to_structure(
+    preferred: str,
+    budget: str,
+    user_message: str = "",
+    domain: str = "",
+    topic_mode: str = "",
+) -> str:
+    """Map Depth × topic → Shape (SNAP / KNIFE / REFLECTION)."""
+    pref = normalize_structure(preferred)
+    budget = (budget or "medium").lower()
+    mode = (topic_mode or classify_topic_mode(user_message, domain)).lower()
+    text = user_message or ""
+
+    if budget == "low":
+        if domain in {"practical", "technical"}:
+            return "KNIFE" if pref == "REFLECTION" else pref
+        return "SNAP"
+
+    if budget == "medium":
+        return "KNIFE"
+
+    # high depth
+    if mode == "expand":
+        return "REFLECTION"
+    if re.search(
+        r"\b(tell me (the )?story|walk me through|what happened|"
+        r"sit (with|down)|talk (to me )?about life)\b",
+        text,
+        re.I,
+    ):
+        return "REFLECTION"
+    # Long ideology / multi-claim compress → Extended KNIFE, not midnight lyric
+    if pref == "SNAP":
+        return "KNIFE"
+    if pref == "REFLECTION" and mode == "compress":
+        return "KNIFE"
+    return "KNIFE" if mode == "compress" else pref if pref != "SNAP" else "KNIFE"
+
+
+def response_budget_guidance(budget: str, structure: str = "", topic_mode: str = "") -> str:
+    """Inject Depth × Shape guidance. Purpose first; length is a consequence."""
+    b = (budget or "medium").lower()
+    struct = normalize_structure(structure)
+    mode = (topic_mode or "").lower()
+    if b == "low" or struct == "SNAP":
+        return (
+            "\nRESPONSE BUDGET — Depth: low × Shape: SNAP.\n"
+            "PURPOSE: Surprise the reader.\n"
+            "Stop at the spear. Soft ~15–70 words (consequence, not the design).\n"
+            "PASS: \"That's like saying prison is just a room.\"\n"
+            "Do not pad. Do not lyricize.\n"
+        )
+    if struct == "REFLECTION":
+        return (
+            "\nRESPONSE BUDGET — Depth: high × Shape: REFLECTION.\n"
+            "PURPOSE: Leave the reader seeing their own life differently.\n"
+            "Contemplation, not narrative. Soft ~250–450 words may follow — length is a consequence.\n"
+            "Unique rule: EARN EVERY PARAGRAPH.\n"
+            "Beat shape: Observation → Deepening → Consequence → Acceptance.\n"
+            "Rotate the same diamond. Do not stack metaphors for beauty.\n"
+            "FAIL: Idea → metaphor → different metaphor → another metaphor → emotional callback.\n"
+            "FAIL: one punchy observation that ignores an existential ask.\n"
+            "PASS: time sneaks up… body whispers… purpose when the chase ends… "
+            "— same truth, turned slowly.\n"
+            "Gold still edits. Do not collapse to a tweet.\n"
+        )
+    if b == "high":
+        return (
+            "\nRESPONSE BUDGET — Depth: high × Shape: Extended KNIFE.\n"
+            "PURPOSE: Develop one mechanism until it feels inevitable.\n"
+            f"Topic mode: {mode or 'argument'}. Soft ~100–260 words (consequence).\n"
+            "Stop after the proof is complete — not after the first line.\n"
+            "Do NOT flip into lyrical REFLECTION on politics/hot-takes.\n"
+            "Compression removes redundancy. It must not remove necessary development.\n"
+        )
+    return (
+        "\nRESPONSE BUDGET — Depth: medium × Shape: KNIFE.\n"
+        "PURPOSE: Reframe the reader.\n"
+        "Stop after the proof. Soft ~50–140 words (consequence).\n"
+        "Reframe → proof → spear. Develop enough to land — do not force SNAP.\n"
+    )
+
+
 def domain_mechanism_guidance(
     domain: str,
     lens: str = "",
@@ -623,8 +856,8 @@ def domain_mechanism_guidance(
         "\nFOUR LAYERS (mandatory — keep independent):\n"
         "1) Identity / Interpretive lens — what world is Moody standing in?\n"
         "2) Intelligence / Capability — what mental tool? (broad buckets)\n"
-        "3) Writing — SNAP / KNIFE / STORY\n"
-        "4) Editing — Gold compression only (never picks the lens)\n"
+        "3) Writing — Depth × Shape (SNAP / KNIFE / REFLECTION)\n"
+        "4) Editing — Gold compression within budget (never picks the lens)\n"
         "Internally ask: whose eyes should Moody borrow? Code name: interpretive lens.\n"
         "Pattern Recognition / Power analysis is NOT the default for food or everyday preference.\n"
         "Gold never decides what Moody thinks. Gold only decides how he says it.\n"
@@ -791,6 +1024,10 @@ def build_response_plan(
 
     preferred_structure = lens_bundle.get("preferred_structure") or "KNIFE"
     mechanism_hint = lens_bundle.get("mechanism_hint") or "prompt_specific"
+    topic_mode = classify_topic_mode(user_message, domain)
+    response_budget = classify_response_budget(
+        user_message, domain, topic_mode=topic_mode
+    )
     # lens assigned below; question + lock applied at return
 
     if missing:
@@ -802,6 +1039,8 @@ def build_response_plan(
         voice = None
         preferred_structure = "SNAP"
         mechanism_hint = "clarification"
+        topic_mode = "compress"
+        response_budget = "low"
     elif practical or domain == "practical":
         intent = "action"
         confidence = "medium"
@@ -816,8 +1055,11 @@ def build_response_plan(
         supporting = "Narrative Weight"
         lens = "Quiet Presence"
         voice = "Atmospheric Reflection"
-        preferred_structure = "SNAP"
+        # Grief expands — REFLECTION depth, not a SNAP tweet
+        preferred_structure = "REFLECTION"
         mechanism_hint = "witness"
+        topic_mode = "expand"
+        response_budget = "high"
     elif technical or domain == "technical":
         intent = "technical"
         confidence = "medium"
@@ -859,6 +1101,13 @@ def build_response_plan(
 
     subject = extract_original_subject(user_message)
     anchors = extract_conversation_anchors(user_message)
+    preferred_structure = apply_budget_to_structure(
+        preferred_structure,
+        response_budget,
+        user_message=user_message,
+        domain=domain,
+        topic_mode=topic_mode,
+    )
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
         "body_ends_response": "none",
@@ -887,6 +1136,8 @@ def build_response_plan(
         lens_question=lens_internal_question(lens),
         preferred_structure=preferred_structure,
         mechanism_hint=mechanism_hint,
+        response_budget=response_budget,
+        topic_mode=topic_mode,
         lens_locked=True,  # only routing may set/change lens
         closing_strategy=legacy_map.get(landing, "none"),
         landing=landing,
@@ -908,19 +1159,22 @@ Layers (mandatory — keep independent):
 1) Identity — interpretive lens (perspective selection). Internally: whose eyes?
 2) Question — one invisible ask that opens many capabilities under that lens
 3) Intelligence — capability / mental tool (NOT an alias for the lens)
-4) Writing — SNAP / KNIFE / STORY
-5) Editing — Gold compression only
+4) Writing — Depth × Shape (SNAP / KNIFE / REFLECTION)
+5) Editing — Editor (Gold) compression within the allocated budget
 
 Pipeline:
-claim type → interpretive lens → question → capability → mechanism fit → structure → generate → Gold → 🥃
+claim type → interpretive lens → question → capability → mechanism fit → response budget (depth × shape) → generate → Editor → 🥃
 
 LENS PERSISTENCE (invariant): once routing selects the lens, generation cannot change it,
-Gold cannot change it, editorial cannot change it. Only routing can.
+the Editor cannot change it, editorial cannot change it. Only routing can.
 If output sounds like another lens, debug routing/generation — never re-lens in the editor.
 
-Gold never decides what Moody thinks. Gold only decides how he says it.
-Protect that boundary — Gold must not become a co-author or pick the lens.
-Do NOT jump straight to Power / Incentive Analysis for every prompt.
+The Editor never decides what Moody thinks. It only removes what doesn't deserve to survive.
+Protect that boundary — the Editor must not become a co-author or pick the lens.
+Editor optimizes density, not brevity. Do not infer "always ~60 words" from the Gold corpus.
+Moody has two authentic modes: the knife ("prison is just a room") and midnight reflection
+("Time sneaks up on you…"). Route explicitly — do not lose either.
+Reader never sees the machinery. Do NOT jump straight to Power / Incentive Analysis for every prompt.
 
 INTERPRETIVE LENS = way of seeing (what you notice first) — not a style theme.
 Never name the lens in the reply. One internal question each:
@@ -929,7 +1183,8 @@ Munger → What's the incentive?
 CIA → What do we actually know?
 Hank Moody → What's the human truth nobody wants to admit?
 Pattern Recognition → What pattern repeats here?
-Emotional Intelligence → What feeling or boundary is driving this?
+Emotional Intelligence → What feeling or boundary is driving this without a sweeping group claim?
+EI begins with people, not groups. Prefer transferable human pattern over demographic scorekeeping.
 The question can produce many capabilities (Sensory Realism, opportunity cost, missing info…).
 Capability ≠ lens.
 
@@ -967,20 +1222,55 @@ Every substantive sentence must add NEW understanding.
 If a sentence merely restates the user's thesis — delete it.
 Do NOT create a hard "never agree" rule. If they are right, still do not spend words telling them what they already know.
 
-GOLD STRUCTURES (pick one; do not force KNIFE onto everything):
-- SNAP: 1–2 sentence punch. Stop.
-- KNIFE: reframe → one proof → spear → stop. Soft tendency ~50–110 words, usually one paragraph.
-- STORY: observation → concrete example → implication → stop. May be longer when narrative earns it.
+RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
+
+Depth: low | medium | high
+Shape: SNAP | KNIFE | REFLECTION
+(STORY is a legacy name for REFLECTION — contemplation, not narrative.)
+
+Structure purpose (emotional outcome — design; length is a consequence):
+| Shape | Purpose | Stop rule |
+|---|---|---|
+| SNAP | Surprise the reader. | Stop at the spear. |
+| KNIFE | Reframe the reader. | Stop after the proof. |
+| Extended KNIFE | Develop one mechanism until it feels inevitable. | Stop when the mechanism is inevitable. |
+| REFLECTION | Leave the reader seeing their own life differently. | Earn every paragraph. |
+
+| Depth | Shape | Soft range (consequence) | When |
+|---|---|---|---|
+| low | SNAP | ~15–70 | hot takes, food, memes, obvious claims |
+| medium | KNIFE | ~50–140 | opinions, short relationship posts |
+| high | Extended KNIFE | ~100–260 | long political/ideological arguments |
+| high | REFLECTION | ~250–450 | existential, aging, grief, purpose, love, legacy, identity, failure, forgiveness, parenthood |
+
+EXPAND topics (high × REFLECTION even if the prompt is short):
+existential, grief, mortality, purpose, identity, parenthood, love, aging, failure, forgiveness, legacy.
+
+COMPRESS topics (SNAP or KNIFE — never midnight lyric by default):
+hot takes, politics, social media posts, opinions, food, memes, obvious claims.
+
+The Editor still cuts all three shapes. It just edits different budgets.
+Old failure: every paragraph deserves another metaphor.
+New failure: every prompt deserves one observation.
+Neither is right. Don't ramble ≠ be short.
+Law: every sentence must survive — if removing it changes nothing, it dies.
+
+REFLECTION unique rule — EARN EVERY PARAGRAPH:
+Observation → Deepening → Consequence → Acceptance.
+Rotate the same diamond. Not Idea → metaphor → different metaphor → callback.
+350 words is fine if every paragraph introduces another layer — not another flourish.
 
 ONE MECHANISM:
-one thesis → one mechanism → one proof.
+one thesis → one mechanism → prove it (with enough development for the depth).
 ONE RESPONSE. ONE THESIS.
 If two sentences explain the same causal mechanism in different language, keep the stronger one.
 Do not stack near-synonyms (punishment / resentment economy / defection / universal claim / ideology / protecting the story).
+Development of one mechanism through a rich or existential prompt is not multi-mechanism essay.
 
 SPEAR:
-Every short reply has one memorable line that carries the answer.
-Once the spear lands — stop. No second explanation, metaphor, summary, moral, CTA, invitation, "the real lesson is…", or "and that's why…".
+Every reply has one memorable line that carries the answer.
+Once the spear lands — stop padding. No second mechanism, summary, moral, CTA, invitation, "the real lesson is…", or "and that's why…".
+On REFLECTION / high-depth, the spear may close a developed piece — do not delete the development to keep only the spear.
 Then end with 🥃 alone (no catchphrase before it).
 
 CASH OUT THE LAST LINE (Abstract → Spoken translation):
@@ -1022,7 +1312,8 @@ Example (rule-shopping):
 FAIL closer: "...wherever incentives reward inconsistency over fixed boundaries."
 PASS: "The pattern is rule-shopping. People reach for the standard that delivers the benefit and drop the one that demands the cost. 🥃"
 
-METAPHOR: at most one meaningful image in a short answer. One memorable image beats three clever ones.
+METAPHOR: at most one meaningful image per beat. REFLECTION must not stack metaphors for beauty.
+One memorable image beats three clever ones. "Every paragraph deserves another metaphor" is a FAIL.
 
 Generation order:
 1) Intent / evidence / deep pattern work (internal)
@@ -1045,7 +1336,9 @@ The sole standard brand tail is 🥃 at the very end after the final sentence.
 BAD: "Stay dangerous. 🥃" / "That's the game. Stay sharp. 🥃"
 GOOD: "The deal was control, not peace. 🥃"
 
-Product test: "someone saw the thing underneath, named it once, and shut up" — not "an articulate explanation."
+Product test (SNAP/KNIFE): "someone saw the thing underneath, named it once, and shut up."
+Product test (Extended KNIFE): developed cleanly through the argument — not a lecture, not a one-liner.
+Product test (REFLECTION): "someone who's lived it sat down and told them" — not a tweet, not metaphor perfume.
 
 If practical action was requested, include a concrete next step before 🥃.
 """
@@ -1059,7 +1352,9 @@ LENS_INTERNAL_QUESTIONS = {
     "CIA": "What do we actually know?",
     "Hank Moody": "What's the human truth nobody wants to admit?",
     "Pattern Recognition": "What pattern repeats here?",
-    "Emotional Intelligence": "What feeling or boundary is driving this?",
+    "Emotional Intelligence": (
+        "What feeling or boundary is driving this without a sweeping group claim?"
+    ),
     "Quiet Presence": "What weight needs witnessing, not solving?",
     "Field Operator": "What's the next concrete move?",
     "Builder": "What's broken and how do we fix it?",
@@ -1208,6 +1503,7 @@ def lens_voice_guidance(lens: str) -> str:
             f"{q_line}"
             f"{family_line}"
             "Notices first: recurring social structures — only when actually present.\n"
+            "Prefer the transferable human pattern over winning a demographic argument.\n"
             "Common failure: finding the same mechanism every time; forcing ideology onto "
             "unrelated prompts (food, travel, ordinary preference).\n"
             "If no social pattern is evidenced, this lens should not have been selected.\n"
@@ -1219,11 +1515,17 @@ def lens_voice_guidance(lens: str) -> str:
             f"{q_line}"
             f"{family_line}"
             "Notices first: feeling, boundary, motivation — the hidden emotional dynamic.\n"
-            "Not dating advice. Not therapy. Not validation. Not self-help.\n"
-            "Common failure: therapy-speak / validating everything / Hank cynicism costume.\n"
-            "FAIL: \"It sounds like you're feeling a lot of feelings and that's valid…\"\n"
-            "PASS: \"The right person doesn't make you guess. They show up without a strategy. "
-            "Everything else is your history trying to sell you a harder story.\"\n"
+            "Begin with people, not groups. Prefer the transferable human pattern over "
+            "a sweeping claim about men/women/generations as blocs.\n"
+            "Guardrail: can I explain the mechanism without a demographic universal?\n"
+            "Not dating advice. Not therapy. Not validation. Not self-help. Not sociology cosplay.\n"
+            "Common failure: therapy-speak; OR staking the answer on 'women do X / men do Y' "
+            "when the durable mechanism is projection, fear, or history.\n"
+            "FAIL (group claim): \"Women built lives with friends… Men built theirs around the woman…\"\n"
+            "FAIL (therapy): \"It sounds like you're feeling a lot of feelings and that's valid…\"\n"
+            "PASS: \"Everything else is your history trying to sell you a harder story.\"\n"
+            "PASS: \"People only use threats they believe would work on themselves.\"\n"
+            "PASS: \"People usually threaten others with the loss they'd fear most themselves.\"\n"
             "Relocate the premise. One emotional mechanism. Stop.\n"
         )
     if name == "Quiet Presence":
@@ -1249,7 +1551,10 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
     elif plan.intent == "technical":
         extra = "\nTechnical mode: cause → fix. KNIFE or SNAP. No poetry unless it helps."
     elif plan.intent == "witness":
-        extra = "\nWitness mode: stay with the weight. No forced closer. Still end with 🥃."
+        extra = (
+            "\nWitness mode: stay with the weight. REFLECTION depth is allowed — "
+            "do not tweet-compress grief. No forced closer. Still end with 🥃."
+        )
     domain = getattr(plan, "claim_domain", None) or classify_claim_domain("")
     lens = getattr(plan, "lens", None) or select_interpretive_lens(domain).get("lens", "")
     cap = getattr(plan, "primary_capability", None) or "Everyday Preference Analysis"
@@ -1257,11 +1562,14 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
     lens_voice = lens_voice_guidance(lens)
     q = getattr(plan, "lens_question", None) or lens_internal_question(lens)
     voice = getattr(plan, "voice", None) or ""
-    structure = getattr(plan, "preferred_structure", None) or ""
+    structure = normalize_structure(getattr(plan, "preferred_structure", None) or "")
     mech = getattr(plan, "mechanism_hint", None) or ""
+    budget = getattr(plan, "response_budget", None) or "medium"
+    topic_mode = getattr(plan, "topic_mode", None) or "neutral"
     voice_bit = f" Voice: {voice}." if voice else ""
-    struct_bit = f" Preferred structure: {structure}." if structure else ""
+    struct_bit = f" Shape: {structure}."
     mech_bit = f" Mechanism family (internal): {mech}." if mech else ""
+    budget_bit = f" Depth: {budget}. Topic mode: {topic_mode}."
     q_bit = f'\nQuestion (invisible step — ask before capability): "{q}"\n' if q else "\n"
     family = lens_capability_family(lens)
     family_bit = (
@@ -1275,12 +1583,15 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         CORE_WRITE_DIRECTIVE
         + f"\n{LENS_PERSISTENCE_INVARIANT}\n"
         + f"Interpretive lens (Identity, locked): {lens}. Capability (Intelligence): {cap}."
-        + f"{voice_bit}{struct_bit}{mech_bit} Claim type: {domain}."
+        + f"{voice_bit}{struct_bit}{mech_bit}{budget_bit} Claim type: {domain}."
         + q_bit
         + family_bit
-        + "Pipeline: claim type → lens → question → capability → mechanism → structure → Gold.\n"
+        + "Pipeline: claim type → lens → question → capability → mechanism → "
+        "Depth × Shape → Gold.\n"
         + "Lens = way of seeing (what you notice first), not a style theme. "
-        "Capability ≠ lens. Gold only compresses. Never name the lens in prose.\n"
+        "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
+        "Never name the lens in prose.\n"
+        + response_budget_guidance(budget, structure, topic_mode=topic_mode)
         + lens_voice
         + domain_block
         + extra
@@ -1615,10 +1926,12 @@ def finalize_response(
 
     # 4b) Gold-shape quality pass — at most one structural compression
     # Gold compresses delivery only — never selects or changes interpretive lens.
+    # Compress within response_budget; do not collapse high-budget answers to SNAP.
     text, gold_report = apply_gold_shape_pass(
         user_message,
         text,
         preferred_structure=getattr(plan, "preferred_structure", None) or None,
+        response_budget=getattr(plan, "response_budget", None) or "medium",
     )
     if plan.lens != locked_lens:
         logger.error(
@@ -1703,6 +2016,8 @@ def finalize_response(
         "lens_locked": str(bool(plan.lens_locked)).lower(),
         "lens_persistence": "routing_only",
         "preferred_structure": plan.preferred_structure or "",
+        "response_budget": plan.response_budget or "",
+        "topic_mode": plan.topic_mode or "",
         "mechanism_hint": plan.mechanism_hint or "",
         "intervention": plan.intervention or "",
         "voice": plan.voice or "",

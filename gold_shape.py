@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Gold-shape delivery: cut → name → prove once → stop → 🥃
+"""Editor (Gold) delivery: cut → name → prove once → stop → 🥃
 
+Responsibility: Editor / Final Cut. Origin: Gold corpus rules.
 Controls SURFACE delivery. Does not replace deep reasoning upstream.
-Max one structural compression pass. Not creative authorship.
+Max one structural compression pass. Never thinks, never re-lenses, never invents.
 """
 
 from __future__ import annotations
@@ -91,6 +92,44 @@ class GoldShapeReport:
     whiskey_tail_present: bool = False
     spear_line: str = ""
     mechanism_mismatch: bool = False
+    response_budget: str = "medium"
+
+
+def _normalize_structure_name(structure: str) -> str:
+    s = (structure or "KNIFE").upper()
+    if s == "STORY":
+        return "REFLECTION"
+    if s not in {"SNAP", "KNIFE", "REFLECTION"}:
+        return "KNIFE"
+    return s
+
+
+def _budget_soft_caps(budget: str) -> dict:
+    """Soft length caps by depth. Density within room — not universal brevity."""
+    b = (budget or "medium").lower()
+    if b == "high":
+        return {
+            "SNAP": 90,
+            "KNIFE": 260,
+            "REFLECTION": 480,
+            "knife_sentences": 10,
+            "reflection_sentences": 18,
+        }
+    if b == "low":
+        return {
+            "SNAP": 70,
+            "KNIFE": 110,
+            "REFLECTION": 200,
+            "knife_sentences": 5,
+            "reflection_sentences": 8,
+        }
+    return {
+        "SNAP": 70,
+        "KNIFE": 140,
+        "REFLECTION": 320,
+        "knife_sentences": 7,
+        "reflection_sentences": 12,
+    }
 
 
 SOCIAL_PROMPT_MARKERS = re.compile(
@@ -184,32 +223,37 @@ def select_structure(
     draft: str,
     preferred: Optional[str] = None,
 ) -> str:
-    """SNAP / KNIFE / STORY — soft selection from length + narrative cues.
+    """SNAP / KNIFE / REFLECTION — soft selection from length + contemplative cues.
 
     preferred comes from the Writing layer (plan.preferred_structure) — a hint,
     not a hard force. Short taste/SNAP-biased drafts stay SNAP.
+    STORY is accepted as a legacy alias for REFLECTION.
     """
     wc = len(words(draft))
     ss = sentences(draft)
     paras = [p for p in (draft or "").split("\n") if p.strip()]
-    preferred = (preferred or "").upper() or None
-    narrative = bool(
+    preferred = _normalize_structure_name(preferred) if preferred else None
+    contemplative = bool(
         re.search(
             r"\b(for (example|instance)|the time|last (week|night|year)|"
-            r"she |he |they |when I |seasons?|years?|daenerys|proof)\b",
+            r"she |he |they |when I |seasons?|years?|daenerys|proof|"
+            r"sneaks up|whisper|years down|chase ends)\b",
             draft,
             re.I,
         )
     )
-    wants_story = bool(
+    wants_reflection = bool(
         re.search(
-            r"\b(tell me (the )?story|walk me through|what happened)\b",
+            r"\b(tell me (the )?story|walk me through|what happened|"
+            r"get older|in (your|their) \d|purpose|legacy|mortality)\b",
             user_message,
             re.I,
         )
     )
-    if wants_story or len(paras) >= 3 or (narrative and (wc >= 70 or len(ss) >= 4)):
-        return "STORY"
+    if preferred == "REFLECTION":
+        return "REFLECTION"
+    if wants_reflection or len(paras) >= 3 or (contemplative and (wc >= 120 or len(ss) >= 5)):
+        return "REFLECTION"
     if preferred == "SNAP" and wc <= 70 and len(ss) <= 3:
         return "SNAP"
     if wc <= 45 and len(ss) <= 2:
@@ -287,12 +331,25 @@ def count_like_metaphors(text: str) -> int:
     return len(LIKE_A.findall(text))
 
 
-def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[str]:
-    """Return list of quality failure codes."""
+def evaluate_gold_shape(
+    user_message: str,
+    draft: str,
+    structure: str,
+    response_budget: str = "medium",
+) -> List[str]:
+    """Return list of quality failure codes.
+
+    Length soft-caps scale with response_budget. High-budget development
+    is not treated as overlong merely for exceeding Telegram-hot-take norms.
+    """
     failures: List[str] = []
     body = strip_whiskey(draft)
     ss = sentences(body)
     wc = len(words(body))
+    structure = _normalize_structure_name(structure)
+    caps = _budget_soft_caps(response_budget)
+    high = (response_budget or "").lower() == "high"
+    reflection = structure == "REFLECTION"
 
     if not ss:
         failures.append("empty")
@@ -312,7 +369,9 @@ def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[s
     essay_hits = len(ESSAY_NOUNS.findall(body))
     if essay_hits >= 3:
         failures.append("essay_diction")
-    if essay_hits >= 2 and structure in {"SNAP", "KNIFE"}:
+    # High / REFLECTION may develop with more abstract nouns; require 3+
+    essay_threshold = 3 if high or reflection else 2
+    if essay_hits >= essay_threshold and structure in {"SNAP", "KNIFE"}:
         failures.append("multi_mechanism_essay")
 
     # Near-duplicate consecutive sentences
@@ -328,9 +387,9 @@ def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[s
         failures.append("no_spear")
     elif spear_i >= 0 and spear_i < len(ss) - 1:
         after = ss[spear_i + 1 :]
-        # Early thesis + following proofs is normal KNIFE/STORY — not drift.
+        # Early thesis + following proofs is normal KNIFE/REFLECTION — not drift.
         # Drift = trailing lines that mostly restate the spear without new content.
-        if structure == "STORY":
+        if reflection or high:
             trailing = after[-2:] if len(after) > 3 else []
             if trailing and all(_overlap_ratio(a, spear) >= 0.55 for a in trailing):
                 failures.append("post_payoff_drift")
@@ -343,7 +402,9 @@ def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[s
             if rest >= 2:
                 failures.append("post_payoff_drift")
 
-    if count_like_metaphors(body) >= 2:
+    # REFLECTION: still kill metaphor perfume (old Moody failure mode)
+    metaphor_limit = 3 if reflection or high else 2
+    if count_like_metaphors(body) >= metaphor_limit:
         failures.append("stacked_metaphor")
 
     if CTA_TAIL.search(body) or COSTUME_CLOSER.search(body):
@@ -357,19 +418,34 @@ def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[s
     if detect_mechanism_mismatch(user_message, body):
         failures.append("mechanism_mismatch")
 
-    # Soft length by structure (not rigid)
-    if structure == "SNAP" and wc > 70:
+    # Soft length by shape × depth (not rigid; not "always ~60 words")
+    if structure == "SNAP" and wc > caps["SNAP"]:
         failures.append("snap_overlong")
-    if structure == "KNIFE" and wc > 140:
+    if structure == "KNIFE" and wc > caps["KNIFE"]:
         failures.append("knife_overlong")
-    if structure == "KNIFE" and len(ss) > 7:
+    if structure == "KNIFE" and len(ss) > caps["knife_sentences"]:
         failures.append("knife_too_many_sentences")
+    if structure == "REFLECTION" and wc > caps["REFLECTION"]:
+        failures.append("reflection_overlong")
+    if structure == "REFLECTION" and len(ss) > caps["reflection_sentences"]:
+        failures.append("reflection_too_many_sentences")
 
     return failures
 
 
-def _compress_once(user_message: str, draft: str, structure: str, failures: List[str]) -> str:
-    """One structural compression rewrite. Keeps meaning; deletes drift."""
+def _compress_once(
+    user_message: str,
+    draft: str,
+    structure: str,
+    failures: List[str],
+    response_budget: str = "medium",
+) -> str:
+    """One structural compression rewrite. Keeps meaning; deletes drift.
+
+    Compress within the allocated response_budget. Do not gut high-budget
+    development — especially REFLECTION — down to a SNAP one-liner.
+    """
+    structure = _normalize_structure_name(structure)
     body = strip_whiskey(draft)
     ss = sentences(body)
     if not ss:
@@ -435,13 +511,18 @@ def _compress_once(user_message: str, draft: str, structure: str, failures: List
         if filtered:
             ss = filtered
 
-    # Post-payoff: only trim clear restatement tails — never gut STORY proofs
+    structure = _normalize_structure_name(structure)
+    # Post-payoff: only trim clear restatement tails — never gut REFLECTION / high-depth proofs
     spear_ok, spear, spear_i = detect_spear(ss)
+    high = (response_budget or "").lower() == "high"
+    reflection = structure == "REFLECTION"
     if (
         spear_ok
         and spear_i >= 0
         and "post_payoff_drift" in failures
         and structure in {"SNAP", "KNIFE"}
+        and not high
+        and not reflection
     ):
         # Keep through spear; drop only trailing restaty lines after last proof
         trimmed = ss[: spear_i + 1]
@@ -453,24 +534,50 @@ def _compress_once(user_message: str, draft: str, structure: str, failures: List
         if trimmed:
             ss = trimmed
 
-    # Soft KNIFE/SNAP cap only when overlong failure present
-    soft_cap = {"SNAP": 55, "KNIFE": 120, "STORY": 260}.get(structure, 120)
+    # Soft caps only when overlong failure present — scaled by depth; never tweet-gut REFLECTION
+    caps = _budget_soft_caps(response_budget)
+    soft_cap = {
+        "SNAP": max(40, caps["SNAP"] - 15),
+        "KNIFE": max(80, caps["KNIFE"] - 20),
+        "REFLECTION": caps["REFLECTION"],
+    }.get(structure, caps["KNIFE"])
     wc = len(words(" ".join(ss)))
+    min_sentences_before_gut = 12 if reflection else (7 if high else 4)
+    overlong_flags = (
+        "knife_overlong",
+        "snap_overlong",
+        "reflection_overlong",
+        "thesis_repetition",
+    )
     if (
-        structure in {"SNAP", "KNIFE"}
+        structure in {"SNAP", "KNIFE", "REFLECTION"}
         and wc > soft_cap
-        and len(ss) > 4
-        and any(f in failures for f in ("knife_overlong", "snap_overlong", "thesis_repetition"))
+        and len(ss) > min_sentences_before_gut
+        and any(f in failures for f in overlong_flags)
     ):
         spear_ok, spear, spear_i = detect_spear(ss)
-        keep_idx = {0}
-        if spear_i >= 0:
-            keep_idx.add(spear_i)
-        if len(ss) > 1:
-            keep_idx.add(min(1, len(ss) - 1))
-        if spear_i >= 2:
-            keep_idx.add(spear_i - 1)
-        ss = [s for i, s in enumerate(ss) if i in keep_idx]
+        if reflection or high:
+            keep_idx = {0, 1, 2, 3}
+            if spear_i >= 0:
+                keep_idx.add(spear_i)
+                if spear_i > 0:
+                    keep_idx.add(spear_i - 1)
+                if spear_i + 1 < len(ss):
+                    keep_idx.add(spear_i + 1)
+            # Keep early contemplative beats for REFLECTION
+            if reflection:
+                for i in range(min(6, len(ss))):
+                    keep_idx.add(i)
+            ss = [s for i, s in enumerate(ss) if i in keep_idx]
+        else:
+            keep_idx = {0}
+            if spear_i >= 0:
+                keep_idx.add(spear_i)
+            if len(ss) > 1:
+                keep_idx.add(min(1, len(ss) - 1))
+            if spear_i >= 2:
+                keep_idx.add(spear_i - 1)
+            ss = [s for i, s in enumerate(ss) if i in keep_idx]
 
     # Essay diction: light signal only — no growing replacement dictionary.
     # Generation owns Abstract→Spoken translation; pass deletes conference closers.
@@ -500,24 +607,37 @@ def apply_gold_shape_pass(
     *,
     structure: Optional[str] = None,
     preferred_structure: Optional[str] = None,
+    response_budget: Optional[str] = None,
 ) -> Tuple[str, GoldShapeReport]:
     """
     draft → evaluate → at most one compression → ensure whiskey later in surface.
     Returns body WITHOUT requiring whiskey (surface_render adds it).
     Editing layer only — never invents a lens or mechanism.
     Lens persistence: must not select or change the interpretive lens.
+    Compresses within response_budget — density, not universal brevity.
     """
-    structure = structure or select_structure(
-        user_message, draft, preferred=preferred_structure
+    budget = (response_budget or "medium").lower()
+    preferred_norm = (
+        _normalize_structure_name(preferred_structure) if preferred_structure else None
     )
+    structure = _normalize_structure_name(
+        structure
+        or select_structure(user_message, draft, preferred=preferred_structure)
+    )
+    # Honor routed shape; do not tweet-collapse high-depth or REFLECTION drafts
+    if preferred_norm == "REFLECTION":
+        structure = "REFLECTION"
+    elif budget == "high" and structure == "SNAP" and preferred_norm != "SNAP":
+        structure = preferred_norm if preferred_norm in {"KNIFE", "REFLECTION"} else "KNIFE"
     body = strip_whiskey(draft)
     report = GoldShapeReport(
         selected_structure=structure,
         draft_word_count=len(words(body)),
         premise_relocated=premise_relocated(user_message, body),
+        response_budget=budget,
     )
 
-    failures = evaluate_gold_shape(user_message, body, structure)
+    failures = evaluate_gold_shape(user_message, body, structure, response_budget=budget)
     report.quality_failures = list(failures)
     report.mechanism_mismatch = "mechanism_mismatch" in failures
 
@@ -533,16 +653,22 @@ def apply_gold_shape_pass(
         "knife_overlong",
         "snap_overlong",
         "knife_too_many_sentences",
+        "reflection_overlong",
+        "reflection_too_many_sentences",
         "essay_diction",
         "abstract_closer",
     }
     if any(f in rewrite_triggers for f in failures):
-        compressed = _compress_once(user_message, body, structure, failures)
+        compressed = _compress_once(
+            user_message, body, structure, failures, response_budget=budget
+        )
         if strip_whiskey(compressed) and _token_set(compressed):
             report.quality_rewrite_triggered = True
             body = strip_whiskey(compressed)
             # re-evaluate lightly (no second rewrite)
-            report.quality_failures = evaluate_gold_shape(user_message, body, structure)
+            report.quality_failures = evaluate_gold_shape(
+                user_message, body, structure, response_budget=budget
+            )
             report.mechanism_mismatch = "mechanism_mismatch" in report.quality_failures
 
     spear_ok, spear, _ = detect_spear(sentences(body))
@@ -570,4 +696,5 @@ def gold_shape_diagnostics(report: GoldShapeReport) -> dict:
         "spear_line": (report.spear_line or "")[:240],
         "whiskey_tail_present": str(report.whiskey_tail_present).lower(),
         "mechanism_mismatch": str(report.mechanism_mismatch).lower(),
+        "response_budget": report.response_budget or "medium",
     }

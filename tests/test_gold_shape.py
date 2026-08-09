@@ -42,7 +42,10 @@ def test_core_write_has_gold_geometry():
     assert "everyday preference" in lower
     assert "bourdain" in lower
     assert "prison is just a room" in lower
-    assert "gold never" in lower
+    assert "editor never" in lower or "gold never" in lower
+    assert "response budget" in lower
+    assert "density" in lower and "brevity" in lower
+    assert "reflection" in lower
 
 
 def test_mcdonalds_routes_to_bourdain_not_pattern_recognition():
