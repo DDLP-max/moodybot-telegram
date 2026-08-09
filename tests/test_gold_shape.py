@@ -100,6 +100,44 @@ def test_stacked_metaphor_flagged():
     assert "stacked_metaphor" in failures
 
 
+def test_rule_shopping_cashes_out_abstract_closer():
+    """Editorial cash-out: drop conference-talk closer when spoken proof already landed."""
+    user = (
+        "Feminists want the authority of a man. The privileges of a woman. "
+        "And the responsibility of a child."
+    )
+    draft = (
+        "The pattern is rule-shopping. Any group grabs the standard that delivers "
+        "advantage and drops the one that imposes cost. The same move appears wherever "
+        "incentives reward inconsistency over fixed boundaries."
+    )
+    failures = evaluate_gold_shape(user, draft, "KNIFE")
+    assert "abstract_closer" in failures
+    out, report = apply_gold_shape_pass(user, draft)
+    assert report.quality_rewrite_triggered is True
+    lower = out.lower()
+    assert "incentives reward inconsistency" not in lower
+    assert "rule-shopping" in lower
+    assert "standard" in lower and "cost" in lower
+    result = finalize_response(draft, user)
+    assert result.text.rstrip().endswith("🥃")
+    assert "incentives reward inconsistency" not in result.text.lower()
+
+
+def test_precise_mechanism_name_is_not_stripped():
+    """Abstraction that IS the shortest accurate name must survive cash-out."""
+    user = "Why do people excuse bad behavior after doing one good thing?"
+    draft = (
+        "That's moral licensing. One clean act gets treated like a voucher "
+        "for the next ugly one."
+    )
+    failures = evaluate_gold_shape(user, draft, "KNIFE")
+    assert "abstract_closer" not in failures
+    out, report = apply_gold_shape_pass(user, draft)
+    assert "moral licensing" in out.lower()
+    assert report.quality_rewrite_triggered is False or "moral licensing" in out.lower()
+
+
 def test_structure_selection_snap():
     assert select_structure("hi", "You already know the answer.") == "SNAP"
 
@@ -121,6 +159,8 @@ if __name__ == "__main__":
     test_pick_me_amplification_compresses()
     test_clean_knife_ships_with_whiskey_minimal_touch()
     test_stacked_metaphor_flagged()
+    test_rule_shopping_cashes_out_abstract_closer()
+    test_precise_mechanism_name_is_not_stripped()
     test_structure_selection_snap()
     test_gold_corpus_examples_end_clean_when_finalized()
     print("All gold-shape tests passed.")

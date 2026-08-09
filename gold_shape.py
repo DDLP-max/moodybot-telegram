@@ -19,13 +19,20 @@ SENT_SPLIT = re.compile(r"(?<=[.!?…])\s+(?=[A-Z\"'“‘0-9*]|$)")
 WORD_RE = re.compile(r"[A-Za-z']+")
 LIKE_A = re.compile(r"\blike a\b|\bas if\b|\bas though\b", re.I)
 
-ESSAY_NOUNS = re.compile(
+# Abstract/conference-talk signals for last-line cash-out detection only.
+# Not a replacement dictionary — quality pass drops or leaves; generation translates.
+CONFERENCE_SIGNALS = re.compile(
     r"\b(ideology|universal claim|defection|dialectic|paradigm|"
-    r"systemic mechanism|resentment economy|grievance economy|"
-    r"collective grievance|epistemic|incentive structure|"
-    r"narrative contract|framework|meta-analysis)\b",
+    r"systemic(?:\s+mechanism)?|resentment economy|grievance economy|"
+    r"collective grievance|epistemic|incentive structure|incentives?|"
+    r"narrative contract|framework|meta-analysis|inconsistency|"
+    r"fixed boundaries|asymmetric incentives|social validation|"
+    r"status signalling|status signaling|resource extraction|"
+    r"boundary violation|wherever .+ reward)\b",
     re.I,
 )
+
+ESSAY_NOUNS = CONFERENCE_SIGNALS  # shared detector; no hardcoded spoken swaps
 
 CTA_TAIL = re.compile(
     r"(want me to|let me know if|say the word|tag @|mention @|"
@@ -87,6 +94,46 @@ def ensure_whiskey(text: str) -> str:
     if not body:
         return WHISKEY
     return f"{body} {WHISKEY}"
+
+
+def _is_conference_talk_sentence(sentence: str) -> bool:
+    """True if a sentence sounds more like a white paper than a conversation.
+
+    Short precise mechanism names (e.g. "Moral licensing.") are NOT conference talk —
+    they are often the spear. Cash out packaging, not the cleanest name.
+    """
+    s = (sentence or "").strip()
+    if not s:
+        return False
+    w = words(s)
+    # Shortest accurate name for the mechanism — keep
+    if len(w) <= 4 and not re.search(
+        r"\b(wherever|insofar|whereby|incentives?|inconsistency|framework)\b",
+        s,
+        re.I,
+    ):
+        return False
+    hits = len(CONFERENCE_SIGNALS.findall(s))
+    if hits >= 2:
+        return True
+    if hits >= 1 and re.search(
+        r"\b(wherever|insofar|whereby|hence|thus|respectively)\b",
+        s,
+        re.I,
+    ):
+        return True
+    if len(w) >= 10:
+        concrete = len(
+            re.findall(
+                r"\b(people|person|man|woman|cost|benefit|standard|rule|"
+                r"pay|drop|grab|ignore|line|drink|door|story)\b",
+                s,
+                re.I,
+            )
+        )
+        if hits >= 1 and concrete == 0:
+            return True
+    return False
 
 
 def select_structure(user_message: str, draft: str) -> str:
@@ -239,6 +286,10 @@ def evaluate_gold_shape(user_message: str, draft: str, structure: str) -> List[s
     if CTA_TAIL.search(body) or COSTUME_CLOSER.search(body):
         failures.append("cta_or_costume_tail")
 
+    # Abstract closer: last sentence is conference-talk (cash-out failure)
+    if _is_conference_talk_sentence(ss[-1]):
+        failures.append("abstract_closer")
+
     # Soft length by structure (not rigid)
     if structure == "SNAP" and wc > 70:
         failures.append("snap_overlong")
@@ -354,24 +405,24 @@ def _compress_once(user_message: str, draft: str, structure: str, failures: List
             keep_idx.add(spear_i - 1)
         ss = [s for i, s in enumerate(ss) if i in keep_idx]
 
-    # Essay diction light substitutions only when essay failure present
+    # Essay diction: light signal only — no growing replacement dictionary.
+    # Generation owns Abstract→Spoken translation; pass deletes conference closers.
     text = " ".join(ss)
-    if "essay_diction" in failures or "multi_mechanism_essay" in failures:
-        replacements = [
-            (r"\bresentment economy\b", "shared grievance story"),
-            (r"\bgrievance economy\b", "shared grievance story"),
-            (r"\bideology\b", "script"),
-            (r"\buniversal claim\b", "blanket story"),
-            (r"\bdefection\b", "exit"),
-            (r"\bdialectic\b", "argument"),
-            (r"\bparadigm\b", "frame"),
-            (r"\bsystemic mechanism\b", "rule"),
-        ]
-        for pat, rep in replacements:
-            text = re.sub(pat, rep, text, count=1, flags=re.I)
+
+    # Cash out the last line (editorial): if the closer is conference-talk and
+    # an earlier spoken sentence already carries the insight, drop the closer.
+    # Principle: do not invent a spoken paraphrase here — only remove white-paper tails.
+    if "abstract_closer" in failures:
+        ss2 = sentences(text) if text else ss
+        if len(ss2) >= 2 and _is_conference_talk_sentence(ss2[-1]):
+            prior = ss2[:-1]
+            # Keep if prior already has concrete / spear content
+            if any(
+                not _is_conference_talk_sentence(p) and len(words(p)) >= 6 for p in prior
+            ):
+                text = " ".join(prior).strip()
 
     text = re.sub(r"\s+", " ", text).strip()
-    # Fix spacing after join
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     return text
 
@@ -409,6 +460,7 @@ def apply_gold_shape_pass(
         "snap_overlong",
         "knife_too_many_sentences",
         "essay_diction",
+        "abstract_closer",
     }
     if any(f in rewrite_triggers for f in failures):
         compressed = _compress_once(user_message, body, structure, failures)

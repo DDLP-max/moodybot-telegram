@@ -31,8 +31,12 @@ Any future change to finalization must answer:
    - thesis / mechanism repetition
    - post-payoff drift
    - stacked metaphor
-   - CTA / verbal costume tail  
+   - CTA / verbal costume tail
+   - conference-talk closer left after a spoken spear (**cash out the last line** — drop white-paper tail; do not invent paraphrases from a dictionary)
    Max: `draft → quality pass → one rewrite → return`. Never loop.
+
+Abstract → Spoken is primarily a **generation** duty.
+The quality pass is an **editorial** safety net, not a thesaurus.
 
 ## Brand exception
 
