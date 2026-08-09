@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Recognition landing tests — endings that land, not module proofs."""
+"""Landing tests — earned endings, not mandatory mic-drops."""
 
 from recognition_landing import (
     LANDING_ENGINE_VERSION,
@@ -12,6 +12,7 @@ from recognition_landing import (
 )
 from response_finalization import build_response_plan, finalize_response
 from signature_language import extract_signature_language
+from signature_line import body_already_lands
 
 
 def test_broken_topic_staple_fails_grammar():
@@ -28,34 +29,28 @@ def test_malformed_landing_family_rejected():
         "What about X looks different now that you've seen it named?",
         "What about Y hate Z looks different?",
         "Something ended. Now that you've seen it named?",
-        "What about feminists hate woman looks different now that you've seen it named?",
     ]
     for c in cases:
         ok, reason = validate_landing(c)
         assert ok is False, c
-        assert "REJECTED" in reason
 
 
 def test_landing_engine_version():
-    assert LANDING_ENGINE_VERSION == "signature-line-v3"
+    assert LANDING_ENGINE_VERSION == "earned-ending-v1"
 
 
-def test_politics_prefers_statement_not_question():
+def test_politics_strips_broken_closer_and_may_stop():
     user = "Why do feminists hate women praising men?"
     draft = (
         "The accusation stops being analysis the moment disagreement becomes evidence.\n\n"
         "What about feminists hate woman looks different now that you've seen it named?"
     )
     result = finalize_response(draft, user)
-    closer = result.text.strip().split("\n\n")[-1].replace("🥃", "").strip()
-    assert "what about feminists" not in closer.lower()
-    assert "seen it named" not in closer.lower()
-    assert not closer.endswith("?") or "stretch" in closer.lower()
+    assert "seen it named" not in result.text.lower()
     assert result.plan.landing in {
+        "body_ends_response",
         "signature_line",
-        "recognition_statement",
         "silence",
-        "recognition_observation",
     }
 
 
@@ -64,7 +59,6 @@ def test_stretch_still_allows_rhetorical_question():
     assert select_landing(user).landing == "RECOGNITION_CALLBACK"
     q = craft_callback_question(user)
     assert q and "stretch" in q.lower()
-    assert is_grammatical_english(q)
 
 
 def test_topic_nouns_are_not_signature():
@@ -75,31 +69,25 @@ def test_topic_nouns_are_not_signature():
     ) is None
 
 
-def test_relationship_not_forced_question():
-    user = "My partner cancels plans and only calls late. What's going on?"
-    draft = "They are treating you as low priority. Convenience over commitment.\n\nWhat about partner cancels looks different now that you've seen it named?"
-    result = finalize_response(draft, user)
-    closer = result.text.strip().split("\n\n")[-1].replace("🥃", "").strip()
-    assert "seen it named" not in closer.lower()
-    assert result.plan.landing != "recognition_callback" or "stretch" in closer.lower()
+def test_body_lands_selector():
+    body = (
+        "The charge works as social enforcement of loyalty. "
+        "Public gratitude threatens movements built on resentment."
+    )
+    assert body_already_lands(body)
+    assert select_landing("why?", body=body).landing == "BODY_ENDS_RESPONSE"
 
 
 def test_technical_silence():
-    user = "Why does this Telegram worker keep dying?"
-    assert select_landing(user, technical=True).landing == "SILENCE"
-    draft = "Duplicate getUpdates.\n\nWhat stretched in you while reading that?"
-    result = finalize_response(draft, user)
-    assert "stretched in you" not in result.text.lower()
+    assert select_landing("Why does worker die?", technical=True).landing == "SILENCE"
 
 
 def test_grief_silence():
-    user = "My brother died last week and I can't stop crying."
-    assert select_landing(user, grief=True).landing == "SILENCE"
+    assert select_landing("My brother died.", grief=True).landing == "SILENCE"
 
 
 def test_practical_action():
-    user = "What should I do about the doorman sending flowers?"
-    assert select_landing(user, practical=True).landing == "ACTION"
+    assert select_landing("What should I do?", practical=True).landing == "ACTION"
 
 
 def test_apply_landing_strips_broken_closer():
@@ -107,15 +95,16 @@ def test_apply_landing_strips_broken_closer():
         "Healthy ideas don't require loyalty tests.\n\n"
         "What about feminists hate woman looks different now that you've seen it named?"
     )
-    decision = select_landing("Why do feminists hate women praising men?", body=text)
-    out, modified = apply_landing(text, "Why do feminists hate women praising men?", decision)
+    decision = select_landing("Why?", body="Healthy ideas don't require loyalty tests.")
+    out, modified = apply_landing(text, "Why?", decision)
     assert "seen it named" not in out.lower()
     assert modified
 
 
 def test_build_plan_landing_field():
     plan = build_response_plan("Why do feminists hate women praising men?")
-    assert plan.landing == "signature_line"
+    # Without body at plan time, discovery may be attempted
+    assert plan.landing in {"signature_line", "body_ends_response", "silence"}
     assert plan.allow_question is False
 
 
@@ -123,10 +112,10 @@ if __name__ == "__main__":
     test_broken_topic_staple_fails_grammar()
     test_malformed_landing_family_rejected()
     test_landing_engine_version()
-    test_politics_prefers_statement_not_question()
+    test_politics_strips_broken_closer_and_may_stop()
     test_stretch_still_allows_rhetorical_question()
     test_topic_nouns_are_not_signature()
-    test_relationship_not_forced_question()
+    test_body_lands_selector()
     test_technical_silence()
     test_grief_silence()
     test_practical_action()

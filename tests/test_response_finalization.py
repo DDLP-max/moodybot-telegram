@@ -84,6 +84,7 @@ def test_dirty_talk_regression_strips_generic_cta_and_calibrates():
     assert " ." not in result.text
     # Landing should not force a quiz; signature line / silence / action OK
     assert result.plan.landing in {
+        "body_ends_response",
         "signature_line",
         "recognition_statement",
         "silence",

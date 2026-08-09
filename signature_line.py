@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Signature Line Engine — the sentence the reader remembers tomorrow.
+"""Signature Line — an earned writing opportunity, not a required feature.
 
-MoodyBot is a writer. The last sentence is a first-class writing object.
+Chase INEVITABLE, not memorable.
 
-It is NOT a closer.
-It is NOT a CTA.
-It is NOT a summary.
-It is the fingerprint left behind after the body releases its tension.
+The ending must be earned. Not generated.
+Sometimes the body is already finished. That is success.
 
-Recognition Callback / Action / Silence are alternate endings.
-Signature Line is the preferred landing for analysis, criticism, and pattern work.
-
-generate_signature_line(plan, draft) runs AFTER the body exists.
+Pipeline:
+  Generate body
+  → Does the body already land? → BODY_ENDS_RESPONSE (stop)
+  → Attempt discovery (not manufacture)
+  → If no genuine discovery → stop (NO_SIGNATURE_FOUND is success)
+  → Deletion test — if removing the line improves the piece, delete it
+  → Surface render
 """
 
 from __future__ import annotations
@@ -24,76 +25,290 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 MAX_WORDS = 18
 MAX_WORDS_EXCEPTIONAL = 22
 MIN_WORDS = 4
+DISCOVERY_THRESHOLD = 0.72
+SIMILARITY_REJECT = 0.62
+
+NO_SIGNATURE_FOUND = "NO_SIGNATURE_FOUND"
 
 _RECENT_SIGNATURES: Deque[str] = deque(maxlen=32)
 
 ENGAGEMENT_MARKERS = (
-    "do you want",
-    "would you like",
-    "let me know",
-    "say the word",
-    "does that make sense",
-    "what do you think",
-    "tell me more",
-    "feel free",
-    "reach out",
-    "subscribe",
-    "@moodybot",
-    "tag me",
+    "do you want", "would you like", "let me know", "say the word",
+    "does that make sense", "what do you think", "tell me more",
+    "subscribe", "@moodybot", "tag me",
 )
 
 SUMMARY_MARKERS = (
-    "in other words",
-    "to summarize",
-    "to sum up",
-    "in summary",
-    "basically",
-    "all in all",
-    "the bottom line is",
-    "what this means is",
-    "as i said",
-    "as mentioned",
-    "to put it simply",
+    "in other words", "to summarize", "to sum up", "in summary",
+    "basically", "all in all", "the bottom line is", "to put it simply",
 )
 
-# Fortune-cookie / slogan factory — instant fail (SPECIFICITY)
+# Bumper stickers / fake profundity
 GENERIC_APHORISMS = (
-    "everything happens for a reason",
-    "life is complicated",
-    "truth always wins",
-    "power corrupts",
-    "trust the process",
-    "you got this",
-    "stay strong",
-    "believe in yourself",
-    "it is what it is",
-    "live your truth",
-    "time heals all wounds",
-    "what doesn't kill you",
-    "follow your heart",
-    "be yourself",
-    "knowledge is power",
-    "love conquers all",
-    "change is hard",
-    "people are complex",
-    "nothing is black and white",
-    "the truth hurts",
+    "everything happens for a reason", "life is complicated",
+    "truth always wins", "truth wins", "power corrupts",
+    "trust the process", "you got this", "stay strong",
+    "believe in yourself", "it is what it is", "live your truth",
+    "time heals all wounds", "knowledge is power", "change is hard",
+    "the truth hurts", "gratitude matters", "movements need enemies",
+    "everything changes", "stories protect themselves",
+    "boundaries matter", "people are complex",
 )
 
 AI_PROFOUND_MARKERS = (
-    "in a world where",
-    "at the end of the day",
-    "the reality is that",
-    "it's important to remember",
-    "one thing is clear",
-    "this serves as a reminder",
-    "a powerful reminder",
-    "speaks volumes",
-    "more than meets the eye",
-    "the human condition",
+    "in a world where", "at the end of the day", "the reality is that",
+    "it's important to remember", "a powerful reminder", "speaks volumes",
+    "the human condition", "more than meets the eye",
 )
 
 
+@dataclass
+class SignatureLineScore:
+    """Discovery score — below threshold means do not generate."""
+
+    novel_insight: float = 0.0
+    unexpected: float = 0.0
+    inevitable: float = 0.0
+    adds_meaning: float = 0.0
+    different_abstraction: float = 0.0
+    reasons: List[str] = field(default_factory=list)
+
+    @property
+    def total(self) -> float:
+        return (
+            self.novel_insight
+            + self.unexpected
+            + self.inevitable
+            + self.adds_meaning
+            + self.different_abstraction
+        ) / 5.0
+
+    @property
+    def ok(self) -> bool:
+        return self.total >= DISCOVERY_THRESHOLD and not self.reasons
+
+
+def word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9']+", text or ""))
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _content_tokens(text: str) -> set:
+    stop = {
+        "the", "and", "for", "that", "this", "with", "from", "about", "have",
+        "what", "when", "where", "which", "your", "you", "how", "did", "does",
+        "are", "was", "were", "been", "into", "than", "then", "just", "like",
+        "not", "but", "its", "it's", "they", "them", "their", "our", "out",
+        "all", "any", "can", "could", "would", "should", "will",
+    }
+    return {
+        t for t in re.findall(r"[a-z0-9']+", _norm(text))
+        if len(t) > 2 and t not in stop
+    }
+
+
+def is_single_sentence(text: str) -> bool:
+    s = (text or "").strip()
+    if not s or s[-1] not in ".!":
+        return False
+    body = s[:-1]
+    if "?" in body or "!" in body or "." in body:
+        return False
+    return True
+
+
+def _body_sentences(body: str) -> List[str]:
+    return [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", (body or "").strip())
+        if s.strip() and not s.strip().endswith("?")
+    ]
+
+
+def final_paragraph(text: str) -> str:
+    paras = re.split(r"\n\s*\n", (text or "").strip())
+    return (paras[-1] if paras else "").strip()
+
+
+def semantic_similarity(a: str, b: str) -> float:
+    ta, tb = _content_tokens(a), _content_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / max(len(ta | tb), 1)
+
+
+def body_already_said_this(line: str, body: str) -> bool:
+    """Restatement / shortening / echo of anything the body already said."""
+    line_n = _norm(line)
+    line_toks = _content_tokens(line)
+    if not line_n or not body or not line_toks:
+        return False
+    for sent in _body_sentences(body):
+        sent_n = _norm(sent)
+        sent_toks = _content_tokens(sent)
+        if not sent_n or not sent_toks:
+            continue
+        if line_n == sent_n or line_n.rstrip(".!") == sent_n.rstrip(".!"):
+            return True
+        # Shortening paraphrase
+        if line_toks <= sent_toks and len(line_toks) >= 3:
+            return True
+        overlap = len(line_toks & sent_toks) / max(len(line_toks), 1)
+        if overlap >= 0.72 and len(line_toks - sent_toks) <= 2:
+            return True
+        # Near-identical with a tacked qualifier ("..., not protection")
+        if overlap >= 0.85:
+            return True
+    # Also compare to final paragraph as a whole
+    fp = final_paragraph(body)
+    if fp and semantic_similarity(line, fp) >= SIMILARITY_REJECT:
+        # Allow only if clearly higher abstraction with novel hinges
+        if len(_content_tokens(line) - _content_tokens(fp)) < 2:
+            return True
+    return False
+
+
+def adds_deeper_layer(line: str, body: str) -> bool:
+    """Body explains. Signature reveals — new abstraction, not rewording."""
+    if not body:
+        return False
+    line_toks = _content_tokens(line)
+    body_toks = _content_tokens(body)
+    if not line_toks:
+        return False
+    novel = line_toks - body_toks
+    reveal_turn = bool(
+        re.search(
+            r"\b(becomes?|became|stopped being|already ending|runs?\s+out|"
+            r"pretending|needs? permission|survives by|long before|"
+            r"was already|no longer|instead|don't end|rarely end|"
+            r"explains?|announces itself)\b",
+            _norm(line),
+        )
+    )
+    if re.search(r"\b(matter|matters|important|real|true|valid)\b\.?$", _norm(line)):
+        return False
+    return reveal_turn and len(novel) >= 2
+
+
+def body_already_lands(body: str) -> bool:
+    """Has the body already completed the argument?
+
+    If deleting every generated ending would improve the response — YES.
+    """
+    text = (body or "").strip()
+    if not text:
+        return False
+    last = final_paragraph(text)
+    if not last or last.endswith("?"):
+        return False
+    lower = last.lower()
+    if any(m in lower for m in ENGAGEMENT_MARKERS):
+        return False
+    if any(m in lower for m in ("seen it named", "what about ", "say the word")):
+        return False
+    sentences = [s.strip() for s in re.split(r"(?<=[.!])\s+", last) if s.strip()]
+    if not sentences:
+        return False
+    final = sentences[-1]
+    if final[-1] not in ".!":
+        return False
+    wc = len(final.split())
+    if wc < 7:
+        return False
+    # Complete intellectual/emotional landing signals
+    lands = bool(
+        re.search(
+            r"\b(enforcement|threatens?|reveals?|betrayal|convenience|"
+            r"protection|resentment|defection|loyalty|already|"
+            r"stopped|becomes?|explains?|survives?|pretending)\b",
+            final.lower(),
+        )
+    )
+    # Or a long complete final sentence that isn't hedging
+    solid = (
+        wc >= 12
+        and not re.search(r"\b(maybe|perhaps|might|seems? to)\b", final.lower())
+    )
+    return (lands and wc >= 7) or solid
+
+
+def deletion_test(body: str, signature: str) -> bool:
+    """Highest-priority gate. True = keep signature. False = delete it.
+
+    If deleting the ending makes the response stronger → reject ending.
+    """
+    if not signature or not signature.strip():
+        return False
+    if body_already_said_this(signature, body):
+        return False
+    if not adds_deeper_layer(signature, body):
+        return False
+    fp = final_paragraph(body)
+    if fp and semantic_similarity(signature, fp) >= SIMILARITY_REJECT:
+        return False
+    # Essay test: signature alone should still hinge on conversation content
+    if not _content_tokens(signature) & (_content_tokens(body) | _content_tokens(fp)):
+        # Pure floating bumper sticker
+        if word_count(signature) <= 8 and not adds_deeper_layer(signature, body):
+            return False
+    return True
+
+
+def score_discovery(
+    line: str,
+    *,
+    body: str = "",
+    user_message: str = "",
+) -> SignatureLineScore:
+    """Score whether a candidate is a genuine discovery."""
+    s = SignatureLineScore()
+    lower = _norm(line)
+    line_toks = _content_tokens(line)
+    body_toks = _content_tokens(body)
+    novel = line_toks - body_toks if body_toks else line_toks
+
+    if any(a in lower for a in GENERIC_APHORISMS):
+        s.reasons.append("bumper_sticker")
+        return s
+    if any(m in lower for m in AI_PROFOUND_MARKERS):
+        s.reasons.append("fake_profundity")
+        return s
+    if body_already_said_this(line, body):
+        s.reasons.append("restates_or_shortens")
+        return s
+    if not deletion_test(body, line):
+        s.reasons.append("fails_deletion_test")
+        return s
+
+    # Novel insight
+    s.novel_insight = min(1.0, len(novel) / 3.0) if novel else 0.0
+    # Unexpected: not a subset paraphrase
+    s.unexpected = 1.0 if len(novel) >= 2 else 0.35
+    # Inevitable: lexical hinge OR earned higher-order reveal after the body
+    overlap = line_toks & body_toks
+    deeper = adds_deeper_layer(line, body)
+    if overlap:
+        s.inevitable = 1.0
+    elif deeper and len(novel) >= 2:
+        # Conceptual inevitability — new abstraction implied by the body
+        s.inevitable = 0.9
+    else:
+        s.inevitable = 0.2
+    # Adds meaning
+    s.adds_meaning = 1.0 if deeper else 0.0
+    # Different abstraction level (not same nouns restated)
+    s.different_abstraction = 1.0 if len(novel) >= 2 and deeper else 0.25
+
+    if s.total < DISCOVERY_THRESHOLD:
+        s.reasons.append("below_discovery_threshold")
+    return s
+
+
+# Compat alias used by older tests
 @dataclass
 class SignatureQuality:
     specificity: bool = False
@@ -115,232 +330,6 @@ class SignatureQuality:
             )
         )
 
-    def as_dict(self) -> Dict[str, str]:
-        return {
-            "specificity": str(self.specificity).lower(),
-            "compression": str(self.compression).lower(),
-            "authorship": str(self.authorship).lower(),
-            "inevitability": str(self.inevitability).lower(),
-            "memory": str(self.memory).lower(),
-            "fail_reasons": ",".join(self.reasons),
-        }
-
-
-def word_count(text: str) -> int:
-    return len(re.findall(r"[A-Za-z0-9']+", text or ""))
-
-
-def _norm(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip().lower())
-
-
-def is_single_sentence(text: str) -> bool:
-    s = (text or "").strip()
-    if not s or s[-1] not in ".!":
-        return False
-    body = s[:-1]
-    if "?" in body or "!" in body:
-        return False
-    if "." in body:
-        return False
-    return True
-
-
-def _content_tokens(text: str) -> set:
-    stop = {
-        "the", "and", "for", "that", "this", "with", "from", "about", "have",
-        "what", "when", "where", "which", "your", "you", "how", "did", "does",
-        "are", "was", "were", "been", "into", "than", "then", "just", "like",
-        "not", "but", "its", "it's", "they", "them", "their", "our", "out",
-        "all", "any", "can", "could", "would", "should", "will", "been",
-    }
-    return {
-        t
-        for t in re.findall(r"[a-z0-9']+", _norm(text))
-        if len(t) > 2 and t not in stop
-    }
-
-
-def is_single_sentence_ok(text: str) -> bool:
-    return is_single_sentence(text)
-
-
-# ---------------------------------------------------------------------------
-# Quality tests — the sentence the user remembers tomorrow
-# ---------------------------------------------------------------------------
-
-
-def test_specificity(line: str, conversation_tokens: set) -> Tuple[bool, str]:
-    """Could this appear after 100 unrelated answers? If yes: FAIL."""
-    lower = _norm(line)
-    for aphorism in GENERIC_APHORISMS:
-        if aphorism in lower or lower.rstrip(".!") == aphorism:
-            return False, "generic_aphorism"
-    # Extremely abstract with no conversation contact
-    line_toks = _content_tokens(line)
-    if conversation_tokens and line_toks:
-        overlap = line_toks & conversation_tokens
-        # Allow literary compression that keeps at least one concrete hinge
-        # OR strong structural turn words with concrete nouns
-        concrete = {t for t in line_toks if t not in {
-            "moment", "argument", "story", "truth", "power", "people", "life",
-            "world", "thing", "things", "always", "never", "often", "usually",
-        }}
-        if not overlap and not concrete:
-            return False, "no_conversation_hinge"
-    return True, "ok"
-
-
-def _body_sentences(body: str) -> List[str]:
-    return [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", (body or "").strip())
-        if s.strip() and not s.strip().endswith("?")
-    ]
-
-
-def body_already_said_this(line: str, body: str) -> bool:
-    """If I removed the last sentence, would the body already have said the same thing?"""
-    line_n = _norm(line)
-    if not line_n or not body:
-        return False
-    line_toks = _content_tokens(line)
-    if not line_toks:
-        return False
-    for sent in _body_sentences(body):
-        sent_n = _norm(sent)
-        if not sent_n:
-            continue
-        # Exact / near-exact restatement of any body sentence
-        if line_n == sent_n:
-            return True
-        if line_n.rstrip(".!") == sent_n.rstrip(".!"):
-            return True
-        sent_toks = _content_tokens(sent)
-        if not sent_toks:
-            continue
-        overlap = len(line_toks & sent_toks) / max(len(line_toks), 1)
-        # Same thesis, slightly rephrased — still a restatement
-        if overlap >= 0.78 and len(line_toks - sent_toks) <= 1:
-            return True
-        # Line is a subset paraphrase of a longer thesis sentence
-        if line_toks <= sent_toks and len(line_toks) >= 3:
-            return True
-    return False
-
-
-def adds_deeper_layer(line: str, body: str) -> bool:
-    """Body explains. Signature Line reveals — one layer deeper than the thesis."""
-    if not body:
-        return True
-    line_toks = _content_tokens(line)
-    body_toks = _content_tokens(body)
-    if not line_toks:
-        return False
-    # New conceptual material not already in the body
-    novel = line_toks - body_toks
-    # Reframing turn required — novelty alone is still explanation, not revelation
-    reveal_turn = bool(
-        re.search(
-            r"\b(becomes?|became|stopped being|already ending|runs?\s+out|"
-            r"pretending|needs? permission|survives by|long before|"
-            r"weren't|was already|no longer|instead|don't end|does not end|"
-            r"rarely end|explains?|announces itself)\b",
-            _norm(line),
-        )
-    )
-    # Weak thesis-echo adjectives ("matter", "important", "real") are not depth
-    if re.search(r"\b(matter|matters|important|real|true|valid)\b\.?$", _norm(line)):
-        return False
-    if not reveal_turn:
-        return False
-    # Must bring at least one new hinge the body didn't already state
-    return len(novel) >= 1
-
-
-def test_compression(line: str, body: str) -> Tuple[bool, str]:
-    """Compress the thesis into a deeper observation — never restate it.
-
-    Ask: if I removed the last sentence, would the body already have said
-    the same thing? If yes — FAIL.
-    """
-    if any(m in _norm(line) for m in SUMMARY_MARKERS):
-        return False, "mechanical_summary"
-    if word_count(line) > 22:
-        return False, "not_compressed"
-    if not body:
-        return True, "ok"
-    if body_already_said_this(line, body):
-        return False, "restates_thesis"
-    if not adds_deeper_layer(line, body):
-        return False, "no_deeper_layer"
-    return True, "ok"
-
-
-def test_authorship(line: str) -> Tuple[bool, str]:
-    """Writer, not AI trying to sound profound."""
-    lower = _norm(line)
-    if any(m in lower for m in ENGAGEMENT_MARKERS):
-        return False, "engagement"
-    if any(m in lower for m in AI_PROFOUND_MARKERS):
-        return False, "ai_profound"
-    if any(m in lower for m in GENERIC_APHORISMS):
-        return False, "slogan"
-    if lower.startswith(("so,", "so ", "look,", "well,", "anyway,", "remember,")):
-        return False, "chat_opener"
-    # Stacked abstractions without verbs of change feel manufactured
-    if re.search(r"\b(journey|empower|vibrant|delve|tapestry|landscape of)\b", lower):
-        return False, "ai_thesaurus"
-    return True, "ok"
-
-
-def test_inevitability(line: str, body: str, conversation_tokens: set) -> Tuple[bool, str]:
-    """After the body, does this feel like the sentence that had to come next?"""
-    line_toks = _content_tokens(line)
-    if not line_toks:
-        return False, "empty_tokens"
-    pool = _content_tokens(body) | conversation_tokens
-    if not pool:
-        return True, "ok"
-    overlap = line_toks & pool
-    # Literary turn can earn inevitability with one shared hinge or body imagery
-    has_turn = bool(
-        re.search(
-            r"\b(but|becomes?|before|after|where|when|don't|doesn't|isn't|"
-            r"stops?|started|reveals?|explains?|pretending|usually|already|"
-            r"never|only|without|instead|rarely|needs?|runs?\s+out)\b",
-            _norm(line),
-        )
-    )
-    if overlap:
-        return True, "ok"
-    if has_turn and word_count(line) <= 12:
-        return True, "ok"
-    return False, "not_earned_by_body"
-
-
-def test_memory(line: str) -> Tuple[bool, str]:
-    """Would someone screenshot this?"""
-    wc = word_count(line)
-    if wc < MIN_WORDS or wc > MAX_WORDS_EXCEPTIONAL:
-        return False, "bad_length"
-    if not is_single_sentence(line):
-        return False, "not_one_sentence"
-    if line.strip().endswith("?"):
-        return False, "question"
-    # Short punch OR clear turn
-    if wc <= 10:
-        return True, "ok"
-    has_turn = bool(
-        re.search(
-            r"\b(but|becomes?|before|after|where|when|don't|doesn't|"
-            r"stops?|started|reveals?|explains?|pretending|usually|"
-            r"already|never|only|without|instead|rarely|needs?)\b",
-            _norm(line),
-        )
-    )
-    return (True, "ok") if has_turn else (False, "no_residue")
-
 
 def score_signature_line(
     line: str,
@@ -350,33 +339,41 @@ def score_signature_line(
     anchors: Optional[List[str]] = None,
     central_insight: str = "",
 ) -> SignatureQuality:
-    conversation_tokens = (
-        _content_tokens(user_message)
-        | _content_tokens(central_insight)
-        | _content_tokens(" ".join(anchors or []))
-        | _content_tokens(body)
-    )
+    """Legacy boolean gate wrapped around discovery score + hard rejects."""
+    _ = anchors
+    _ = central_insight
     q = SignatureQuality()
-    ok, reason = test_specificity(line, conversation_tokens)
-    q.specificity = ok
-    if not ok:
-        q.reasons.append(f"specificity:{reason}")
-    ok, reason = test_compression(line, body)
-    q.compression = ok
-    if not ok:
-        q.reasons.append(f"compression:{reason}")
-    ok, reason = test_authorship(line)
-    q.authorship = ok
-    if not ok:
-        q.reasons.append(f"authorship:{reason}")
-    ok, reason = test_inevitability(line, body, conversation_tokens)
-    q.inevitability = ok
-    if not ok:
-        q.reasons.append(f"inevitability:{reason}")
-    ok, reason = test_memory(line)
-    q.memory = ok
-    if not ok:
-        q.reasons.append(f"memory:{reason}")
+    lower = _norm(line)
+    disc = score_discovery(line, body=body, user_message=user_message)
+
+    q.specificity = not any(a in lower for a in GENERIC_APHORISMS)
+    if not q.specificity:
+        q.reasons.append("specificity:generic")
+    q.authorship = not any(m in lower for m in AI_PROFOUND_MARKERS + ENGAGEMENT_MARKERS)
+    if not q.authorship:
+        q.reasons.append("authorship:fail")
+    q.compression = not body_already_said_this(line, body) and (
+        not body or adds_deeper_layer(line, body)
+    )
+    if not q.compression:
+        q.reasons.append("compression:restates_or_no_depth")
+    q.inevitability = (
+        disc.inevitable >= 0.5
+        and "fails_deletion_test" not in disc.reasons
+        and "restates_or_shortens" not in disc.reasons
+    )
+    if not q.inevitability:
+        q.reasons.append("inevitability:fail")
+    # "Memory" reframed: structural fitness, not quotability chase
+    q.memory = (
+        is_single_sentence(line)
+        and MIN_WORDS <= word_count(line) <= MAX_WORDS_EXCEPTIONAL
+        and not line.endswith("?")
+    )
+    if not q.memory:
+        q.reasons.append("memory:structure")
+    if disc.reasons:
+        q.reasons.extend(disc.reasons)
     return q
 
 
@@ -390,7 +387,6 @@ def validate_signature_line(
     allow_exceptional_length: bool = False,
     check_novelty: bool = True,
 ) -> Tuple[bool, str]:
-    """Hard gate. Returns (ok, reason)."""
     s = (text or "").strip()
     if not s:
         return False, "REJECTED:empty"
@@ -406,6 +402,8 @@ def validate_signature_line(
         return False, "REJECTED:too_short"
     if check_novelty and _norm(s) in _RECENT_SIGNATURES:
         return False, "REJECTED:slogan_reuse"
+    if not deletion_test(body, s) and body:
+        return False, "REJECTED:fails_deletion_test"
     quality = score_signature_line(
         s,
         body=body,
@@ -415,6 +413,9 @@ def validate_signature_line(
     )
     if not quality.ok:
         return False, "REJECTED:" + (quality.reasons[0] if quality.reasons else "quality")
+    disc = score_discovery(s, body=body, user_message=user_message)
+    if not disc.ok:
+        return False, "REJECTED:" + (disc.reasons[0] if disc.reasons else "discovery")
     return True, "ok"
 
 
@@ -432,35 +433,10 @@ def _plan_fields(plan: Any) -> Dict[str, Any]:
     return {
         "central_insight": getattr(plan, "central_insight", None) or "",
         "original_subject": getattr(plan, "original_subject", None) or "",
-        "primary_capability": getattr(plan, "primary_capability", None) or "",
-        "intervention": getattr(plan, "intervention", None) or "",
-        "expected_shift_from": getattr(plan, "expected_shift_from", None) or "",
-        "expected_shift_to": getattr(plan, "expected_shift_to", None) or "",
         "anchors": list(getattr(plan, "anchors", None) or []),
         "intent": getattr(plan, "intent", None) or "",
         "selected_command": getattr(plan, "selected_command", None) or "",
     }
-
-
-def signature_line_appropriate(plan: Any, user_message: str = "") -> bool:
-    """Preferred for analysis / criticism / pattern / psychology / politics."""
-    fields = _plan_fields(plan)
-    intent = (fields.get("intent") or "").lower()
-    if intent in {"witness", "technical", "clarify", "action"}:
-        return False
-    if fields.get("needs_practical_action"):
-        return False
-    cmd = (fields.get("selected_command") or "").lower()
-    if cmd in {"/ghost", "/numb", "/roast", "/savage", "/cut"}:
-        return False
-    um = (user_message or "").lower()
-    if any(
-        p in um
-        for p in ("what should i do", "what do i say", "how should i handle", "what now")
-    ):
-        return False
-    # Default yes for substantial analytic modes
-    return True
 
 
 def last_line_is_signature(
@@ -471,14 +447,13 @@ def last_line_is_signature(
     central_insight: str = "",
 ) -> bool:
     paras = re.split(r"\n\s*\n", (text or "").strip())
-    last = (paras[-1] if paras else "").strip()
-    body = "\n\n".join(paras[:-1]) if len(paras) > 1 else ""
-    # A sole paragraph is the thesis body — not yet a Signature Line.
-    if not body:
+    if len(paras) < 2:
         return False
+    last = paras[-1].strip()
+    prior = "\n\n".join(paras[:-1]).strip()
     ok, _ = validate_signature_line(
         last,
-        body=body,
+        body=prior,
         user_message=user_message,
         anchors=anchors,
         central_insight=central_insight,
@@ -487,103 +462,14 @@ def last_line_is_signature(
     return ok
 
 
-def extract_signature_from_body(
-    body: str,
-    *,
-    user_message: str = "",
-    anchors: Optional[List[str]] = None,
-    central_insight: str = "",
-) -> Optional[str]:
-    """Only keep a draft sentence if it already sits as a deeper last paragraph.
-
-    Mid-body thesis sentences explain. Promoting them is restatement, not revelation.
-    """
-    paras = re.split(r"\n\s*\n", (body or "").strip())
-    if len(paras) < 2:
-        return None
-    last = paras[-1].strip()
-    prior = "\n\n".join(paras[:-1]).strip()
-    if not last or not prior:
-        return None
-    if not is_single_sentence(last):
-        return None
-    if body_already_said_this(last, prior):
-        return None
-    if not adds_deeper_layer(last, prior):
-        return None
-    ok, _ = validate_signature_line(
-        last,
-        body=prior,
-        user_message=user_message,
-        anchors=anchors,
-        central_insight=central_insight,
-        allow_exceptional_length=True,
-        check_novelty=False,
-    )
-    return last if ok else None
-
-
-def _compress_candidate(
-    sentence: str,
-    *,
-    user_message: str = "",
-    body: str = "",
-    anchors: Optional[List[str]] = None,
-    central_insight: str = "",
-) -> Optional[str]:
-    s = (sentence or "").strip()
-    if not s:
-        return None
-    candidates = []
-    for sep in (" — ", " - ", ": ", "; "):
-        if sep in s:
-            right = s.split(sep)[-1].strip()
-            if not right.endswith((".", "!")):
-                right += "."
-            candidates.append(right)
-    trimmed = re.sub(
-        r"\s+(?:because|since|which|that|when)\b.+$",
-        ".",
-        s,
-        count=1,
-        flags=re.IGNORECASE,
-    )
-    if trimmed != s:
-        if not trimmed.endswith((".", "!")):
-            trimmed = trimmed.rstrip(",;:") + "."
-        candidates.append(trimmed)
-    for c in candidates:
-        ok, _ = validate_signature_line(
-            c,
-            body=body,
-            user_message=user_message,
-            anchors=anchors,
-            central_insight=central_insight,
-            allow_exceptional_length=True,
-            check_novelty=True,
-        )
-        if ok:
-            return c
-    return None
-
-
-def _conversation_conditioned_line(
-    user_message: str,
-    plan_fields: Dict[str, Any],
-    body: str,
-) -> Optional[str]:
-    """Last-resort lines that still hinge on THIS conversation — not slogans."""
-    um = (user_message or "").lower()
-    insight = (plan_fields.get("central_insight") or "").lower()
-    subject = (plan_fields.get("original_subject") or "").lower()
-    blob = f"{um} {insight} {subject} {_norm(body)}"
-
-    bank = [
+def _candidate_bank(user_message: str, body: str) -> List[str]:
+    """Optional discoveries — never mandatory slogans."""
+    blob = f"{user_message} {_norm(body)}".lower()
+    bank: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = [
         (
             ("feminist", "feminism", "praising", "pick me", "loyalty", "equality"),
             (
                 "The moment gratitude becomes betrayal, the argument stopped being about equality.",
-                "The script usually survives by making disagreement feel like betrayal.",
                 "The moment gratitude needs permission, the argument changed.",
             ),
         ),
@@ -591,59 +477,69 @@ def _conversation_conditioned_line(
             ("boundary", "boundaries"),
             (
                 "Boundaries don't end relationships — they reveal the ones that were already ending.",
-                "Boundaries rarely end relationships — they reveal them.",
             ),
         ),
         (
-            ("story", "narrative", "defending", "women"),
+            ("dirty talk", "porn", "script"),
             (
-                "The story started defending itself long before it started defending people.",
-                "The story started defending itself long before it started defending women.",
-            ),
-        ),
-        (
-            ("power", "control", "authority"),
-            ("Power usually announces itself by pretending it doesn't exist.",),
-        ),
-        (
-            ("backstage", "behind the scenes"),
-            ("The backstage explains the stage.",),
-        ),
-        (
-            ("paper trail", "receipts", "evidence", "emails", "performance"),
-            ("The paper trail is where the performance runs out.",),
-        ),
-        (
-            ("dirty talk", "porn", "1995", "sexual language", "script"),
-            (
-                "The language only followed — the script library had already grown.",
                 "The script usually survives by making the new language feel ordinary.",
             ),
         ),
-        (
-            ("cancel", "late at night", "low priority", "only calls"),
-            ("Convenience dressed as connection is still just convenience.",),
-        ),
-        (
-            ("doorman", "flowers", "wine"),
-            ("The move is clear — the next line is hers.",),
-        ),
     ]
+    out: List[str] = []
     for keys, lines in bank:
         if any(k in blob for k in keys):
-            for line in lines:
-                if _norm(line) in _RECENT_SIGNATURES:
-                    continue
-                ok, _ = validate_signature_line(
-                    line,
-                    body=body,
-                    user_message=user_message,
-                    anchors=list(plan_fields.get("anchors") or []),
-                    central_insight=plan_fields.get("central_insight") or "",
-                    allow_exceptional_length=True,
-                )
-                if ok:
-                    return line
+            out.extend(lines)
+    return out
+
+
+def discover_signature_line(
+    plan: Any,
+    draft: str,
+    *,
+    user_message: str = "",
+) -> Optional[str]:
+    """Attempt to DISCOVER an ending. None / NO_SIGNATURE_FOUND is success."""
+    fields = _plan_fields(plan)
+    body = (draft or "").strip()
+    if body.endswith("?"):
+        sents = re.split(r"(?<=[.!?])\s+", body)
+        if len(sents) >= 2:
+            body = " ".join(sents[:-1]).rstrip()
+
+    # If body already landed, do not hunt for a quote
+    if body_already_lands(body):
+        return None
+
+    # Already has a true deeper last paragraph
+    if last_line_is_signature(
+        body,
+        user_message=user_message,
+        anchors=list(fields.get("anchors") or []),
+        central_insight=fields.get("central_insight") or "",
+    ):
+        last = final_paragraph(body)
+        prior = "\n\n".join(re.split(r"\n\s*\n", body)[:-1])
+        if deletion_test(prior, last):
+            return last
+
+    # Try conversation-conditioned candidates — accept only if discovery score passes
+    for cand in _candidate_bank(user_message, body):
+        if _norm(cand) in _RECENT_SIGNATURES:
+            continue
+        disc = score_discovery(cand, body=body, user_message=user_message)
+        if not disc.ok:
+            continue
+        ok, _ = validate_signature_line(
+            cand,
+            body=body,
+            user_message=user_message,
+            allow_exceptional_length=True,
+            check_novelty=True,
+        )
+        if ok and deletion_test(body, cand):
+            return cand
+
     return None
 
 
@@ -653,91 +549,12 @@ def generate_signature_line(
     *,
     user_message: str = "",
 ) -> Optional[str]:
-    """Write the last sentence after the body exists.
-
-    Returns one sentence or None if nothing earns the fingerprint.
-    Prefer discovery inside the draft over manufacturing a slogan.
-    """
-    fields = _plan_fields(plan)
-    body = (draft or "").strip()
-    anchors = list(fields.get("anchors") or [])
-    insight = fields.get("central_insight") or ""
-
-    # Strip trailing engagement/question debris before discovery
-    if body.endswith("?"):
-        sents = re.split(r"(?<=[.!?])\s+", body)
-        if len(sents) >= 2:
-            body = " ".join(sents[:-1]).rstrip()
-
-    # Prefer a deeper line that REVEALS — never promote a thesis restatement.
-    # Body explains; Signature Line goes one layer deeper.
-
-    # 1) Body already ends with a Signature Line that adds depth — keep it
-    if last_line_is_signature(
-        body,
-        user_message=user_message,
-        anchors=anchors,
-        central_insight=insight,
-    ):
-        last = re.split(r"\n\s*\n", body)[-1].strip()
-        prior = "\n\n".join(re.split(r"\n\s*\n", body)[:-1])
-        if prior and not body_already_said_this(last, prior) and adds_deeper_layer(last, prior):
-            return last
-        # Sole paragraph = the thesis body. Never keep it as the Signature Line —
-        # go one layer deeper via bank/compression below.
-
-    # 2) Discover a revealing sentence already in the draft (not a restatement)
-    extracted = extract_signature_from_body(
-        body,
-        user_message=user_message,
-        anchors=anchors,
-        central_insight=insight,
-    )
-    if extracted:
-        others = body.replace(extracted, " ", 1)
-        if not body_already_said_this(extracted, others) and adds_deeper_layer(
-            extracted, others
-        ):
-            return extracted
-
-    # 3) Compress a late body sentence only if the cut adds a deeper layer
-    sentences = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", body)
-        if s.strip() and not s.strip().endswith("?")
-    ]
-    for s in reversed(sentences[-5:]):
-        compressed = _compress_candidate(
-            s,
-            user_message=user_message,
-            body=body,
-            anchors=anchors,
-            central_insight=insight,
-        )
-        if (
-            compressed
-            and not body_already_said_this(compressed, body)
-            and adds_deeper_layer(compressed, body)
-        ):
-            return compressed
-
-    # 4) Conversation-conditioned depth when the body only explained the thesis
-    deeper = _conversation_conditioned_line(user_message, fields, body)
-    if deeper and not body_already_said_this(deeper, body) and adds_deeper_layer(
-        deeper, body
-    ):
-        return deeper
-
-    return None
+    """Compat name — discovery only. Never manufactures obligatory profundity."""
+    return discover_signature_line(plan, draft, user_message=user_message)
 
 
-# Compat aliases used by recognition_landing
 def craft_signature_line(user_message: str, body: str) -> Optional[str]:
-    return generate_signature_line(
-        {"central_insight": "", "anchors": []},
-        body,
-        user_message=user_message,
-    )
+    return discover_signature_line({}, body, user_message=user_message)
 
 
 def ensure_signature_line(
@@ -746,69 +563,46 @@ def ensure_signature_line(
     *,
     plan: Any = None,
 ) -> Tuple[str, bool, Optional[str]]:
-    """Attach a Signature Line when one can be earned. Only one landing wins."""
+    """Attach a Signature Line only if discovered AND it survives deletion test.
+
+    Returns (text, modified, signature_or_none).
+    None signature with unmodified/stripped body = BODY_ENDS_RESPONSE outcome.
+    """
     base = (text or "").strip()
-    fields = _plan_fields(plan)
-    anchors = list(fields.get("anchors") or [])
-    insight = fields.get("central_insight") or ""
-
-    if last_line_is_signature(
-        base,
-        user_message=user_message,
-        anchors=anchors,
-        central_insight=insight,
-    ):
-        line = re.split(r"\n\s*\n", base)[-1].strip()
-        remember_signature_line(line)
-        return base, False, line
-
     if base.endswith("?"):
         sents = re.split(r"(?<=[.!?])\s+", base)
         if len(sents) >= 2:
             base = " ".join(sents[:-1]).rstrip()
 
-    line = generate_signature_line(plan or {}, base, user_message=user_message)
+    # Body already finished — stop writing
+    if body_already_lands(base):
+        return base, False, None
+
+    if last_line_is_signature(base, user_message=user_message):
+        paras = re.split(r"\n\s*\n", base)
+        line = paras[-1].strip()
+        prior = "\n\n".join(paras[:-1]).strip()
+        if deletion_test(prior, line):
+            remember_signature_line(line)
+            return base, False, line
+        # Deletion test failed — strip the fake ending
+        return prior or base, True, None
+
+    line = discover_signature_line(plan or {}, base, user_message=user_message)
     if not line:
         return base, False, None
 
-    # Validate against the body WITHOUT this line (promotion isn't restatement)
-    prior_for_gate = base
-    if line in base:
-        prior_for_gate = base.replace(line, " ", 1)
-        prior_for_gate = re.sub(r"\s{2,}", " ", prior_for_gate).strip()
-
-    ok, _ = validate_signature_line(
-        line,
-        body=prior_for_gate,
-        user_message=user_message,
-        anchors=anchors,
-        central_insight=insight,
-        allow_exceptional_length=True,
-        check_novelty=False,
-    )
-    if not ok:
+    if not deletion_test(base, line):
         return base, False, None
 
-    paras = re.split(r"\n\s*\n", base)
-    last = (paras[-1] if paras else "").strip()
-    if last == line:
-        remember_signature_line(line)
-        return base, False, line
+    disc = score_discovery(line, body=base, user_message=user_message)
+    if not disc.ok:
+        return base, False, None
 
-    # If discovered mid-body, isolate as final paragraph (don't leave duplicate)
-    if line in base and last != line:
-        if last.endswith(line):
-            base = base[: base.rfind(line)].rstrip()
-        elif line in last:
-            without = last.replace(line, "").strip(" ,;")
-            paras[-1] = without
-            base = "\n\n".join(p for p in paras if p.strip())
-        else:
-            # Sentence earlier in a multi-sentence paragraph
-            base = re.sub(re.escape(line), "", base, count=1).strip()
-            base = re.sub(r"\s{2,}", " ", base)
-            base = re.sub(r"\n{3,}", "\n\n", base).strip()
+    out = f"{base.rstrip()}\n\n{line}"
+    # Final deletion test on the assembled piece
+    if not deletion_test(base, line):
+        return base, False, None
 
-    out = f"{base.rstrip()}\n\n{line}" if base else line
     remember_signature_line(line)
     return out, True, line

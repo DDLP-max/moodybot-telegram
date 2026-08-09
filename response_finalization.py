@@ -191,7 +191,7 @@ class ResponsePlan:
     central_insight: Optional[str] = None
     original_subject: Optional[str] = None
     closing_strategy: str = "none"  # legacy alias of landing
-    landing: str = "silence"  # signature_line | recognition_callback | action | silence
+    landing: str = "silence"  # body_ends_response | signature_line | callback | action | silence
     allow_question: bool = False
     missing_required_info: bool = False
     channel: str = "telegram"
@@ -380,6 +380,7 @@ def build_response_plan(
     anchors = extract_conversation_anchors(user_message)
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
+        "body_ends_response": "none",
         "signature_line": "ritual_line",
         "recognition_callback": "recognition_callback",
         "recognition_statement": "ritual_line",
@@ -411,18 +412,20 @@ def build_response_plan(
 def plan_closer_instruction(plan: ResponsePlan) -> str:
     landing = (plan.landing or "silence").upper()
     instructions = {
+        "BODY_ENDS_RESPONSE": (
+            "The body is already finished. Do NOT add a Signature Line, question, "
+            "summary, or mic-drop. Stop writing. Confidence to stop is the mark of a writer."
+        ),
         "SIGNATURE_LINE": (
-            "Write a Signature Line — the one sentence the reader remembers tomorrow. "
-            "Exactly one sentence (~18 words). Compress the insight; do not summarize. "
-            "No question, no CTA, no slogan. It must feel inevitable after YOUR body, "
-            "and could only belong to this conversation. Not a chatbot closer — a last sentence."
+            "Only if a higher-order insight is truly earned after the body, end with "
+            "one inevitable sentence that reveals what the body implies — not a restatement, "
+            "shortening, or manufactured quote. If nothing is earned, stop. No CTA."
         ),
         "RECOGNITION_STATEMENT": (
-            "Ending: SIGNATURE_LINE. "
-            "One complete insight sentence that could be highlighted in a book. No question."
+            "Prefer stopping if the body already landed. Otherwise one earned reveal only."
         ),
         "RECOGNITION_OBSERVATION": (
-            "Ending: SIGNATURE_LINE. Sharp observation as the fingerprint. No quiz."
+            "Prefer stopping if the body already landed. Otherwise one earned reveal only."
         ),
         "RECOGNITION_CALLBACK": (
             "Ending: RECOGNITION_CALLBACK. "
@@ -437,7 +440,7 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
             "Ending: SILENCE. The answer should end cleanly. No follow-up question."
         ),
     }
-    return instructions.get(landing, instructions["SIGNATURE_LINE"])
+    return instructions.get(landing, instructions["BODY_ENDS_RESPONSE"])
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -606,6 +609,7 @@ def _apply_closing_strategy(
     plan.landing = decision.landing.lower()
     # Keep legacy field in sync for telemetry
     legacy_map = {
+        "body_ends_response": "none",
         "signature_line": "ritual_line",
         "recognition_callback": "recognition_callback",
         "recognition_statement": "ritual_line",
@@ -613,12 +617,22 @@ def _apply_closing_strategy(
         "action": "action_line",
         "silence": "silence",
     }
-    plan.closing_strategy = legacy_map.get(plan.landing, plan.closing_strategy)
     plan.allow_question = decision.allow_question
 
     new_text, modified = apply_landing(
         text, user_message, decision, plan=plan
     )
+    # If discovery failed, the actual outcome is BODY_ENDS_RESPONSE
+    from signature_line import last_line_is_signature as _last_is_sig
+
+    if decision.landing in {
+        "SIGNATURE_LINE",
+        "RECOGNITION_STATEMENT",
+        "RECOGNITION_OBSERVATION",
+    }:
+        if not _last_is_sig(new_text, user_message=user_message):
+            plan.landing = "body_ends_response"
+    plan.closing_strategy = legacy_map.get(plan.landing, plan.closing_strategy)
     if modified:
         last = new_text.strip().split("\n\n")[-1] if new_text else ""
         if last:

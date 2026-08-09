@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """Landing selection — which single ending mechanism wins.
 
-MoodyBot is a writer. The preferred last sentence is a Signature Line.
+Chase inevitable, not memorable.
+The ending must be earned. Not generated.
 
-Recognition Landing / Recognition Callback is one alternate implementation
-when the user's own language deserves to return.
+Possible endings (only ONE wins):
+  BODY_ENDS_RESPONSE  — body already landed; stop writing
+  SIGNATURE_LINE      — discovered higher-order insight (optional)
+  RECOGNITION_CALLBACK — user's authorial language returns
+  ACTION
+  SILENCE
 
-Decision order at finalization (only ONE wins):
-  1. Signature Line   — analysis, criticism, pattern, psychology, politics...
-  2. Recognition Callback — distinctive authorial language returns
-  3. Action           — practical guidance
-  4. Silence          — grief / shock / nothing improves the ending
-
-Legacy aliases: RECOGNITION_STATEMENT, RECOGNITION_OBSERVATION → Signature Line.
+NO_SIGNATURE_FOUND is success — not a failure to manufacture profundity.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ from signature_language import (
     transform_signature_callback,
 )
 from signature_line import (
+    body_already_lands,
     craft_signature_line,
     ensure_signature_line,
     generate_signature_line,
@@ -36,7 +36,7 @@ from signature_line import (
 
 LandingType = str
 
-LANDING_ENGINE_VERSION = "signature-line-v3"
+LANDING_ENGINE_VERSION = "earned-ending-v1"
 
 # Patterns that prove the closer is machine-stapled topic debris.
 BROKEN_CLOSER_PATTERNS = [
@@ -146,22 +146,6 @@ def would_keep_if_nobody_could_reply(text: str) -> bool:
     return True
 
 
-def body_already_lands(body: str) -> bool:
-    """True if the draft already ends on a complete, non-question insight."""
-    text = (body or "").strip()
-    if not text:
-        return False
-    last = re.split(r"\n\s*\n", text)[-1].strip()
-    if last.endswith("?"):
-        return False
-    # Prefer substantive ending sentences
-    sentences = [s.strip() for s in re.split(r"(?<=[.!])\s+", last) if s.strip()]
-    if not sentences:
-        return False
-    final = sentences[-1]
-    return len(final.split()) >= 6 and final[-1] in ".!"
-
-
 def extract_best_statement_from_body(body: str) -> Optional[str]:
     """Pull a strong non-question sentence that could serve as the landing."""
     sentences = [
@@ -219,11 +203,10 @@ def select_landing(
     roast: bool = False,
     missing_info: bool = False,
 ) -> LandingDecision:
-    """Choose the single ending mechanism. Never append two."""
+    """Evaluate body first. Only attempt an ending if the body has not landed."""
     um = (user_message or "").lower()
     signatures = extract_signature_language(user_message)
 
-    # Silence — nothing improves the ending
     if missing_info:
         return LandingDecision("SILENCE", False, "clarification belongs in the body")
 
@@ -234,24 +217,17 @@ def select_landing(
         return LandingDecision("SILENCE", False, "killshot should stand")
 
     if technical:
-        return LandingDecision("SILENCE", False, "technical — no Signature Line")
+        return LandingDecision("SILENCE", False, "technical — stop")
 
-    # Action — practical guidance is the goal
     if practical or any(
         p in um
         for p in ("what should i do", "what do i say", "how should i handle", "what now")
     ):
         return LandingDecision("ACTION", False, "practical request")
 
-    # Recognition Callback — SPECIAL: user's own language returns
     authorial_hooks = (
-        "stretch",
-        "stretched",
-        "carrying",
-        "cracked",
-        "got stretched",
-        "the room changed",
-        "room changed",
+        "stretch", "stretched", "carrying", "cracked", "got stretched",
+        "the room changed", "room changed",
     )
     if signatures.protected and any(s in um for s in authorial_hooks):
         return LandingDecision(
@@ -260,12 +236,19 @@ def select_landing(
             "authorial language returns as callback",
         )
 
-    # Signature Line — preferred last sentence for analytic writing
-    _ = body  # generate_signature_line reacts to body at apply time
+    # Highest-priority writer move: stop when the body is already finished
+    if body and body_already_lands(body):
+        return LandingDecision(
+            "BODY_ENDS_RESPONSE",
+            False,
+            "body already landed — stop writing",
+        )
+
+    # Opportunity only — discovery may still return NO_SIGNATURE_FOUND
     return LandingDecision(
         "SIGNATURE_LINE",
         False,
-        "write the sentence the reader remembers tomorrow",
+        "attempt discovery; stop if none earned",
     )
 
 
@@ -345,12 +328,16 @@ def apply_landing(
         q = craft_callback_question(user_message, conversation_id=conversation_id)
         base = _strip_trailing_question(body or text)
         if not q:
-            # Fall back to Signature Line — never invent topic-noun questions
-            out, mod, _sig = ensure_signature_line(base, user_message, plan=plan)
-            return _finish(out, True if mod or modified_strip else modified_strip)
+            # Do not manufacture a Signature Line to replace a failed callback
+            return _finish(base, True if modified_strip or closer else False)
         if q in base:
             return _finish(base, True)
         return _finish(f"{base.rstrip()}\n\n{q}", True)
+
+    if landing == "BODY_ENDS_RESPONSE":
+        base = _strip_trailing_question(body or text)
+        # Strip any manufactured closer; body is the ending
+        return _finish(base, True if (closer or modified_strip) else False)
 
     if landing in {
         "SIGNATURE_LINE",
@@ -358,20 +345,17 @@ def apply_landing(
         "RECOGNITION_OBSERVATION",
     }:
         base = _strip_trailing_question(body or text)
-        # Keep if last line already earns Signature Line status
-        if last_line_is_signature(base, user_message=user_message) or (
-            closer and last_line_is_signature(closer, user_message=user_message)
-        ):
-            kept = base
-            if closer and last_line_is_signature(closer, user_message=user_message):
-                kept = f"{base.rstrip()}\n\n{closer}" if base else closer
-            return _finish(kept, modified_strip)
 
-        # Generate AFTER body exists — react to the draft (single call via ensure)
+        # Re-check: body may already be finished
+        if body_already_lands(base):
+            return _finish(base, True if (closer or modified_strip) else False)
+
+        # Discovery only — NO_SIGNATURE_FOUND is success
         out, mod, sig = ensure_signature_line(base, user_message, plan=plan)
-        if sig:
+        if sig and last_line_is_signature(out, user_message=user_message):
             return _finish(out, True if (mod or closer or modified_strip) else mod)
-        # Nothing earned — silence beats a manufactured slogan
-        return _finish(base, True if (closer or modified_strip) else modified_strip)
+
+        # Discovery failed or deletion test stripped it — body ends the response
+        return _finish(base, True if (closer or modified_strip or mod) else False)
 
     return _finish(text, modified_strip)
