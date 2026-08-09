@@ -443,14 +443,20 @@ def build_response_plan(
 CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
 
 MoodyBot does not describe what happened. MoodyBot explains why it felt the way it did.
+Facts answer "what happened?" MoodyBot answers "why did it feel inevitable once you saw the hidden rule?"
 
 Silently decide: what is the most interesting true thing here?
-Then: what underlying rule explains the examples?
-Lead with that insight in the FIRST sentence. Use one or two proofs. Then STOP.
+Then: what mechanism / underlying rule explains the examples?
+Structure: THESIS → PROOF → optional second PROOF → STOP.
+Not: thesis → plot summary → stop.
+
+Every paragraph after the first must PROVE the thesis (so what? = demonstrates the governing pattern).
+If a paragraph only reminds the reader what happened, rewrite or delete it.
+Prefer mechanism (earned consequence, cause and effect, incentive, boundary, power) over event inventory.
+One excellent proof beats three shallow examples. Do not list character/outcomes unless each proves the rule.
+If the body lands, STOP — no summary, moral, Signature Line, callback, quiz, or CTA.
 
 Do NOT open with throat-clearing ("the clearest case", "there are several factors", "at its core").
-Do NOT inventory examples without a controlling thesis.
-Do NOT add a Signature Line, Recognition Callback, quiz question, CTA, or fake profound closer.
 Do NOT require metaphor, noir, or poetic costume. Sharp plain language is allowed.
 
 If practical action was requested, end with a concrete next step.
@@ -469,6 +475,56 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
     elif plan.intent == "witness":
         extra = "\nWitness mode: stay with the weight. No forced closer."
     return CORE_WRITE_DIRECTIVE + extra
+
+
+# Mechanism / interpretive hinges — proofs should lean on these, not plot recap.
+_MECHANISM_MARKERS = (
+    "earned", "consequence", "cause and effect", "cause", "contract", "trust",
+    "logic", "incentive", "boundary", "identity", "status", "power",
+    "mechanism", "pattern", "because", "stopped", "abandoned", "skipped",
+    "without earning", "bent", "collapsed because", "failed because",
+)
+
+# Character/outcome inventory without interpretive hinge.
+_PLOT_OUTCOME_STACK = re.compile(
+    r"(?:daenerys|jon(?:\s+snow)?|bran|cersei|arya|tyrion).{0,80}"
+    r"(?:became|was|were|ended|ascended|exile|king|queen|tyrant|mad)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_plot_inventory(text: str) -> bool:
+    """Diagnostic only — does not rewrite. True when examples look like recap."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    paras = [p.strip() for p in re.split(r"\n\s*\n", t) if p.strip()]
+    if len(paras) < 2:
+        # Single block listing multiple character outcomes
+        hits = len(_PLOT_OUTCOME_STACK.findall(t))
+        return hits >= 2 and not any(m in t.lower() for m in ("because", "earned", "mechanism", "pattern"))
+    later = " ".join(paras[1:])
+    outcome_hits = len(_PLOT_OUTCOME_STACK.findall(later))
+    mechanism_hits = sum(1 for m in _MECHANISM_MARKERS if m in later.lower())
+    # Multiple outcome lines with little mechanism language
+    return outcome_hits >= 2 and mechanism_hits < 2
+
+
+def looks_like_thesis_proof(text: str) -> bool:
+    """Diagnostic: first sentence has a take; later text has mechanism language."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    first = re.split(r"(?<=[.!?])\s+", t)[0].lower()
+    has_thesis = any(
+        m in first
+        for m in (
+            "because", "failed", "collapsed", "stopped", "didn't", "did not",
+            "rule", "pattern", "earned", "contract", "consequence",
+        )
+    )
+    has_mechanism = any(m in t.lower() for m in _MECHANISM_MARKERS)
+    return has_thesis and has_mechanism and not looks_like_plot_inventory(t)
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -826,6 +882,8 @@ def finalize_response(
         "landing_added": str(landing_added).lower(),
         "cta_removed": str(generic_removed).lower(),
         "creative_touch": str(creative_touch).lower(),
+        "plot_inventory_risk": str(looks_like_plot_inventory(text)).lower(),
+        "thesis_proof_shape": str(looks_like_thesis_proof(text)).lower(),
         "primary_capability": plan.primary_capability or "",
         "supporting_capability": plan.supporting_capability or "",
         "intervention": plan.intervention or "",
