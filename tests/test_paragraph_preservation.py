@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from gold_shape import apply_gold_shape_pass, paragraph_count
+from gold_shape import apply_gold_shape_pass, paragraph_count, writing_shape_label
 from postprocessing import polish_sentences, strip_prefab_phrases
 from response_finalization import finalize_response, build_response_plan
 from surface_render import final_surface_render
@@ -72,6 +72,45 @@ def test_finalizer_preserves_paragraphs_for_high_knife():
 def test_surface_render_preserves_paragraphs():
     text, _ = final_surface_render(MULTI)
     assert paragraph_count(text) == 3
+
+
+def test_structure_persistence_knife_not_promoted_to_reflection():
+    """Multi-paragraph Extended KNIFE must not mute into REFLECTION."""
+    out, report = apply_gold_shape_pass(
+        "cat lady threat projection loneliness epidemic",
+        MULTI,
+        preferred_structure="KNIFE",
+        response_budget="high",
+    )
+    assert writing_shape_label("KNIFE", "high") == "Extended KNIFE"
+    assert report.routing_structure == "Extended KNIFE"
+    assert report.selected_structure == "Extended KNIFE"
+    assert report.structure_override is False
+    # Recommendation may differ; must not become selected
+    assert report.selected_structure != "REFLECTION"
+    assert "\n\n" in out
+
+
+def test_finalizer_structure_persistence_fields():
+    cat_lady = (
+        "It's amusing to me that men refuse to give up the 'cat lady' threat even though "
+        "women have never been threatened by it. It's a projection of his fears, not an "
+        "example of hers. The biggest fear for these men is ending up alone so they assume "
+        "it's women's biggest fear too, but it's not. There's no female loneliness epidemic "
+        "because women don't experience loneliness like men do. Women don't need companionship "
+        "in the same way that men do. Women are okay being single because women aren't ever "
+        "really 'alone' like single men are. The sooner these men realize that threatening "
+        "women with singledom isn't really a threat at all, the sooner they can switch their "
+        "focus to becoming a man who women actually want to be in a relationship with instead."
+    )
+    plan = build_response_plan(cat_lady)
+    finalized = finalize_response(MULTI, cat_lady, plan, channel="telegram")
+    d = finalized.diagnostics
+    assert d["routing_structure"] == "Extended KNIFE"
+    assert d["selected_structure"] == "Extended KNIFE"
+    assert d["structure_override"] == "false"
+    assert d["structure_persistence"] == "routing_only"
+    assert d["preferred_structure"] == "KNIFE"
 
 
 if __name__ == "__main__":

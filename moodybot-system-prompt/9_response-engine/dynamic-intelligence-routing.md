@@ -50,6 +50,18 @@ Once routing selects the lens:
 
 Only routing can. If output sounds like another lens, debug routing/generation fidelity — never silently re-lens in the editor.
 
+### Structure persistence (invariant)
+
+Once routing selects the response structure (Depth × Shape → SNAP / KNIFE / Extended KNIFE / REFLECTION):
+
+- Generation may fill it
+- Editor (Gold) may compress within it
+- Neither may silently promote KNIFE ↔ REFLECTION (or demote Extended KNIFE to SNAP)
+
+If generation/editor heuristics prefer another shape, log it as `generation_recommendation` with `structure_override=false`.
+
+Only routing can change structure. Multi-paragraph Extended KNIFE is not evidence for REFLECTION.
+
 Lens ≠ capability. A lens is a **way of seeing** (what it notices first), not a style theme.
 The question can produce many capabilities (e.g. Bourdain → Sensory Realism, craft appreciation, anti-pretension…).
 

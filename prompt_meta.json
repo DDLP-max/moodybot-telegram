@@ -1,8 +1,8 @@
 {
   "section_count": 216,
-  "char_count": 231955,
-  "prompt_hash": "5fcf4a8e8311a8f5",
-  "prompt_hash_sha256": "5fcf4a8e8311a8f5651e1d2270d19c48713f0c6bc5979aa921e3485d95b2e317",
+  "char_count": 233030,
+  "prompt_hash": "27a6d51fe842f556",
+  "prompt_hash_sha256": "27a6d51fe842f556fe4e9dae589dbd8523908c2777d8cc4984b5046136f80f0c",
   "final_20_sections": [
     "9_response-engine/response-length-tiers.md",
     "9_response-engine/response-type-mapping.md",

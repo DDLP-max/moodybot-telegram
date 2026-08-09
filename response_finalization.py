@@ -30,8 +30,9 @@ from conversation_anchors import (
 from gold_shape import (
     GOLD_SHAPE_VERSION,
     apply_gold_shape_pass,
-    paragraph_count,
     gold_shape_diagnostics,
+    paragraph_count,
+    writing_shape_label,
 )
 from recognition_callbacks import is_generic_followup
 from recognition_landing import (
@@ -207,7 +208,9 @@ class ResponsePlan:
     routed_lens: str = ""
     # Invisible step after lens: the one internal question that opens many capabilities.
     lens_question: str = ""
-    preferred_structure: str = ""  # SNAP | KNIFE | REFLECTION — writing shape
+    preferred_structure: str = ""  # SNAP | KNIFE | REFLECTION — writing shape enum
+    # Product label including Extended KNIFE (high × KNIFE). Routing owns this.
+    routed_structure: str = ""
     mechanism_hint: str = ""  # expected mechanism family for diversity telemetry
     # Depth dimension (Response Budget): low | medium | high
     # Depth × Shape. Gold compresses within the allocated depth.
@@ -216,6 +219,8 @@ class ResponsePlan:
     topic_mode: str = "neutral"
     # Lens persistence: True after routing. Generation/Gold/editorial must not change lens.
     lens_locked: bool = False
+    # Structure persistence: True after routing. Generation/Gold may not re-shape.
+    structure_locked: bool = False
     closing_strategy: str = "none"  # legacy alias of landing
     landing: str = "silence"  # body_ends_response | signature_line | callback | action | silence
     allow_question: bool = False
@@ -669,10 +674,12 @@ _COMPRESS_TOPIC_RE = re.compile(
 
 
 def normalize_structure(structure: str) -> str:
-    """SNAP | KNIFE | REFLECTION. STORY is a legacy alias for REFLECTION."""
-    s = (structure or "KNIFE").upper().strip()
+    """SNAP | KNIFE | REFLECTION. STORY→REFLECTION; Extended KNIFE→KNIFE."""
+    s = (structure or "KNIFE").upper().strip().replace("_", " ")
     if s == "STORY":
         return "REFLECTION"
+    if s in {"EXTENDED KNIFE", "EXTENDEDKNIFE"}:
+        return "KNIFE"
     if s not in {"SNAP", "KNIFE", "REFLECTION"}:
         return "KNIFE"
     return s
@@ -1150,10 +1157,12 @@ def build_response_plan(
         routed_lens=lens,
         lens_question=lens_internal_question(lens),
         preferred_structure=preferred_structure,
+        routed_structure=writing_shape_label(preferred_structure, response_budget),
         mechanism_hint=mechanism_hint,
         response_budget=response_budget,
         topic_mode=topic_mode,
         lens_locked=True,  # only routing may set/change lens
+        structure_locked=True,  # only routing may set/change structure
         closing_strategy=legacy_map.get(landing, "none"),
         landing=landing,
         allow_question=decision.allow_question,
@@ -1921,6 +1930,13 @@ def finalize_response(
         )
         plan.lens = locked_lens
     plan.lens_locked = True
+    # Structure persistence: routing owns SNAP / KNIFE / REFLECTION (and Extended KNIFE label).
+    locked_structure = normalize_structure(plan.preferred_structure or "KNIFE")
+    plan.preferred_structure = locked_structure
+    plan.routed_structure = writing_shape_label(
+        locked_structure, plan.response_budget or "medium"
+    )
+    plan.structure_locked = True
     if not plan.lens_question:
         plan.lens_question = lens_internal_question(locked_lens)
     pattern = plan.governing_pattern or plan.central_insight or infer_governing_pattern(
@@ -1986,7 +2002,7 @@ def finalize_response(
     text, gold_report = apply_gold_shape_pass(
         user_message,
         text,
-        preferred_structure=getattr(plan, "preferred_structure", None) or None,
+        preferred_structure=locked_structure,
         response_budget=getattr(plan, "response_budget", None) or "medium",
     )
     post_editor_paragraph_count = paragraph_count(text)
@@ -1998,6 +2014,22 @@ def finalize_response(
         )
         plan.lens = locked_lens
     plan.lens = locked_lens  # hard pin after Gold
+    # Structure persistence: Editor may recommend, never silently promote/demote.
+    selected_norm = normalize_structure(gold_report.selected_structure or "")
+    if selected_norm != locked_structure:
+        logger.error(
+            "STRUCTURE_PERSISTENCE_VIOLATION routed=%s selected=%s recommendation=%s — restoring",
+            plan.routed_structure,
+            gold_report.selected_structure,
+            gold_report.generation_recommendation,
+        )
+        gold_report.selected_structure = plan.routed_structure
+        gold_report.structure_override = False
+    plan.preferred_structure = locked_structure
+    plan.routed_structure = writing_shape_label(
+        locked_structure, plan.response_budget or "medium"
+    )
+    plan.structure_locked = True
     if gold_report.quality_rewrite_triggered:
         post_reasons.append("gold_shape_compress")
     # Surface invariant baseline is post-gold (whiskey-only changes after this)
@@ -2074,7 +2106,14 @@ def finalize_response(
         "lens_locked": str(bool(plan.lens_locked)).lower(),
         "lens_persistence": "routing_only",
         "preferred_structure": plan.preferred_structure or "",
+        "routing_structure": plan.routed_structure or writing_shape_label(
+            plan.preferred_structure or "", plan.response_budget or "medium"
+        ),
         "selected_structure": gold_report.selected_structure or "",
+        "generation_recommendation": gold_report.generation_recommendation or "",
+        "structure_override": str(gold_report.structure_override).lower(),
+        "structure_locked": str(bool(plan.structure_locked)).lower(),
+        "structure_persistence": "routing_only",
         "response_budget": plan.response_budget or "",
         "topic_mode": plan.topic_mode or "",
         "draft_paragraph_count": str(draft_paragraph_count),

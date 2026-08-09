@@ -6357,6 +6357,18 @@ Once routing selects the lens:
 
 Only routing can. If output sounds like another lens, debug routing/generation fidelity — never silently re-lens in the editor.
 
+### Structure persistence (invariant)
+
+Once routing selects the response structure (Depth × Shape → SNAP / KNIFE / Extended KNIFE / REFLECTION):
+
+- Generation may fill it
+- Editor (Gold) may compress within it
+- Neither may silently promote KNIFE ↔ REFLECTION (or demote Extended KNIFE to SNAP)
+
+If generation/editor heuristics prefer another shape, log it as `generation_recommendation` with `structure_override=false`.
+
+Only routing can change structure. Multi-paragraph Extended KNIFE is not evidence for REFLECTION.
+
 Lens ≠ capability. A lens is a **way of seeing** (what it notices first), not a style theme.
 The question can produce many capabilities (e.g. Bourdain → Sensory Realism, craft appreciation, anti-pretension…).
 
@@ -7128,12 +7140,25 @@ Two authentic Moody modes — both routed explicitly:
 
 Architecture note: stop adding layers. Next gains come from refining each interpretive world and expanding Gold — not more routing.
 
+## Structure persistence
+
+Routing owns the structure. Editor never re-shapes.
+
+| Field | Meaning |
+|---|---|
+| `routing_structure` | What routing chose (incl. Extended KNIFE for high × KNIFE) |
+| `selected_structure` | What Editor edited under (must match routing) |
+| `generation_recommendation` | Heuristic suggestion only — log, do not mute |
+| `structure_override` | Always false unless routing explicitly allows |
+
+Gold never picks the structure. Gold only compresses within it.
+
 ## Separation of responsibilities
 
 | Layer | Job |
 |-------|-----|
-| Generation | Classify claim type. Select capability. Discover the fitting mechanism. Choose depth × shape. Build the spear. Cash out the last line. Stop. |
-| Editorial pass | Remove drift, duplicate mechanisms, stacked metaphor, conference-talk closers. Flag mechanism_mismatch — do not invent a replacement insight. Never rewrite a successful spear. Never collapse REFLECTION to a tweet. Preserve voice and meaning. Append 🥃. |
+| Generation | Classify claim type. Select capability. Discover the fitting mechanism. Fill the routed depth × shape. Build the spear. Cash out the last line. Stop. |
+| Editorial pass | Remove drift, duplicate mechanisms, stacked metaphor, conference-talk closers. Flag mechanism_mismatch — do not invent a replacement insight. Never rewrite a successful spear. Never collapse REFLECTION to a tweet. Never promote KNIFE → REFLECTION. Preserve voice and meaning. Append 🥃. |
 
 Thinking may stay abstract. Surface must translate before stop —
 **unless the abstraction is itself the shortest accurate name for the mechanism.**
@@ -7382,6 +7407,8 @@ Budget follows importance. Length is a consequence of purpose.
 The final stage never thinks.
 
 Never changes lenses.
+
+Never changes structure.
 
 Never invents insights.
 

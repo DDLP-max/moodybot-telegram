@@ -82,6 +82,9 @@ SPEAR_MARKERS = re.compile(
 @dataclass
 class GoldShapeReport:
     selected_structure: str = "KNIFE"
+    routing_structure: str = ""
+    generation_recommendation: str = ""
+    structure_override: bool = False
     premise_relocated: bool = False
     dominant_mechanism_count: int = 1
     draft_word_count: int = 0
@@ -96,11 +99,21 @@ class GoldShapeReport:
 
 
 def _normalize_structure_name(structure: str) -> str:
-    s = (structure or "KNIFE").upper()
+    s = (structure or "KNIFE").strip().upper().replace("_", " ")
     if s == "STORY":
         return "REFLECTION"
+    if s in {"EXTENDED KNIFE", "EXTENDEDKNIFE"}:
+        return "KNIFE"
     if s not in {"SNAP", "KNIFE", "REFLECTION"}:
         return "KNIFE"
+    return s
+
+
+def writing_shape_label(structure: str, response_budget: str = "medium") -> str:
+    """Display label: high × KNIFE → Extended KNIFE (Depth × Shape product name)."""
+    s = _normalize_structure_name(structure)
+    if s == "KNIFE" and (response_budget or "").lower() == "high":
+        return "Extended KNIFE"
     return s
 
 
@@ -236,21 +249,20 @@ def select_structure(
     draft: str,
     preferred: Optional[str] = None,
 ) -> str:
-    """SNAP / KNIFE / REFLECTION — soft selection from length + contemplative cues.
+    """Recommend SNAP / KNIFE / REFLECTION from draft cues.
 
-    preferred comes from the Writing layer (plan.preferred_structure) — a hint,
-    not a hard force. Short taste/SNAP-biased drafts stay SNAP.
-    STORY is accepted as a legacy alias for REFLECTION.
+    Recommendation only — routing owns the structure. Editor must not mute
+    preferred_structure. Multi-paragraph drafts are normal for Extended KNIFE;
+    paragraph count alone must never promote KNIFE → REFLECTION.
     """
     wc = len(words(draft))
     ss = sentences(draft)
-    paras = [p for p in (draft or "").split("\n") if p.strip()]
     preferred = _normalize_structure_name(preferred) if preferred else None
     contemplative = bool(
         re.search(
             r"\b(for (example|instance)|the time|last (week|night|year)|"
-            r"she |he |they |when I |seasons?|years?|daenerys|proof|"
-            r"sneaks up|whisper|years down|chase ends)\b",
+            r"when I |seasons?|sneaks up|whisper|years down|chase ends|"
+            r"get older|purpose|legacy|mortality)\b",
             draft,
             re.I,
         )
@@ -258,21 +270,23 @@ def select_structure(
     wants_reflection = bool(
         re.search(
             r"\b(tell me (the )?story|walk me through|what happened|"
-            r"get older|in (your|their) \d|purpose|legacy|mortality)\b",
+            r"get older|in (your|their) \d|purpose|legacy|mortality|"
+            r"grief|forgive|forgiveness)\b",
             user_message,
             re.I,
         )
     )
-    if preferred == "REFLECTION":
+    # Soft recommendation (caller may ignore when routing locked a shape)
+    if wants_reflection:
         return "REFLECTION"
-    if wants_reflection or len(paras) >= 3 or (contemplative and (wc >= 120 or len(ss) >= 5)):
+    if contemplative and (wc >= 160 or len(ss) >= 7):
         return "REFLECTION"
     if preferred == "SNAP" and wc <= 70 and len(ss) <= 3:
         return "SNAP"
     if wc <= 45 and len(ss) <= 2:
         return "SNAP"
-    if preferred == "KNIFE":
-        return "KNIFE"
+    if preferred in {"KNIFE", "REFLECTION", "SNAP"}:
+        return preferred
     if preferred == "SNAP" and wc <= 90:
         return "SNAP"
     return "KNIFE"
@@ -740,18 +754,30 @@ def apply_gold_shape_pass(
     preferred_norm = (
         _normalize_structure_name(preferred_structure) if preferred_structure else None
     )
-    structure = _normalize_structure_name(
-        structure
-        or select_structure(user_message, draft, preferred=preferred_structure)
+    explicit = _normalize_structure_name(structure) if structure else None
+    recommendation = select_structure(
+        user_message, draft, preferred=preferred_structure
     )
-    # Honor routed shape; do not tweet-collapse high-depth or REFLECTION drafts
-    if preferred_norm == "REFLECTION":
-        structure = "REFLECTION"
-    elif budget == "high" and structure == "SNAP" and preferred_norm != "SNAP":
-        structure = preferred_norm if preferred_norm in {"KNIFE", "REFLECTION"} else "KNIFE"
+    # Structure persistence: routing owns the shape. Recommendation is log-only.
+    if preferred_norm:
+        editor_structure = preferred_norm
+        override = False
+    elif explicit:
+        editor_structure = explicit
+        override = False
+    else:
+        editor_structure = recommendation
+        override = False
+    structure = editor_structure
+    routing_label = writing_shape_label(preferred_norm or structure, budget)
+    selected_label = writing_shape_label(structure, budget)
+    recommendation_label = writing_shape_label(recommendation, budget)
     body = strip_whiskey(draft)
     report = GoldShapeReport(
-        selected_structure=structure,
+        selected_structure=selected_label,
+        routing_structure=routing_label,
+        generation_recommendation=recommendation_label,
+        structure_override=override,
         draft_word_count=len(words(body)),
         premise_relocated=premise_relocated(user_message, body),
         response_budget=budget,
@@ -808,6 +834,10 @@ def gold_shape_diagnostics(report: GoldShapeReport) -> dict:
     return {
         "gold_shape_version": GOLD_SHAPE_VERSION,
         "selected_structure": report.selected_structure,
+        "routing_structure": report.routing_structure or report.selected_structure,
+        "generation_recommendation": report.generation_recommendation or "",
+        "structure_override": str(report.structure_override).lower(),
+        "structure_persistence": "routing_only",
         "premise_relocated": str(report.premise_relocated).lower(),
         "dominant_mechanism_count": str(report.dominant_mechanism_count),
         "draft_word_count": str(report.draft_word_count),

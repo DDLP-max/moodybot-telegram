@@ -55,6 +55,8 @@ The final stage never thinks.
 
 Never changes lenses.
 
+Never changes structure.
+
 Never invents insights.
 
 It only removes everything that doesn't deserve to survive.

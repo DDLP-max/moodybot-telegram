@@ -48,6 +48,8 @@ def test_cat_lady_is_high_knife_not_reflection():
     assert plan.response_budget == "high"
     assert plan.preferred_structure == "KNIFE"
     assert plan.preferred_structure != "REFLECTION"
+    assert plan.routed_structure == "Extended KNIFE"
+    assert plan.structure_locked is True
     g = plan_closer_instruction(plan).lower()
     assert "extended knife" in g or "depth: high" in g
     assert "do not flip into lyrical" in g or "extended knife" in g
