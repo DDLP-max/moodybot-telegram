@@ -95,6 +95,7 @@ def test_reflection_guidance_names_purpose_and_diamond():
     assert "new layer" in g or "reinforce" in g
     assert "and then" in g
     assert "semantic units" in g
+    assert "structural contract" in g or "paragraph 1" in g
     assert "3–6" in g or "3-6" in g or "paragraphs" in g
 
 

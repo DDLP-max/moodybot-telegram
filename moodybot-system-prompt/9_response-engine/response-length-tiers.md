@@ -27,10 +27,12 @@ Purpose first; length is a consequence.
 
 **Paragraphs are semantic units, not visual spacing.**
 
-REFLECTION: Observation → Deepening → Consequence → Acceptance (only if earned).
-3–6 paragraphs. Each answers "And then?" with a new layer — not another proof of the same point.
-Extended KNIFE: 2–4 paragraphs of forward motion. Never re-prove six ways.
-Every paragraph must survive.
+Structural contract — emit blank lines between beats:
+- Extended KNIFE: Observation → Development/proof → optional Consequence (2–4)
+- REFLECTION: Observation → Deepening → Consequence → optional Acceptance (3–6)
+
+Each paragraph answers "And then?" with a new layer — not another proof of the same point.
+Every paragraph must survive. Never flatten multi-paragraph drafts into one wall.
 
 EXPAND → REFLECTION: existential, grief, mortality, purpose, identity, parenthood, love, aging, failure, forgiveness, legacy.
 

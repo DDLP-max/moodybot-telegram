@@ -239,7 +239,17 @@ async def send_message(
     
     # Format for HTML parse mode
     html_text = format_html_message(formatted_text)
-    
+    try:
+        from gold_shape import paragraph_count as _paragraph_count
+
+        logger.info(
+            "PARA_TRACE_TELEGRAM mode=%s telegram_payload_paragraph_count=%s",
+            mode,
+            _paragraph_count(formatted_text),
+        )
+    except Exception:
+        pass
+
     try:
         # Send with HTML parse mode
         await update.message.reply_text(html_text, parse_mode='HTML')

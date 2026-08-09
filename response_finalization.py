@@ -30,6 +30,7 @@ from conversation_anchors import (
 from gold_shape import (
     GOLD_SHAPE_VERSION,
     apply_gold_shape_pass,
+    paragraph_count,
     gold_shape_diagnostics,
 )
 from recognition_callbacks import is_generic_followup
@@ -821,10 +822,12 @@ def response_budget_guidance(budget: str, structure: str = "", topic_mode: str =
             "\nRESPONSE BUDGET — Depth: high × Shape: REFLECTION.\n"
             "PURPOSE: Leave the reader seeing their own life differently.\n"
             "PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.\n"
-            "Split when the thought changes. Merge when it doesn't. "
-            "Never create a paragraph simply because it looks nicer.\n"
-            "FORMAT: 3–6 paragraphs. Observation → Deepening → Consequence → "
-            "Acceptance (only if earned).\n"
+            "STRUCTURAL CONTRACT — emit blank lines between beats (not one wall of text):\n"
+            "Paragraph 1 — Observation\n"
+            "Paragraph 2 — Deepening\n"
+            "Paragraph 3 — Consequence\n"
+            "Paragraph 4 (optional) — Acceptance (only if earned)\n"
+            "STOP. 3–6 paragraphs max.\n"
             "REFLECTION EDITORIAL RULE: Does this paragraph introduce a new layer, "
             "or merely another way of saying the previous one? "
             "If it merely reinforces — delete it.\n"
@@ -839,8 +842,11 @@ def response_budget_guidance(budget: str, structure: str = "", topic_mode: str =
             "\nRESPONSE BUDGET — Depth: high × Shape: Extended KNIFE.\n"
             "PURPOSE: Develop one mechanism until it feels inevitable.\n"
             "PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.\n"
-            "FORMAT: 2–4 paragraphs. Each advances the mechanism. "
-            "Never split because it looks nicer.\n"
+            "STRUCTURAL CONTRACT — emit blank lines between beats (not one wall of text):\n"
+            "Paragraph 1 — Observation\n"
+            "Paragraph 2 — Development / proof\n"
+            "Paragraph 3 (optional) — Consequence\n"
+            "STOP. 2–4 paragraphs. Each advances the mechanism.\n"
             f"Topic mode: {mode or 'argument'}. Soft ~100–260 words (consequence).\n"
             "AND THEN? TEST: if the next paragraph is just another proof of the same point, remove it.\n"
             "Do NOT flip into lyrical REFLECTION on politics/hot-takes.\n"
@@ -1194,6 +1200,8 @@ Hank Moody → What's the human truth nobody wants to admit?
 Pattern Recognition → What pattern repeats here?
 Emotional Intelligence → What feeling or boundary is driving this without a sweeping group claim?
 EI begins with people, not groups. Prefer transferable human pattern over demographic scorekeeping.
+EI writing instinct: name the emotional mechanism — do not narrate the person's inner movie,
+and do not finish the reader's inference. The prompt already carries the rest.
 The question can produce many capabilities (Sensory Realism, opportunity cost, missing info…).
 Capability ≠ lens.
 
@@ -1269,11 +1277,20 @@ Split when the thought changes. Merge when the thought doesn't.
 Never create a paragraph simply because it "looks nicer."
 Law 7 extension: every sentence must survive — and every paragraph must survive.
 
-CADENCE BY STRUCTURE:
+CADENCE BY STRUCTURE (structural contract — emit blank lines; not formatting polish):
 - SNAP: one paragraph; one movement.
 - KNIFE: one paragraph; two only if the second is the proof rather than another thesis.
-- Extended KNIFE: 2–4 paragraphs; each advances the mechanism.
-- REFLECTION: 3–6 paragraphs — Observation → Deepening → Consequence → Acceptance (only if earned).
+- Extended KNIFE:
+  Paragraph 1 — Observation
+  Paragraph 2 — Development / proof
+  Paragraph 3 (optional) — Consequence
+  STOP. 2–4 paragraphs.
+- REFLECTION:
+  Paragraph 1 — Observation
+  Paragraph 2 — Deepening
+  Paragraph 3 — Consequence
+  Paragraph 4 (optional) — Acceptance (only if earned)
+  STOP. 3–6 paragraphs.
 
 REFLECTION EDITORIAL RULE:
 Does this paragraph introduce a new layer, or merely another way of saying the previous one?
@@ -1287,7 +1304,10 @@ FAIL: insight lands, then three more sentences making sure it landed (over-confi
 PASS: each paragraph deepens once; trust the reader; stop.
 
 Editor check (not a routing rule): every paragraph must deepen.
-If a paragraph only restates or reinforces the previous one, remove it. Preserve semantic paragraph breaks.
+Delete entire paragraphs that fail the "And then?" test.
+Never merge paragraphs that represent different semantic beats.
+Never flatten multi-paragraph drafts into one wall of text.
+Preserve semantic paragraph breaks.
 
 ONE MECHANISM:
 one thesis → one mechanism → prove it (with enough development for the depth).
@@ -1547,15 +1567,21 @@ def lens_voice_guidance(lens: str) -> str:
             "Begin with people, not groups. Prefer the transferable human pattern over "
             "a sweeping claim about men/women/generations as blocs.\n"
             "Guardrail: can I explain the mechanism without a demographic universal?\n"
+            "Writing instinct: name the emotional mechanism. Do not narrate the person's "
+            "inner movie unless the prompt genuinely asks for it. Do not finish the "
+            "reader's inference — once the mechanism is obvious, stop.\n"
             "Not dating advice. Not therapy. Not validation. Not self-help. Not sociology cosplay.\n"
-            "Common failure: therapy-speak; OR staking the answer on 'women do X / men do Y' "
-            "when the durable mechanism is projection, fear, or history.\n"
+            "Common failure: therapy-speak; completing the psychology; OR staking the answer "
+            "on 'women do X / men do Y' when the durable mechanism is projection, fear, or history.\n"
+            "FAIL (finishing inference): \"emptiness without someone to witness his life… "
+            "She already knows how to build a life that doesn't require a man…\"\n"
             "FAIL (group claim): \"Women built lives with friends… Men built theirs around the woman…\"\n"
             "FAIL (therapy): \"It sounds like you're feeling a lot of feelings and that's valid…\"\n"
-            "PASS: \"Everything else is your history trying to sell you a harder story.\"\n"
+            "PASS: \"The 'cat lady' line isn't really about women. It's a man naming the "
+            "future he'd fear most and handing it to someone else like it's universal.\"\n"
             "PASS: \"People only use threats they believe would work on themselves.\"\n"
             "PASS: \"People usually threaten others with the loss they'd fear most themselves.\"\n"
-            "Relocate the premise. One emotional mechanism. Stop.\n"
+            "Relocate the premise. One emotional mechanism. Trust the reader. Stop.\n"
         )
     if name == "Quiet Presence":
         return (
@@ -1915,6 +1941,7 @@ def finalize_response(
 
     body_generated = (draft or "").strip()
     text = body_generated
+    draft_paragraph_count = paragraph_count(body_generated)
     draft_last = _last_sentence(text)
     epistemic_rewrite = False
     generic_removed = False
@@ -1962,6 +1989,7 @@ def finalize_response(
         preferred_structure=getattr(plan, "preferred_structure", None) or None,
         response_budget=getattr(plan, "response_budget", None) or "medium",
     )
+    post_editor_paragraph_count = paragraph_count(text)
     if plan.lens != locked_lens:
         logger.error(
             "LENS_PERSISTENCE_VIOLATION locked=%s got=%s — restoring routing lens",
@@ -1983,6 +2011,7 @@ def finalize_response(
 
     text, surface_cleaned = final_surface_render(text)
     gold_report.whiskey_tail_present = "🥃" in text
+    post_finalizer_paragraph_count = paragraph_count(text)
     after_surface_last = _last_sentence(text)
 
     if not response_text_after_surface_semantically_equals(after_landing, text):
@@ -2045,8 +2074,12 @@ def finalize_response(
         "lens_locked": str(bool(plan.lens_locked)).lower(),
         "lens_persistence": "routing_only",
         "preferred_structure": plan.preferred_structure or "",
+        "selected_structure": gold_report.selected_structure or "",
         "response_budget": plan.response_budget or "",
         "topic_mode": plan.topic_mode or "",
+        "draft_paragraph_count": str(draft_paragraph_count),
+        "post_editor_paragraph_count": str(post_editor_paragraph_count),
+        "post_finalizer_paragraph_count": str(post_finalizer_paragraph_count),
         "mechanism_hint": plan.mechanism_hint or "",
         "intervention": plan.intervention or "",
         "voice": plan.voice or "",

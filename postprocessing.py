@@ -178,6 +178,36 @@ def restore_whitelisted_tokens(text: str, tokens_to_preserve: Dict[str, str]) ->
         restored_text = restored_text.replace(placeholder, original)
     return restored_text
 
+def polish_sentences(text: str) -> str:
+    """Light clause polish. Preserve semantic paragraph breaks (\\n\\n)."""
+    body = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not body:
+        return body
+
+    def _polish_block(block: str) -> str:
+        sentences = re.split(r"(?<=[.!?])\s+", block.strip())
+        polished = []
+        for sentence in sentences:
+            if "," in sentence:
+                parts = sentence.split(",")
+                if len(parts) == 2:
+                    left, right = parts[0].strip(), parts[1].strip()
+                    if re.match(r"^[A-Z][^,]+$", left) and re.match(r"^[A-Z][^,]+$", right):
+                        sentence = f"{left}; {right}"
+            if len(sentence.split()) > 25 and "," not in sentence and ";" not in sentence:
+                sentence = re.sub(r"\b(and|but)\b", r". \1", sentence, count=1)
+            polished.append(sentence)
+        return " ".join(polished)
+
+    paras = [p.strip() for p in re.split(r"\n\s*\n+", body) if p.strip()]
+    if len(paras) <= 1:
+        if "\n\n" not in body and "\n" in body:
+            lines = [ln.strip() for ln in body.split("\n") if ln.strip()]
+            return _polish_block(" ".join(lines))
+        return _polish_block(body)
+    return "\n\n".join(_polish_block(p) for p in paras)
+
+
 def strip_prefab_phrases(text: str) -> str:
     """
     Strip unwanted prefab phrases from bot outputs.
@@ -225,10 +255,12 @@ def strip_prefab_phrases(text: str) -> str:
             # Remove the pattern
             cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
     
-    # Clean up any extra whitespace left behind
-    cleaned_text = re.sub(r'^\s+', '', cleaned_text)  # Remove leading whitespace
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)  # Normalize internal whitespace
-    
+    # Clean horizontal whitespace only — never flatten paragraph cadence (\n\n)
+    cleaned_text = re.sub(r"^[ \t]+", "", cleaned_text)
+    cleaned_text = re.sub(r"[ \t]+", " ", cleaned_text)
+    cleaned_text = re.sub(r" *\n *", "\n", cleaned_text)
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+
     # Log if any changes were made
     if cleaned_text != original_text and os.getenv('DEBUG', '').startswith('bot:postprocess'):
         logger.info(f"PREFAB STRIPPING: '{original_text[:50]}...' -> '{cleaned_text[:50]}...'")

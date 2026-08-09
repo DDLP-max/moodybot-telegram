@@ -66,6 +66,8 @@ The question can produce many capabilities (e.g. Bourdain → Sensory Realism, c
 
 EI guardrail: begin with people, not groups. Prefer the transferable human pattern over demographic universals ("women do X / men do Y") when the durable mechanism is projection, fear, or history.
 
+EI writing instinct: name the emotional mechanism. Don't narrate the person's inner movie unless the prompt asks. Don't finish the reader's inference.
+
 Common failures (not style — noticing the wrong thing first):
 
 | Lens | Common failure |
@@ -75,7 +77,7 @@ Common failures (not style — noticing the wrong thing first):
 | CIA | Sherlock certainty |
 | Hank Moody | Cynicism / profanity costume |
 | Pattern Recognition | Same mechanism every time |
-| Emotional Intelligence | Therapy-speak |
+| Emotional Intelligence | Therapy-speak; completing the psychology / finishing the inference |
 
 Gold never picks the lens. Gold only compresses. Protect that boundary.
 

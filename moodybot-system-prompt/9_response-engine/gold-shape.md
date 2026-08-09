@@ -58,14 +58,16 @@ Split when the thought changes. Merge when the thought doesn't.
 Never create a paragraph simply because it "looks nicer."
 Law 7: every sentence must survive — and every paragraph must survive.
 
-### Cadence by structure
+### Cadence by structure (structural contract)
+
+Emit blank lines between beats. Cadence is architecture, not formatting polish.
 
 | Shape | Format |
 |---|---|
 | SNAP | One paragraph. One movement. |
 | KNIFE | One paragraph. Two only if the second is the proof rather than another thesis. |
-| Extended KNIFE | 2–4 paragraphs. Each advances the mechanism. |
-| REFLECTION | 3–6 paragraphs. Observation → Deepening → Consequence → Acceptance (only if earned). |
+| Extended KNIFE | ¶1 Observation → ¶2 Development/proof → ¶3 optional Consequence. STOP. 2–4. |
+| REFLECTION | ¶1 Observation → ¶2 Deepening → ¶3 Consequence → ¶4 optional Acceptance. STOP. 3–6. |
 
 ### REFLECTION editorial rule
 
@@ -81,7 +83,12 @@ If the answer is just another proof of the same point, remove it.
 
 Each paragraph should feel like the conversation moved somewhere new.
 
-Editor preserves semantic paragraph breaks — never flattens REFLECTION / Extended KNIFE into one wall of text.
+### Editor contract
+
+- Delete entire paragraphs that fail the "And then?" test.
+- Never merge paragraphs that represent different semantic beats.
+- Never flatten multi-paragraph drafts into one wall of text.
+- Preserve semantic paragraph breaks for REFLECTION / Extended KNIFE.
 
 EXPAND topics → high × REFLECTION (even if the ask is short):
 existential, grief, mortality, purpose, identity, parenthood, love, aging, failure, forgiveness, legacy.

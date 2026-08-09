@@ -160,11 +160,16 @@ def words(text: str) -> List[str]:
 
 
 def paragraphs(text: str) -> List[str]:
-    """Blank-line separated units of thought."""
+    """Blank-line separated semantic units (not visual spacing)."""
     body = strip_whiskey(text or "").strip()
     if not body:
         return []
     return [p.strip() for p in re.split(r"\n\s*\n+", body) if p.strip()]
+
+
+def paragraph_count(text: str) -> int:
+    """Blank-line paragraph units; whiskey ignored."""
+    return len(paragraphs(text))
 
 
 def sentences(text: str) -> List[str]:
@@ -706,7 +711,11 @@ def _compress_once(
             ):
                 text = " ".join(prior).strip()
 
-    # SNAP / medium KNIFE: single block. High / REFLECTION single-block: keep spaces only.
+    # SNAP / medium KNIFE: single block OK. High / REFLECTION: never invent flatten of cadence.
+    if keep_paragraphs:
+        text = re.sub(r"[ \t]{2,}", " ", text).strip()
+        text = re.sub(r"[ \t]+([,.!?;:])", r"\1", text)
+        return text
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     return text

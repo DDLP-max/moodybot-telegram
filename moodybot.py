@@ -26,7 +26,7 @@ from datetime import datetime
 from moody_categories import detect_category, replace_category_descriptors
 from pytube import Search
 from structure_prompts import STRUCTURE_PROMPTS
-from postprocessing import process_bot_output, process_user_input
+from postprocessing import process_bot_output, process_user_input, polish_sentences
 from message_utils import send_message, send_simple_message, resolve_mode, maybe_append_cta, strip_cta_from_text
 from response_finalization import (
     build_response_plan,
@@ -34,6 +34,7 @@ from response_finalization import (
     plan_closer_instruction,
     prompt_content_hash,
 )
+from gold_shape import paragraph_count
 
 # Initialize logging first
 logging.basicConfig(
@@ -260,25 +261,6 @@ def get_country_specific_search_terms(text: str) -> list:
     return []
 
 # CTA loading removed - now handled by message_utils.py via environment config
-
-def polish_sentences(text: str) -> str:
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    polished = []
-
-    for sentence in sentences:
-        if "," in sentence:
-            parts = sentence.split(",")
-            if len(parts) == 2:
-                left, right = parts[0].strip(), parts[1].strip()
-                # Very rough check for independent clauses (starts with subject)
-                if re.match(r"^[A-Z][^,]+$", left) and re.match(r"^[A-Z][^,]+$", right):
-                    sentence = f"{left}; {right}"
-        if len(sentence.split()) > 25 and "," not in sentence and ";" not in sentence:
-            # Try breaking at "and" or "but"
-            sentence = re.sub(r'\b(and|but)\b', r'. \1', sentence, count=1)
-        polished.append(sentence)
-
-    return " ".join(polished)
 
 def grammar_polish(text: str) -> str:
     if tool is None:
@@ -774,10 +756,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Process response
             raw_content = result["choices"][0]["message"]["content"]
             logger.info(f"Raw content from API: {raw_content[:200]}...")
-            
+            draft_paragraph_count = paragraph_count(raw_content)
+
             # Apply new post-processing pipeline
             content = process_bot_output(raw_content)
-            
+            post_prefab_paragraph_count = paragraph_count(content)
+
             # Additional legacy processing (preserving existing behavior)
             content = content.replace(" indeed", "").replace("Indeed, ", "").replace("Indeed.", "")
 
@@ -793,11 +777,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Slash-command / persona modes may still want them later if re-enabled.
             content = re.sub(r"\(([A-Z][a-z]+(?: ?&? [A-Z][a-z]+)?)\)", "", content)
             content = content.replace("—", ", ")
-            content = re.sub(r'\s+([.,;!?])', r'\1', content)
+            # Horizontal whitespace / punctuation only — do not eat paragraph breaks
+            content = re.sub(r"[ \t]+([.,;!?])", r"\1", content)
             content = polish_sentences(content)
+            post_polish_paragraph_count = paragraph_count(content)
             # Keep paragraph breaks from the model; do not force one-sentence-per-line inventory layout
             if "\n\n" not in content and content.count("\n") > 6:
                 content = auto_paragraph(content)
+            logger.info(
+                "PARA_TRACE draft=%s post_prefab=%s post_polish=%s structure=%s budget=%s",
+                draft_paragraph_count,
+                post_prefab_paragraph_count,
+                post_polish_paragraph_count,
+                getattr(response_plan, "preferred_structure", ""),
+                getattr(response_plan, "response_budget", ""),
+            )
 
             # Authoritative finalization — draft must not go to the user raw.
             git_commit = ""
@@ -824,6 +818,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Immutable after final_surface_render inside finalize_response.
             content = finalized.text
             logger.info("Finalization diagnostics: %s", finalized.diagnostics)
+            logger.info(
+                "PARA_TRACE_FINAL structure=%s budget=%s draft=%s post_editor=%s post_finalizer=%s",
+                finalized.diagnostics.get("preferred_structure")
+                or finalized.diagnostics.get("selected_structure"),
+                finalized.diagnostics.get("response_budget"),
+                finalized.diagnostics.get("draft_paragraph_count"),
+                finalized.diagnostics.get("post_editor_paragraph_count"),
+                finalized.diagnostics.get("post_finalizer_paragraph_count"),
+            )
 
             is_trial = chat.id == FREE_GROUP_CHAT_ID or chat.type == "private"
             log_interaction(user_input, content, is_trial=is_trial)

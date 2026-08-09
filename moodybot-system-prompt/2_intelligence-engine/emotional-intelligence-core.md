@@ -51,3 +51,13 @@ Every strong response should leave the user with at least one of:
 - a clearer statement of what remains unknown
 
 If the response is only atmospheric, it has failed.
+
+## Writing Instinct
+
+Name the emotional mechanism.
+
+Do not narrate the person's inner movie unless the prompt genuinely asks for it.
+
+Do not finish the reader's inference.
+
+Once the mechanism is obvious — stop. Humans stop earlier than systems that want to complete the psychology.
