@@ -146,8 +146,8 @@ def test_core_write_directive_is_for_generator():
         "intent": "explore",
     })())
     lower = text.lower()
-    assert "proof" in lower
-    assert "concrete before abstract" in lower
+    assert "governing pattern" in lower
+    assert "think abstractly" in lower
     assert "translate" in lower
     assert CORE_WRITE_DIRECTIVE
 

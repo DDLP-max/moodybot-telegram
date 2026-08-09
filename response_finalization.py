@@ -197,7 +197,8 @@ class ResponsePlan:
     needs_practical_action: bool = False
     expected_shift_from: Optional[str] = None
     expected_shift_to: Optional[str] = None
-    central_insight: Optional[str] = None
+    governing_pattern: Optional[str] = None  # invisible rule — not a prose sentence
+    central_insight: Optional[str] = None  # legacy alias of governing_pattern
     original_subject: Optional[str] = None
     closing_strategy: str = "none"  # legacy alias of landing
     landing: str = "silence"  # body_ends_response | signature_line | callback | action | silence
@@ -255,12 +256,54 @@ def extract_high_signal_vocabulary(user_message: str, draft: str = "") -> List[s
     return out
 
 
+def infer_governing_pattern(user_message: str, draft: str = "") -> str:
+    """Diagnostic: short rule-shaped pattern — not a mid-essay analytical sentence.
+
+    Prefer the opening take when it reads like a noticed rule.
+    Never prefer mid-draft consultant vocabulary as the logged 'insight'.
+    """
+    sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", (draft or "").strip())
+        if s.strip() and not s.strip().endswith("?")
+    ]
+    if sentences:
+        first = sentences[0]
+        fl = first.lower()
+        # Opening take that sounds like a rule / observation
+        if 12 <= len(first) <= 180 and any(
+            w in fl
+            for w in (
+                "rule", "because", "stopped", "promise", "trust", "cost",
+                "move", "when", "didn't", "did not", "not because", "playing",
+            )
+        ):
+            # Skip if it dumps internal analysis labels
+            if not any(
+                bad in fl
+                for bad in (
+                    "incentive structure", "narrative contract", "coherence",
+                    "framework", "governing mechanism", "systemic",
+                )
+            ):
+                return first.rstrip(".!")
+        # Otherwise first short concrete sentence beats a middle-essay dump
+        if 12 <= len(first) <= 140:
+            if not any(
+                bad in fl
+                for bad in (
+                    "incentive structure", "narrative contract",
+                    "framework", "governing mechanism",
+                )
+            ):
+                return first.rstrip(".!")
+    subject = extract_original_subject(user_message)
+    return f"pattern about {subject}" if subject else ""
+
+
 def infer_central_insight(user_message: str, draft: str) -> str:
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", draft or "") if s.strip()]
-    candidates = [s for s in sentences if 40 <= len(s) <= 180 and not s.endswith("?")]
-    if candidates:
-        return candidates[min(len(candidates) - 1, max(0, len(candidates) // 2))]
-    return extract_original_subject(user_message)
+    """Legacy name — returns governing_pattern."""
+    return infer_governing_pattern(user_message, draft)
 
 
 def needs_clarification(user_message: str) -> bool:
@@ -405,6 +448,7 @@ def build_response_plan(
         needs_practical_action=practical,
         expected_shift_from="confusion" if insight else None,
         expected_shift_to="clarity" if insight else ("action" if practical else None),
+        governing_pattern=None,
         central_insight=None,
         original_subject=subject,
         closing_strategy=legacy_map.get(landing, "none"),
@@ -420,32 +464,36 @@ def build_response_plan(
 
 CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
 
+THINK abstractly. SPEAK concretely.
+MoodyBot sees systems. MoodyBot does not talk ABOUT systems.
+
 MoodyBot does not describe what happened. MoodyBot explains why it felt the way it did.
-Facts answer "what happened?" MoodyBot answers "why did it feel inevitable once you saw the hidden rule?"
 
-Generation order:
-1) Find the hidden pattern.
-2) Translate it into ordinary human language.
-3) Write: THESIS → PROOF → optional second PROOF → STOP.
-Not: thesis → plot summary → stop.
+Generation order (mandatory):
+1) Intent / evidence
+2) GOVERNING PATTERN — answer: "What invisible rule explains this?" (not "what sentence summarizes this?")
+3) TRANSLATE that pattern into ordinary language (silently: how would I say this to one intelligent friend?)
+4) WRITE: concrete claim → one or two proofs of what someone would notice → STOP
 
-CONCRETE BEFORE ABSTRACT:
-If a simple word carries the same meaning, use it.
-Prefer: rules, promises, trust, cost, pressure, cheating, earning, breaking, winning, losing, waiting, leaving, staying.
-Avoid consultant/engine jargon when plain English is stronger: incentive structure, narrative contract, coherence, framework, optimization, behavioral system, ideological structure, epistemic calibration, pattern forensics.
-Do not ban useful precision (legal terms, real technical terms, "incentives" when it truly fits).
-Internal analysis may use systems language; output should sound spoken — barstool test / would a human say this aloud?
-First sentence = the take in plain language with tension. Not "the governing mechanism is..."
+Never dump internal reasoning labels into prose.
+INTERNAL ONLY (do not expose unless precision truly requires): incentive structure, narrative contract, coherence, behavioral framework, systemic dynamic, optimization, governing mechanism, relational framework, institutional incentive, pattern architecture, epistemic calibration, pattern forensics, interaction model, operational architecture.
 
-Every paragraph after the first must PROVE the thesis in concrete terms.
+Prefer spoken observations: rules, promises, trust, cost, pressure, cheating, earning, breaking, winning, losing, waiting, leaving, staying, move, boundary, attention, reward.
+
+First sentence = concrete claim with tension.
+GOOD: "The show stopped playing by its own rules." / "He's making a move." / "People don't trust you yet."
+BAD: "The series abandoned the incentive structure..." / "The relationship exhibits..." / "The trust architecture is underdeveloped."
+
+Every paragraph: "What would a perceptive person actually notice?" — not "what analytical category is this?"
 One excellent proof beats three shallow examples.
-If the body lands, STOP — no summary, moral, Signature Line, callback, quiz, or CTA.
+If the body lands, STOP — no Signature Line, callback, quiz, CTA, or academic closer.
 
-Do NOT open with throat-clearing ("the clearest case", "there are several factors", "at its core").
-Do NOT require metaphor, noir, or poetic costume.
+Do NOT open with throat-clearing. Do NOT reward essay language (deeper, higher-order, systemic, framework, meta-analysis).
+Do NOT require metaphor, noir, or poetic costume. Keep real technical/legal terms when they are the precise terms.
+
+Product test: reader thinks "I've never looked at it like that" — not "that was a sophisticated explanation."
 
 If practical action was requested, end with a concrete next step.
-Otherwise end when the answer lands.
 """
 
 
@@ -718,7 +766,11 @@ def finalize_response(
         channel=channel,
         mode=mode,
     )
-    plan.central_insight = plan.central_insight or infer_central_insight(user_message, draft)
+    pattern = plan.governing_pattern or plan.central_insight or infer_governing_pattern(
+        user_message, draft
+    )
+    plan.governing_pattern = pattern
+    plan.central_insight = pattern  # legacy alias
     plan.original_subject = plan.original_subject or extract_original_subject(user_message)
 
     anchors = extract_conversation_anchors(user_message, draft)
@@ -819,7 +871,8 @@ def finalize_response(
         "git_commit": git_commit or "",
         "landing_engine_version": LANDING_ENGINE_VERSION,
         "creative_ending_tools": str(CREATIVE_ENDING_TOOLS_ENABLED).lower(),
-        "core_insight": (plan.central_insight or "")[:240],
+        "governing_pattern": (plan.governing_pattern or "")[:240],
+        "core_insight": (plan.governing_pattern or "")[:240],  # deprecated alias
         "body_generated": body_generated[:400],
         "post_finalizer_changed_text": str(post_finalizer_changed).lower(),
         "post_finalizer_reason": ",".join(post_reasons) if post_reasons else "none",

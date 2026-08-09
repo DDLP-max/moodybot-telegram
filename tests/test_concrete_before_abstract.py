@@ -27,13 +27,11 @@ def test_concrete_before_abstract_doc_exists():
 
 def test_write_directive_requires_translation_step():
     lower = CORE_WRITE_DIRECTIVE.lower()
-    assert "concrete before abstract" in lower
-    assert "ordinary human language" in lower or "ordinary language" in lower
+    assert "think abstractly" in lower and "speak concretely" in lower
+    assert "governing pattern" in lower
     assert "translate" in lower
-    assert "barstool" in lower or "say this aloud" in lower
-    assert "incentive structure" in lower  # named as avoid
+    assert "incentive structure" in lower  # named as internal-only
     assert "narrative contract" in lower
-    # Prefer human words
     assert "rules" in lower and "promises" in lower and "trust" in lower
 
 
