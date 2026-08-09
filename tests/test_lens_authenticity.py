@@ -303,6 +303,8 @@ def test_ei_prefers_people_not_group_claims():
     assert "people, not groups" in g or "begin with people" in g
     assert "people only use threats they believe would work on themselves" in g
     assert "women built lives with friends" in g  # FAIL example
+    assert "approach diversity" in g
+    assert "do not always open" in g or "not mandatory" in g
 
 
 if __name__ == "__main__":

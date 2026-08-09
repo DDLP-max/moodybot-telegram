@@ -1,15 +1,15 @@
 {
-  "section_count": 216,
-  "char_count": 233879,
-  "prompt_hash": "fd546c05ffe70d94",
-  "prompt_hash_sha256": "fd546c05ffe70d944ccfc2e297484df990ac310d3e2872a4942e1aed164d1b13",
+  "section_count": 217,
+  "char_count": 237543,
+  "prompt_hash": "22eeb24423fe05be",
+  "prompt_hash_sha256": "22eeb24423fe05bea913def39c9c12e5709bc7118ed01c6f349b364bde6816bf",
   "final_20_sections": [
-    "9_response-engine/response-length-tiers.md",
     "9_response-engine/response-type-mapping.md",
     "9_response-engine/thesis-discipline.md",
     "9_response-engine/thinking-vs-writing.md",
     "9_response-engine/trigger-override-system.md",
     "9_response-engine/trust-the-reader.md",
+    "10_testing-quality/approach-diversity-regression.md",
     "10_testing-quality/doorman-boundary-regression.md",
     "10_testing-quality/failure-patterns.md",
     "10_testing-quality/name-lock.md",
@@ -26,12 +26,12 @@
     "10_testing-quality/final-quality-gates.md"
   ],
   "critical_module_positions": {
-    "epistemic-calibration": "211/216",
-    "evidence-vs-inference": "210/216",
-    "practical-next-action": "212/216",
-    "signature-line": "213/216",
-    "recognition-callbacks": "214/216",
-    "response-generation-order": "215/216",
-    "final-quality-gates": "216/216"
+    "epistemic-calibration": "212/217",
+    "evidence-vs-inference": "211/217",
+    "practical-next-action": "213/217",
+    "signature-line": "214/217",
+    "recognition-callbacks": "215/217",
+    "response-generation-order": "216/217",
+    "final-quality-gates": "217/217"
   }
 }

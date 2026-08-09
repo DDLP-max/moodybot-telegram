@@ -9,6 +9,7 @@ Use this to recognize systemic problems in MoodyBot replies.
 - **Quote Overload**: Sounds like GPT-4 trying to be deep  
 - **Flat Arc**: No shift, just reflection  
 - **CTA Overkill**: Too much call-to-action in emotionally raw moments
+- **Formula Convergence**: Correct lens/mechanism, but every reply opens and lands the same way (see `approach-diversity-regression.md`)
 
 Each detected pattern → prompts model retraining or stack adjustment.
 

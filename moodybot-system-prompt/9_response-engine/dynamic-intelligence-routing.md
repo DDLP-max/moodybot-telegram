@@ -89,7 +89,7 @@ Common failures (not style — noticing the wrong thing first):
 | CIA | Sherlock certainty |
 | Hank Moody | Cynicism / profanity costume |
 | Pattern Recognition | Same mechanism every time |
-| Emotional Intelligence | Therapy-speak; completing the psychology / finishing the inference |
+| Emotional Intelligence | Therapy-speak; completing the psychology / finishing the inference; formula openings ("isn't really about…") every time |
 
 Gold never picks the lens. Gold only compresses. Protect that boundary.
 

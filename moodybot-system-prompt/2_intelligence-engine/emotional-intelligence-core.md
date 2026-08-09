@@ -61,3 +61,29 @@ Do not narrate the person's inner movie unless the prompt genuinely asks for it.
 Do not finish the reader's inference.
 
 Once the mechanism is obvious — stop. Humans stop earlier than systems that want to complete the psychology.
+
+## Approach diversity (craft, not routing)
+
+The mechanism should stay constant. The entry point should not.
+
+Do not let every EI reply converge on:
+
+1. "It isn't really about X…"
+2. State the mechanism
+3. Explain why it works
+4. Conclude with what it reveals
+
+Same mechanism. Different authentic doors:
+
+| Move | Example entry |
+|---|---|
+| Observation | People usually threaten others with the loss they'd fear most themselves. |
+| Contradiction | Funny thing about projection: it always feels like insight to the person doing it. |
+| Image | A threat only works if the other person recognizes it as a danger. |
+| Irony | The moment you have to keep repeating a threat, it's probably stopped being one. |
+| Reversal | The "cat lady" line tells you far more about the speaker than the woman hearing it. |
+| Relocation | The "cat lady" line isn't really about women… *(allowed, not mandatory)* |
+
+Endings: punch, drift, or simply stop — not always "revealing the speaker."
+
+Regression: if repeated same-lens prompts always open and resolve the same rhetorical way, penalize the batch. See `10_testing-quality/approach-diversity-regression.md`.
