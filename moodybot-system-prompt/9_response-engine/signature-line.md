@@ -1,62 +1,92 @@
-# Signature Line — earned, never mandatory
+# Body can be the landing
 
-Chase **inevitable**, not memorable.
+PRIMARY RULE: **the body is allowed to be the last line.**
 
-The last sentence is a writing opportunity — not a required feature.
+Signature Line / Recognition Callback tools are **OPTIONAL and OFF by default**
+(`MOODYBOT_CREATIVE_ENDINGS=1` to re-enable).
 
-## Has the body already landed?
+If the final sentence of the body is already sharp, complete, specific, memorable, and rhythmically final — **STOP WRITING.**
 
-If yes: **STOP WRITING.**
+No Signature Line.
+No Recognition Callback.
+No CTA.
+No extra aphorism.
 
-Do not improve it.
-Do not summarize it.
-Do not compress it.
-Do not create a Signature Line.
-Do not prove a module ran.
+Do not ask "what can I add?"
+Ask "did I already say enough?"
 
-Landing type: `BODY_ENDS_RESPONSE`
+See also: `insight-first.md` — lead with the hidden pattern, not plot inventory.
 
-The confidence to stop is one of the marks of a real writer.
+## Landing types (only one)
 
-## Possible endings (only one)
-
-1. BODY_ENDS_RESPONSE
-2. SIGNATURE_LINE (discovered, not manufactured)
+1. **BODY_ENDS_RESPONSE** — preferred outcome, not a fallback
+2. SIGNATURE_LINE — rare; only when a genuinely better last sentence still exists
 3. RECOGNITION_CALLBACK
 4. ACTION
 5. SILENCE
 
-## Discovery before generation
+## Terminal rhythm
 
-Attempt to discover a stronger ending.
-If no genuine discovery exists → `NO_SIGNATURE_FOUND` → that is success.
+A finished body often ends on:
 
-## Deletion test (mandatory)
+- reversal
+- consequence
+- final contrast
+- compressed pattern
+- image
+- decisive clause
 
-Delete the generated ending. Ask: is the response now stronger?
+Examples that need nothing after them:
 
-If yes — the ending failed. Delete it permanently.
+- "...before the example spreads."
+- "...the paper trail does the talking."
+- "...the relationship was already telling you."
+- "...the performance runs out."
 
-## Never restate / shorten / echo
+## Deletion test (authoritative)
 
-Body: The 'pick me' charge works as social enforcement.
-Bad: The 'pick me' charge works as social enforcement, not protection.
+Before adding any Signature Line:
 
-Body: Public gratitude toward one man threatens movements that depend on collective resentment.
+Compare:
+
+- A = body alone
+- B = body + candidate ending
+
+If A is equal or stronger → **DELETE** the candidate → `BODY_ENDS_RESPONSE`.
+
+## No duplicate landing / semantic redundancy
+
+Never append a weaker summary of a strong body ending.
+
+Body: Public gratitude toward one man threatens movements that depend on collective resentment of all men.
 Bad: Public gratitude toward one man threatens movements.
 
-## One-layer rule
+A Signature Line must add a new insight layer — not repeat, shorten, or rephrase.
 
-The body explains.
-The Signature Line reveals what the response *implies*.
+## Signature Line rule
 
-Allowed only if it creates new value at a higher abstraction.
-Not restatement. Not compression. Not rewording.
+Allowed only when:
 
-## Anti-profundity
+the body is good
+AND
+there is a genuinely better last sentence still available.
 
-Reject bumper stickers: "Power corrupts." "Truth wins." "Gratitude matters."
+That should be rare.
+Unnecessary extra writing is failure.
+`NO_SIGNATURE_FOUND` is success.
 
-Quotable writing is discovered. Not inserted.
-The product is not "every response has a mic-drop."
-The product is: every response ends exactly where it should.
+## Ordinary inference stays
+
+Bold interpretive judgments are allowed:
+
+- "He is making a move."
+- "The label functions as social enforcement."
+- "That behavior is protecting the narrative."
+
+Calibrate only invented machinery: hidden plans, specific deception, unseen conspiracy, unsupported precise motive.
+
+## Finalization flow
+
+draft_body → epistemic checks → `body_already_lands()` →
+if true: BODY_ENDS_RESPONSE →
+else attempt discovery → deletion / redundancy tests → surface render → send

@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Signature Line — an earned writing opportunity, not a required feature.
+"""Signature Line — rare earned ending, never a required module.
 
-Chase INEVITABLE, not memorable.
+PRIMARY RULE: the body is allowed to be the last line.
 
-The ending must be earned. Not generated.
-Sometimes the body is already finished. That is success.
+If the final sentence is already sharp, complete, specific, memorable,
+and rhythmically final — STOP WRITING.
+
+Do not ask "what can I add?"
+Ask "did I already say enough?"
 
 Pipeline:
-  Generate body
-  → Does the body already land? → BODY_ENDS_RESPONSE (stop)
-  → Attempt discovery (not manufacture)
-  → If no genuine discovery → stop (NO_SIGNATURE_FOUND is success)
-  → Deletion test — if removing the line improves the piece, delete it
-  → Surface render
+  draft_body
+  → epistemic / quality checks
+  → body_already_lands()  → BODY_ENDS_RESPONSE (preferred)
+  → else attempt signature discovery
+  → if none: BODY_ENDS_RESPONSE
+  → deletion + redundancy tests (if A ≥ B, delete candidate)
+  → surface render
 """
 
 from __future__ import annotations
@@ -27,8 +31,56 @@ MAX_WORDS_EXCEPTIONAL = 22
 MIN_WORDS = 4
 DISCOVERY_THRESHOLD = 0.72
 SIMILARITY_REJECT = 0.62
+# Shorter paraphrase / near-echo of the thesis
+REDUNDANCY_REJECT = 0.55
 
 NO_SIGNATURE_FOUND = "NO_SIGNATURE_FOUND"
+
+# Cadence that already ends the piece — nothing after these.
+TERMINAL_RHYTHM_EXAMPLES = (
+    r"before the example spreads",
+    r"the paper trail does the talking",
+    r"the relationship was already telling you",
+    r"the performance runs out",
+    r"before the example becomes contagious",
+    r"examples are more dangerous than arguments",
+)
+
+TERMINAL_RHYTHM_STRUCTURAL = re.compile(
+    r"(?:"
+    r"\b(?:before|once|until)\b.+\b(?:spreads?|contagious|runs?\s+out|ends?|talking|telling you)\b"
+    r"|"
+    r"\b(?:not|isn't|aren't|wasn't|weren't)\b.+\b(?:it's|it is|they're|they are|he's|she's)\b"
+    r"|"
+    r"\b(?:because|so)\b.+\b(?:more dangerous|already|no longer|instead)\b"
+    r"|"
+    r"\b(?:punish(?:es|ed)?|polices?|threatens?|enforces?|survives?)\b.+\b(?:before|once|until)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+LANDING_INSIGHT_MARKERS = re.compile(
+    r"\b(?:"
+    r"enforcement|disciplinary|threatens?|reveals?|betrayal|convenience|"
+    r"protection|resentment|defection|loyalty|narrative|grievance|"
+    r"already|stopped|becomes?|explains?|survives?|pretending|"
+    r"punish(?:es|ed)?|breach|collective|subtractive"
+    r")\b",
+    re.IGNORECASE,
+)
+
+DANGLING_THREAD = re.compile(
+    r"(?:"
+    r"\b(?:because|since|which means|which is why|and then|so that)\s*$"
+    r"|"
+    r"\b(?:for example|for instance|such as)\s*[,:]?\s*$"
+    r"|"
+    r":\s*$"
+    r"|"
+    r"\b(?:however|although|though|but)\s*$"
+    r")",
+    re.IGNORECASE,
+)
 
 _RECENT_SIGNATURES: Deque[str] = deque(maxlen=32)
 
@@ -140,6 +192,46 @@ def semantic_similarity(a: str, b: str) -> float:
     return len(ta & tb) / max(len(ta | tb), 1)
 
 
+def is_shorter_paraphrase(line: str, body: str) -> bool:
+    """True when candidate is a shorter compression of a body sentence."""
+    line_toks = _content_tokens(line)
+    if len(line_toks) < 3:
+        return False
+    line_wc = word_count(line)
+    for sent in _body_sentences(body):
+        sent_toks = _content_tokens(sent)
+        if not sent_toks:
+            continue
+        if line_toks <= sent_toks and line_wc < word_count(sent):
+            return True
+        overlap = len(line_toks & sent_toks) / max(len(line_toks), 1)
+        if overlap >= 0.8 and line_wc <= word_count(sent) and len(line_toks - sent_toks) <= 1:
+            return True
+    return False
+
+
+def is_semantically_redundant(line: str, body: str) -> bool:
+    """Candidate is substantially a paraphrase of final sentence / thesis / para."""
+    if not line or not body:
+        return False
+    if body_already_said_this(line, body) or is_shorter_paraphrase(line, body):
+        return True
+    final = _body_sentences(body)[-1] if _body_sentences(body) else ""
+    fp = final_paragraph(body)
+    targets = [t for t in (final, fp, body) if t]
+    for target in targets:
+        sim = semantic_similarity(line, target)
+        if sim >= SIMILARITY_REJECT:
+            novel = _content_tokens(line) - _content_tokens(target)
+            if len(novel) < 2:
+                return True
+        if sim >= REDUNDANCY_REJECT and word_count(line) <= word_count(target):
+            novel = _content_tokens(line) - _content_tokens(target)
+            if len(novel) < 3 and not adds_deeper_layer(line, body):
+                return True
+    return False
+
+
 def body_already_said_this(line: str, body: str) -> bool:
     """Restatement / shortening / echo of anything the body already said."""
     line_n = _norm(line)
@@ -194,10 +286,36 @@ def adds_deeper_layer(line: str, body: str) -> bool:
     return reveal_turn and len(novel) >= 2
 
 
-def body_already_lands(body: str) -> bool:
-    """Has the body already completed the argument?
+def has_terminal_rhythm(final: str) -> bool:
+    """Clear terminal cadence — reversal, consequence, contrast, image, decisive close."""
+    lower = (final or "").strip().lower().rstrip(".!")
+    if not lower:
+        return False
+    for example in TERMINAL_RHYTHM_EXAMPLES:
+        if example in lower:
+            return True
+    if TERMINAL_RHYTHM_STRUCTURAL.search(lower):
+        return True
+    # Decisive clause: compressed insight ending on a hard noun/verb
+    if LANDING_INSIGHT_MARKERS.search(lower) and len(lower.split()) >= 10:
+        if re.search(
+            r"\b(?:spreads?|talking|telling|runs?\s+out|resentment|defection|"
+            r"enforcement|narrative|breach|loyalty|betrayal)\.?$",
+            lower,
+        ):
+            return True
+    return False
 
-    If deleting every generated ending would improve the response — YES.
+
+def body_already_lands(body: str) -> bool:
+    """Preferred landing detector — true when the body should be the last line.
+
+    True when the final sentence / paragraph:
+      1. completes the argument
+      2. carries the strongest insight
+      3. leaves no logical thread dangling
+      4. has clear terminal rhythm
+      5. would be diluted by another sentence
     """
     text = (body or "").strip()
     if not text:
@@ -210,51 +328,74 @@ def body_already_lands(body: str) -> bool:
         return False
     if any(m in lower for m in ("seen it named", "what about ", "say the word")):
         return False
+    if any(m in lower for m in SUMMARY_MARKERS):
+        return False
     sentences = [s.strip() for s in re.split(r"(?<=[.!])\s+", last) if s.strip()]
     if not sentences:
         return False
     final = sentences[-1]
     if final[-1] not in ".!":
         return False
+    stem = final.rstrip(".!").strip()
+    if DANGLING_THREAD.search(stem):
+        return False
     wc = len(final.split())
     if wc < 7:
         return False
-    # Complete intellectual/emotional landing signals
-    lands = bool(
-        re.search(
-            r"\b(enforcement|threatens?|reveals?|betrayal|convenience|"
-            r"protection|resentment|defection|loyalty|already|"
-            r"stopped|becomes?|explains?|survives?|pretending)\b",
-            final.lower(),
-        )
-    )
-    # Or a long complete final sentence that isn't hedging
-    solid = (
-        wc >= 12
-        and not re.search(r"\b(maybe|perhaps|might|seems? to)\b", final.lower())
-    )
-    return (lands and wc >= 7) or solid
+
+    rhythm = has_terminal_rhythm(final)
+    insight = bool(LANDING_INSIGHT_MARKERS.search(final))
+    hedging = bool(re.search(r"\b(maybe|perhaps|might|seems? to)\b", final.lower()))
+    # Multi-sentence body whose last line lands = argument complete
+    multi = len(_body_sentences(text)) >= 2
+    solid = wc >= 12 and not hedging and insight
+    # Strong single landing line with terminal rhythm
+    rhythmic_close = rhythm and wc >= 8 and not hedging
+    # Preferred: finished analytic prose
+    if rhythmic_close and (insight or multi or wc >= 14):
+        return True
+    if solid and (rhythm or multi):
+        return True
+    # Completed argument: earlier sentences set up; final insight closes
+    if insight and multi and wc >= 7 and not hedging:
+        return True
+    return False
+
+
+def body_alone_stronger_or_equal(body: str, signature: str) -> bool:
+    """Deletion test core: A (body alone) ≥ B (body + candidate) → discard candidate."""
+    if not signature or not signature.strip():
+        return True
+    if body_already_lands(body):
+        return True
+    if is_semantically_redundant(signature, body):
+        return True
+    if body_already_said_this(signature, body):
+        return True
+    if is_shorter_paraphrase(signature, body):
+        return True
+    if not adds_deeper_layer(signature, body):
+        return True
+    fp = final_paragraph(body)
+    if fp and semantic_similarity(signature, fp) >= SIMILARITY_REJECT:
+        return True
+    # Floating bumper sticker with no hinge
+    if not _content_tokens(signature) & (_content_tokens(body) | _content_tokens(fp or "")):
+        if word_count(signature) <= 8:
+            return True
+    return False
 
 
 def deletion_test(body: str, signature: str) -> bool:
-    """Highest-priority gate. True = keep signature. False = delete it.
+    """Authoritative gate. True = keep signature. False = delete it.
 
-    If deleting the ending makes the response stronger → reject ending.
+    Generate candidate, then compare A (body alone) vs B (body + candidate).
+    If A is equal or stronger — DELETE. Return BODY_ENDS_RESPONSE.
     """
     if not signature or not signature.strip():
         return False
-    if body_already_said_this(signature, body):
+    if body_alone_stronger_or_equal(body, signature):
         return False
-    if not adds_deeper_layer(signature, body):
-        return False
-    fp = final_paragraph(body)
-    if fp and semantic_similarity(signature, fp) >= SIMILARITY_REJECT:
-        return False
-    # Essay test: signature alone should still hinge on conversation content
-    if not _content_tokens(signature) & (_content_tokens(body) | _content_tokens(fp)):
-        # Pure floating bumper sticker
-        if word_count(signature) <= 8 and not adds_deeper_layer(signature, body):
-            return False
     return True
 
 

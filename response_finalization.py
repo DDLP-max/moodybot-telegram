@@ -1,17 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Authoritative finalization pass for MoodyBot responses.
+"""Protective finalization — not a second writer.
 
-ANALYZE → ROUTE → GENERATE DRAFT → FINALIZE → USER
+ANALYZE → ROUTE → GENERATE DRAFT → LIGHT QUALITY CHECK → SEND
 
-Pipeline:
-  epistemic rewrite
-  → generic CTA strip
-  → recognition callback / closing strategy
-  → anchor enforcement
-  → compression
-  → FINAL SURFACE RENDER (immutable after this)
+Default path may:
+  - calibrate fabricated hidden schemes / invented precision
+  - strip generic CTA
+  - strip malformed closers / trailing quiz questions
+  - light formatting cleanup
 
-Deterministic gates run always. Web and Telegram must call finalize_response().
+Default path may NOT:
+  - invent Signature Lines / Recognition Callbacks
+  - paraphrase the thesis
+  - add metaphors or quotable closers
+  - "improve" an already complete ending
+
+Creative ending tools remain in recognition_landing / signature_line
+but are OFF unless MOODYBOT_CREATIVE_ENDINGS=1.
 """
 
 from __future__ import annotations
@@ -29,7 +34,14 @@ from conversation_anchors import (
     extract_conversation_anchors,
 )
 from recognition_callbacks import is_generic_followup
-from recognition_landing import LANDING_ENGINE_VERSION, apply_landing, select_landing
+from recognition_landing import (
+    CREATIVE_ENDING_TOOLS_ENABLED,
+    LANDING_ENGINE_VERSION,
+    apply_landing,
+    protective_cleanup,
+    select_landing,
+    strip_malformed_closers,
+)
 from signature_language import extract_signature_language
 from surface_render import final_surface_render, response_text_after_surface_semantically_equals
 
@@ -112,6 +124,23 @@ CONSEQUENTIAL_REWRITES = [
     ),
 ]
 
+# Coordinated necessity ("must") implying hidden collective machinery.
+# Preserve rhetorical force; do not hedge ordinary social inference.
+COORDINATED_NECESSITY_REWRITES = [
+    (
+        r"\bthe enforcers must punish the breach\b",
+        "the pressure shifts toward punishing the breach",
+    ),
+    (
+        r"\bthe system must (?:punish|police)\b",
+        "the system responds by policing",
+    ),
+    (
+        r"\bthey must punish the breach\b",
+        "the breach gets punished",
+    ),
+]
+
 # Invented quantitative specificity only (distance-agnostic precision abuse).
 INVENTED_PRECISION_REWRITES = [
     (
@@ -161,6 +190,8 @@ def classify_inference_distance(sentence: str) -> Tuple[int, ClaimClass]:
         "get laid", "romantically", "sexually interested", "personal move",
         "more personal", "read the number as", "interpreted the number",
         "low priority", "convenience more than commitment", "protecting their position",
+        "social enforcement", "protecting the narrative", "disciplinary tool",
+        "functions as", "works as",
     )
     if any(m in s for m in ordinary_markers):
         return 1, "ORDINARY_INFERENCE"
@@ -409,38 +440,35 @@ def build_response_plan(
     )
 
 
+CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
+
+MoodyBot does not describe what happened. MoodyBot explains why it felt the way it did.
+
+Silently decide: what is the most interesting true thing here?
+Then: what underlying rule explains the examples?
+Lead with that insight in the FIRST sentence. Use one or two proofs. Then STOP.
+
+Do NOT open with throat-clearing ("the clearest case", "there are several factors", "at its core").
+Do NOT inventory examples without a controlling thesis.
+Do NOT add a Signature Line, Recognition Callback, quiz question, CTA, or fake profound closer.
+Do NOT require metaphor, noir, or poetic costume. Sharp plain language is allowed.
+
+If practical action was requested, end with a concrete next step.
+Otherwise end when the answer lands.
+"""
+
+
 def plan_closer_instruction(plan: ResponsePlan) -> str:
-    landing = (plan.landing or "silence").upper()
-    instructions = {
-        "BODY_ENDS_RESPONSE": (
-            "The body is already finished. Do NOT add a Signature Line, question, "
-            "summary, or mic-drop. Stop writing. Confidence to stop is the mark of a writer."
-        ),
-        "SIGNATURE_LINE": (
-            "Only if a higher-order insight is truly earned after the body, end with "
-            "one inevitable sentence that reveals what the body implies — not a restatement, "
-            "shortening, or manufactured quote. If nothing is earned, stop. No CTA."
-        ),
-        "RECOGNITION_STATEMENT": (
-            "Prefer stopping if the body already landed. Otherwise one earned reveal only."
-        ),
-        "RECOGNITION_OBSERVATION": (
-            "Prefer stopping if the body already landed. Otherwise one earned reveal only."
-        ),
-        "RECOGNITION_CALLBACK": (
-            "Ending: RECOGNITION_CALLBACK. "
-            "Only if the user offered distinctive authorial language, "
-            "end with one short rhetorical callback that reuses THAT language. "
-            "Never staple topic nouns into a question."
-        ),
-        "ACTION": (
-            "Ending: ACTION. Close with a concrete next step. No quiz question."
-        ),
-        "SILENCE": (
-            "Ending: SILENCE. The answer should end cleanly. No follow-up question."
-        ),
-    }
-    return instructions.get(landing, instructions["BODY_ENDS_RESPONSE"])
+    """Generation guidance — insight-first. Not a closer-module compliance checklist."""
+    _ = plan
+    extra = ""
+    if plan.needs_practical_action:
+        extra = "\nUser asked for action — include a concrete next step. No quiz question."
+    elif plan.intent == "technical":
+        extra = "\nTechnical mode: cause → fix. No poetry unless it helps."
+    elif plan.intent == "witness":
+        extra = "\nWitness mode: stay with the weight. No forced closer."
+    return CORE_WRITE_DIRECTIVE + extra
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -493,6 +521,13 @@ def run_epistemic_check(draft: str, plan: ResponsePlan) -> Tuple[str, bool]:
 
     # 2) Consequential attributions (distance 3)
     for pattern, replacement in CONSEQUENTIAL_REWRITES:
+        new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
+        if n:
+            text = new_text
+            changed = True
+
+    # 2b) Coordinated "must" necessity — keep force, drop invented machinery
+    for pattern, replacement in COORDINATED_NECESSITY_REWRITES:
         new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
             text = new_text
@@ -591,11 +626,16 @@ def _apply_closing_strategy(
     plan: ResponsePlan,
     user_message: str,
     anchors: Optional[ConversationAnchors] = None,
-) -> Tuple[str, bool]:
-    """Signature Line decision → callback → action/silence. Only one wins."""
+) -> Tuple[str, bool, bool]:
+    """Protective landing cleanup. Returns (text, modified, landing_added).
+
+    landing_added is True only if a creative ending was actually appended.
+    On the default path this should almost always be False.
+    """
     if anchors is not None and not plan.anchors:
         plan.anchors = list(anchors.all_anchors)
 
+    before = (text or "").strip()
     decision = select_landing(
         user_message,
         selected_command=plan.selected_command,
@@ -607,7 +647,6 @@ def _apply_closing_strategy(
         missing_info=plan.missing_required_info,
     )
     plan.landing = decision.landing.lower()
-    # Keep legacy field in sync for telemetry
     legacy_map = {
         "body_ends_response": "none",
         "signature_line": "ritual_line",
@@ -617,27 +656,49 @@ def _apply_closing_strategy(
         "action": "action_line",
         "silence": "silence",
     }
-    plan.allow_question = decision.allow_question
+    plan.allow_question = decision.allow_question and CREATIVE_ENDING_TOOLS_ENABLED
+
+    # Default: protective strip only — never invent endings
+    if not CREATIVE_ENDING_TOOLS_ENABLED:
+        cleaned, mod = protective_cleanup(before)
+        # Still honor silence/action selection for trailing questions
+        if decision.landing in {"SILENCE", "ACTION", "BODY_ENDS_RESPONSE"}:
+            new_text, apply_mod = apply_landing(
+                cleaned, user_message, decision, plan=plan
+            )
+            mod = mod or apply_mod
+        else:
+            new_text = cleaned
+        plan.landing = "body_ends_response" if decision.landing not in {
+            "SILENCE", "ACTION"
+        } else decision.landing.lower()
+        plan.closing_strategy = legacy_map.get(plan.landing, "none")
+        return new_text, mod, False
 
     new_text, modified = apply_landing(
         text, user_message, decision, plan=plan
     )
-    # If discovery failed, the actual outcome is BODY_ENDS_RESPONSE
     from signature_line import last_line_is_signature as _last_is_sig
 
+    landing_added = False
     if decision.landing in {
         "SIGNATURE_LINE",
         "RECOGNITION_STATEMENT",
         "RECOGNITION_OBSERVATION",
+        "RECOGNITION_CALLBACK",
     }:
-        if not _last_is_sig(new_text, user_message=user_message):
+        if decision.landing == "RECOGNITION_CALLBACK" and new_text.rstrip().endswith("?"):
+            landing_added = len(new_text) > len(before)
+        elif _last_is_sig(new_text, user_message=user_message):
+            landing_added = True
+        else:
             plan.landing = "body_ends_response"
     plan.closing_strategy = legacy_map.get(plan.landing, plan.closing_strategy)
     if modified:
         last = new_text.strip().split("\n\n")[-1] if new_text else ""
         if last:
             _RECENT_CLOSERS.append(re.sub(r"\s+", " ", last.lower()))
-    return new_text, modified
+    return new_text, modified, landing_added
 
 
 def compress_if_overwritten(text: str) -> Tuple[str, bool]:
@@ -646,6 +707,10 @@ def compress_if_overwritten(text: str) -> Tuple[str, bool]:
     text = re.sub(r"\n{3,}", "\n\n", text or "")
     text = re.sub(r"^(?:Look,?|So,?|Well,?)\s+", "", text.strip(), count=1, flags=re.IGNORECASE)
     return text, text != original
+
+
+def _normalize_compare(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
 def finalize_response(
@@ -659,10 +724,7 @@ def finalize_response(
     prompt_hash: str = "",
     git_commit: str = "",
 ) -> FinalizeResult:
-    """Run the authoritative finalization gates. Draft must not go to users raw.
-
-    After final_surface_render, text is immutable for this pass.
-    """
+    """Protective quality check. Most good drafts should ship nearly unchanged."""
     t0 = time.time()
     plan = plan or build_response_plan(
         user_message,
@@ -682,37 +744,51 @@ def finalize_response(
         sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", last) if s.strip()]
         return sents[-1] if sents else last
 
-    text = (draft or "").strip()
+    body_generated = (draft or "").strip()
+    text = body_generated
     draft_last = _last_sentence(text)
     epistemic_rewrite = False
     generic_removed = False
     closer_replaced = False
     surface_cleaned = False
+    landing_added = False
+    post_reasons: List[str] = []
 
-    # 1) Epistemic / motivation / cultural / quantitative calibration
+    # 1) Epistemic — only remote invention / fake precision
     text, epistemic_rewrite = run_epistemic_check(text, plan)
+    if epistemic_rewrite:
+        post_reasons.append("epistemic_calibration")
     after_epistemic_last = _last_sentence(text)
 
-    # 2) Generic continuation CTA — hard failure → remove
+    # 2) Generic CTA strip
     if plan.missing_required_info and len(text.split()) < 40:
         pass
     else:
         text, generic_removed = strip_generic_cta(text)
+        if generic_removed:
+            post_reasons.append("cta_removed")
 
-    # 3) Closing strategy + recognition landing (authoritative)
-    text, closer_replaced = _apply_closing_strategy(text, plan, user_message, anchors)
+    # 3) Protective closer cleanup (creative endings OFF by default)
+    text, closer_replaced, landing_added = _apply_closing_strategy(
+        text, plan, user_message, anchors
+    )
+    if closer_replaced:
+        post_reasons.append("malformed_closer_stripped")
+    if landing_added:
+        post_reasons.append("landing_added")
     after_landing = text
     after_landing_last = _last_sentence(after_landing)
 
-    # 4) Compression
+    # 4) Light formatting only
     text, compressed = compress_if_overwritten(text)
+    if compressed:
+        post_reasons.append("format_compress")
 
-    # 5) FINAL SURFACE RENDER — typography only; no new closer wording
+    # 5) Surface typography — must not invent meaning
     text, surface_cleaned = final_surface_render(text)
     after_surface_last = _last_sentence(text)
 
     if not response_text_after_surface_semantically_equals(after_landing, text):
-        # Dev hard invariant: surface must not append sentences / banned closers
         import os
 
         if os.environ.get("MOODYBOT_STRICT_SURFACE", "1") == "1" and os.environ.get(
@@ -721,11 +797,15 @@ def finalize_response(
             raise AssertionError(
                 "SURFACE_INVARIANT: final_surface_render changed wording beyond typography"
             )
-        # Production safety: strip banned patterns if surface somehow reintroduced them
-        from recognition_landing import strip_malformed_closers
-
         text = strip_malformed_closers(text)
+        post_reasons.append("surface_safety_strip")
 
+    if surface_cleaned:
+        post_reasons.append("surface_typography")
+
+    post_finalizer_changed = _normalize_compare(body_generated) != _normalize_compare(text)
+    # Creative rewrite signal: meaning changed beyond CTA/format/epistemic safety
+    creative_touch = landing_added
     finalization_rewrite = (
         epistemic_rewrite or generic_removed or closer_replaced or compressed or surface_cleaned
     )
@@ -738,6 +818,14 @@ def finalize_response(
         "prompt_hash": prompt_hash or "",
         "git_commit": git_commit or "",
         "landing_engine_version": LANDING_ENGINE_VERSION,
+        "creative_ending_tools": str(CREATIVE_ENDING_TOOLS_ENABLED).lower(),
+        "core_insight": (plan.central_insight or "")[:240],
+        "body_generated": body_generated[:400],
+        "post_finalizer_changed_text": str(post_finalizer_changed).lower(),
+        "post_finalizer_reason": ",".join(post_reasons) if post_reasons else "none",
+        "landing_added": str(landing_added).lower(),
+        "cta_removed": str(generic_removed).lower(),
+        "creative_touch": str(creative_touch).lower(),
         "primary_capability": plan.primary_capability or "",
         "supporting_capability": plan.supporting_capability or "",
         "intervention": plan.intervention or "",

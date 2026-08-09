@@ -1,21 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Landing selection — which single ending mechanism wins.
+"""Landing tools — available, but OFF the default writing path.
 
-Chase inevitable, not memorable.
-The ending must be earned. Not generated.
+Default Dynamic Mode does not invent Signature Lines or Recognition Callbacks.
+The body ships. These modules remain for optional / explicit use only.
 
-Possible endings (only ONE wins):
-  BODY_ENDS_RESPONSE  — body already landed; stop writing
-  SIGNATURE_LINE      — discovered higher-order insight (optional)
-  RECOGNITION_CALLBACK — user's authorial language returns
-  ACTION
-  SILENCE
-
-NO_SIGNATURE_FOUND is success — not a failure to manufacture profundity.
+Protective duties that remain on the default path:
+  - strip malformed closers
+  - strip engagement CTAs / trailing quiz questions
+  - silence for grief/roast/technical when selected
 """
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
@@ -36,7 +33,11 @@ from signature_line import (
 
 LandingType = str
 
-LANDING_ENGINE_VERSION = "earned-ending-v1"
+LANDING_ENGINE_VERSION = "minimal-write-v1"
+
+# Default OFF — do not manufacture endings after generation.
+# Set MOODYBOT_CREATIVE_ENDINGS=1 to re-enable signature/callback discovery.
+CREATIVE_ENDING_TOOLS_ENABLED = os.environ.get("MOODYBOT_CREATIVE_ENDINGS", "0") == "1"
 
 # Patterns that prove the closer is machine-stapled topic debris.
 BROKEN_CLOSER_PATTERNS = [
@@ -203,7 +204,7 @@ def select_landing(
     roast: bool = False,
     missing_info: bool = False,
 ) -> LandingDecision:
-    """Evaluate body first. Only attempt an ending if the body has not landed."""
+    """Default: body ends. Creative signature/callback only if explicitly re-enabled."""
     um = (user_message or "").lower()
     signatures = extract_signature_language(user_message)
 
@@ -225,6 +226,21 @@ def select_landing(
     ):
         return LandingDecision("ACTION", False, "practical request")
 
+    # Default writing path: never invent an ending module
+    if not CREATIVE_ENDING_TOOLS_ENABLED:
+        return LandingDecision(
+            "BODY_ENDS_RESPONSE",
+            False,
+            "minimal path — body stands; no creative ending tools",
+        )
+
+    if body and body_already_lands(body):
+        return LandingDecision(
+            "BODY_ENDS_RESPONSE",
+            False,
+            "body already landed — stop writing",
+        )
+
     authorial_hooks = (
         "stretch", "stretched", "carrying", "cracked", "got stretched",
         "the room changed", "room changed",
@@ -236,20 +252,39 @@ def select_landing(
             "authorial language returns as callback",
         )
 
-    # Highest-priority writer move: stop when the body is already finished
-    if body and body_already_lands(body):
-        return LandingDecision(
-            "BODY_ENDS_RESPONSE",
-            False,
-            "body already landed — stop writing",
-        )
-
-    # Opportunity only — discovery may still return NO_SIGNATURE_FOUND
     return LandingDecision(
         "SIGNATURE_LINE",
         False,
         "attempt discovery; stop if none earned",
     )
+
+
+def _is_junk_closer(closer: str, *, allow_question: bool = False) -> bool:
+    """True only for engagement debris / malformed endings — not real body paragraphs."""
+    c = (closer or "").strip()
+    if not c:
+        return False
+    if not validate_landing(c)[0] or is_broken_closer_text(c):
+        return True
+    if c.endswith("?") and not allow_question:
+        return True
+    if not would_keep_if_nobody_could_reply(c):
+        return True
+    # Short engagement-only paragraphs
+    if len(c.split()) <= 12 and any(
+        m in c.lower()
+        for m in (
+            "do you want", "would you like", "say the word", "let me know",
+            "does that make sense", "anything else",
+        )
+    ):
+        return True
+    return False
+
+
+def is_broken_closer_text(text: str) -> bool:
+    ok, _ = validate_landing(text)
+    return not ok
 
 
 def apply_landing(
@@ -260,12 +295,13 @@ def apply_landing(
     conversation_id: str = "",
     plan: Any = None,
 ) -> Tuple[str, bool]:
-    """Apply exactly one landing. Signature Line is generated from the body."""
-    parts = re.split(r"\n\s*\n", (text or "").strip())
+    """Protective apply. Never drop a real body paragraph as if it were a closer."""
+    full = (text or "").strip()
+    parts = re.split(r"\n\s*\n", full)
     if len(parts) >= 2:
-        body, closer = "\n\n".join(parts[:-1]).rstrip(), parts[-1].strip()
+        prior, last = "\n\n".join(parts[:-1]).rstrip(), parts[-1].strip()
     else:
-        body, closer = (text or "").strip(), ""
+        prior, last = full, ""
 
     def _strip_trailing_question(base: str) -> str:
         if base.rstrip().endswith("?"):
@@ -278,42 +314,37 @@ def apply_landing(
         cleaned = strip_malformed_closers(out)
         return cleaned, modified or cleaned != (out or "").strip()
 
-    # Always drop broken / engagement closers
-    if closer and (
-        not is_grammatical_english(closer)
-        or not would_keep_if_nobody_could_reply(closer)
-        or closer.endswith("?")
-        and decision.landing != "RECOGNITION_CALLBACK"
-    ):
-        # Strip bad closer; may replace below
-        text_body = body if body else _strip_trailing_question(text or "")
-        closer = ""
-        body = text_body
+    # Only detach the last paragraph if it is junk — otherwise it is body.
+    junk = bool(last) and _is_junk_closer(
+        last, allow_question=decision.landing == "RECOGNITION_CALLBACK"
+    )
+    if junk:
+        working = prior
         modified_strip = True
+        closer = ""
     else:
+        working = full
         modified_strip = False
+        closer = last if last and len(parts) >= 2 else ""
 
     landing = decision.landing
 
     if landing == "SILENCE":
-        base = body or _strip_trailing_question(text or "")
-        # Remove trailing questions
-        base = _strip_trailing_question(base)
-        if closer and closer.endswith("?"):
-            return _finish(base, True)
-        return _finish(
-            (base if modified_strip or closer == "" else text),
-            modified_strip or bool(closer.endswith("?") if closer else False),
-        )
+        base = _strip_trailing_question(working)
+        return _finish(base, modified_strip or base != working)
 
     if landing == "ACTION":
-        base = body or text
-        if closer and (closer.endswith("?") or not would_keep_if_nobody_could_reply(closer)):
-            return _finish(_strip_trailing_question(base), True)
-        return _finish(text if not modified_strip else base, modified_strip)
+        base = working
+        if base.rstrip().endswith("?"):
+            base = _strip_trailing_question(base)
+            return _finish(base, True)
+        return _finish(base, modified_strip)
 
     if landing == "RECOGNITION_CALLBACK":
-        # Keep a good existing signature question
+        base = _strip_trailing_question(working)
+        if not CREATIVE_ENDING_TOOLS_ENABLED:
+            return _finish(base, True if (modified_strip or base != working) else False)
+
         if (
             closer.endswith("?")
             and is_grammatical_english(closer)
@@ -323,39 +354,56 @@ def apply_landing(
                 for stem in extract_signature_language(user_message).stems
             )
         ):
-            return _finish(text, False)
+            return _finish(full if not junk else working, False)
 
         q = craft_callback_question(user_message, conversation_id=conversation_id)
-        base = _strip_trailing_question(body or text)
         if not q:
-            # Do not manufacture a Signature Line to replace a failed callback
-            return _finish(base, True if modified_strip or closer else False)
+            return _finish(base, True if modified_strip or base != working else False)
         if q in base:
             return _finish(base, True)
         return _finish(f"{base.rstrip()}\n\n{q}", True)
 
     if landing == "BODY_ENDS_RESPONSE":
-        base = _strip_trailing_question(body or text)
-        # Strip any manufactured closer; body is the ending
-        return _finish(base, True if (closer or modified_strip) else False)
+        base = _strip_trailing_question(working)
+        return _finish(base, True if (modified_strip or base != working) else False)
 
     if landing in {
         "SIGNATURE_LINE",
         "RECOGNITION_STATEMENT",
         "RECOGNITION_OBSERVATION",
     }:
-        base = _strip_trailing_question(body or text)
+        base = _strip_trailing_question(working)
 
-        # Re-check: body may already be finished
+        if not CREATIVE_ENDING_TOOLS_ENABLED:
+            return _finish(base, True if (modified_strip or base != working) else False)
+
         if body_already_lands(base):
-            return _finish(base, True if (closer or modified_strip) else False)
+            return _finish(base, True if (modified_strip or base != working) else False)
 
-        # Discovery only — NO_SIGNATURE_FOUND is success
         out, mod, sig = ensure_signature_line(base, user_message, plan=plan)
         if sig and last_line_is_signature(out, user_message=user_message):
-            return _finish(out, True if (mod or closer or modified_strip) else mod)
+            return _finish(out, True if (mod or modified_strip) else mod)
 
-        # Discovery failed or deletion test stripped it — body ends the response
-        return _finish(base, True if (closer or modified_strip or mod) else False)
+        return _finish(base, True if (modified_strip or mod or base != working) else False)
 
-    return _finish(text, modified_strip)
+    return _finish(working, modified_strip)
+
+
+def protective_cleanup(text: str) -> Tuple[str, bool]:
+    """Strip broken closers / trailing quiz — never invent a new ending."""
+    before = (text or "").strip()
+    out = strip_malformed_closers(before)
+    # Drop trailing engagement question paragraphs
+    paras = re.split(r"\n\s*\n", out)
+    while len(paras) >= 2:
+        last = paras[-1].strip()
+        if last.endswith("?") or not would_keep_if_nobody_could_reply(last):
+            paras = paras[:-1]
+            out = "\n\n".join(paras).strip()
+            continue
+        break
+    if out.rstrip().endswith("?"):
+        sentences = re.split(r"(?<=[.!?])\s+", out.rstrip())
+        if len(sentences) >= 2:
+            out = " ".join(sentences[:-1]).rstrip()
+    return out, out != before

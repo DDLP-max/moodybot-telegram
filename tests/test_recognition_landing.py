@@ -36,7 +36,7 @@ def test_malformed_landing_family_rejected():
 
 
 def test_landing_engine_version():
-    assert LANDING_ENGINE_VERSION == "earned-ending-v1"
+    assert LANDING_ENGINE_VERSION == "minimal-write-v1"
 
 
 def test_politics_strips_broken_closer_and_may_stop():
@@ -47,16 +47,13 @@ def test_politics_strips_broken_closer_and_may_stop():
     )
     result = finalize_response(draft, user)
     assert "seen it named" not in result.text.lower()
-    assert result.plan.landing in {
-        "body_ends_response",
-        "signature_line",
-        "silence",
-    }
+    assert result.plan.landing == "body_ends_response"
+    assert result.diagnostics.get("landing_added") == "false"
 
 
-def test_stretch_still_allows_rhetorical_question():
+def test_stretch_callback_available_but_not_forced():
     user = "What got stretched out for you?"
-    assert select_landing(user).landing == "RECOGNITION_CALLBACK"
+    assert select_landing(user).landing == "BODY_ENDS_RESPONSE"
     q = craft_callback_question(user)
     assert q and "stretch" in q.lower()
 
@@ -103,7 +100,6 @@ def test_apply_landing_strips_broken_closer():
 
 def test_build_plan_landing_field():
     plan = build_response_plan("Why do feminists hate women praising men?")
-    # Without body at plan time, discovery may be attempted
     assert plan.landing in {"signature_line", "body_ends_response", "silence"}
     assert plan.allow_question is False
 
@@ -113,7 +109,7 @@ if __name__ == "__main__":
     test_malformed_landing_family_rejected()
     test_landing_engine_version()
     test_politics_strips_broken_closer_and_may_stop()
-    test_stretch_still_allows_rhetorical_question()
+    test_stretch_callback_available_but_not_forced()
     test_topic_nouns_are_not_signature()
     test_body_lands_selector()
     test_technical_silence()

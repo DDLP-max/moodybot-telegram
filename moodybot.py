@@ -789,12 +789,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 content = content[3:].lstrip()
 
             content = clean_response(content)
-            content = replace_moody_descriptors(content)
+            # Persona costume swaps OFF on default Dynamic — they compete with real writing.
+            # Slash-command / persona modes may still want them later if re-enabled.
             content = re.sub(r"\(([A-Z][a-z]+(?: ?&? [A-Z][a-z]+)?)\)", "", content)
             content = content.replace("—", ", ")
             content = re.sub(r'\s+([.,;!?])', r'\1', content)
             content = polish_sentences(content)
-            content = auto_paragraph(content)
+            # Keep paragraph breaks from the model; do not force one-sentence-per-line inventory layout
+            if "\n\n" not in content and content.count("\n") > 6:
+                content = auto_paragraph(content)
 
             # Authoritative finalization — draft must not go to the user raw.
             git_commit = ""

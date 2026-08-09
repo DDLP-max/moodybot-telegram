@@ -51,18 +51,20 @@ def test_generate_callback_preserves_stretch():
     assert "what shifted" not in cb.lower()
 
 
-def test_finalize_rewrites_semantic_closer_to_rhetorical():
+def test_finalize_strips_quiz_without_forcing_callback():
+    """Default path strips junk questions; does not manufacture a stretch callback."""
     user = "What got stretched out for you?"
     draft = (
         "Here is the insight about intimacy and language.\n\n"
         "What changed in your sense of the topic?"
     )
     result = finalize_response(draft, user)
-    closer = result.text.strip().split("\n\n")[-1].lower().replace("🥃", "").strip()
-    assert "stretch" in closer
-    assert not closer.startswith("what changed")
-    assert "what shifted" not in closer
-    assert "seen it named" not in closer
+    lower = result.text.lower()
+    assert "what changed in your sense" not in lower
+    assert "seen it named" not in lower
+    assert result.diagnostics.get("landing_added") == "false"
+    # Insight body survives
+    assert "intimacy" in lower or "insight" in lower
 
 
 def test_carrying_callback():
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     test_stretch_fails_semantic_synonyms()
     test_stretch_pass_rhetorical_echo()
     test_generate_callback_preserves_stretch()
-    test_finalize_rewrites_semantic_closer_to_rhetorical()
+    test_finalize_strips_quiz_without_forcing_callback()
     test_carrying_callback()
     test_cracked_callback()
     test_room_callback()

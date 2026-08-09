@@ -32,12 +32,9 @@ def test_cultural_analysis_prefers_recognition_callback():
         "How has dirty talk changed between 1995 and 2026, "
         "and did pornography influence that?"
     )
-    # Cultural criticism should land as statement/silence, not forced quiz
-    assert decision.landing in {
-        "RECOGNITION_STATEMENT",
-        "SILENCE",
-        "RECOGNITION_OBSERVATION",
-    }
+    # Cultural criticism: body ends — no forced quiz / signature module
+    assert decision.landing == "BODY_ENDS_RESPONSE"
+    assert decision.allow_question is False
 
 
 def test_practical_action_prefers_action_line():
@@ -71,12 +68,8 @@ def test_relationship_pattern_can_use_callback():
     decision = select_landing(
         "Why does this relationship keep repeating the same pattern?"
     )
-    assert decision.landing in {
-        "RECOGNITION_STATEMENT",
-        "SILENCE",
-        "RECOGNITION_OBSERVATION",
-        "RECOGNITION_CALLBACK",
-    }
+    # Default minimal path: body ends; creative landing tools are optional/off
+    assert decision.landing == "BODY_ENDS_RESPONSE"
 
 
 def test_generic_followups_are_detected():
