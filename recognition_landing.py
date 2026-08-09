@@ -36,7 +36,7 @@ from signature_line import (
 
 LandingType = str
 
-LANDING_ENGINE_VERSION = "signature-line-v2"
+LANDING_ENGINE_VERSION = "signature-line-v3"
 
 # Patterns that prove the closer is machine-stapled topic debris.
 BROKEN_CLOSER_PATTERNS = [
@@ -367,12 +367,10 @@ def apply_landing(
                 kept = f"{base.rstrip()}\n\n{closer}" if base else closer
             return _finish(kept, modified_strip)
 
-        # Generate AFTER body exists — react to the draft
-        line = generate_signature_line(plan, base, user_message=user_message)
-        if line:
-            out, mod, sig = ensure_signature_line(base, user_message, plan=plan)
-            if sig:
-                return _finish(out, True if (mod or closer or modified_strip) else mod)
+        # Generate AFTER body exists — react to the draft (single call via ensure)
+        out, mod, sig = ensure_signature_line(base, user_message, plan=plan)
+        if sig:
+            return _finish(out, True if (mod or closer or modified_strip) else mod)
         # Nothing earned — silence beats a manufactured slogan
         return _finish(base, True if (closer or modified_strip) else modified_strip)
 

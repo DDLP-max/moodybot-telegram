@@ -1,8 +1,8 @@
 {
   "section_count": 209,
-  "char_count": 202235,
-  "prompt_hash": "bca0ffe6ce795030",
-  "prompt_hash_sha256": "bca0ffe6ce79503034cafb82d649b8c492ae80ff5dc5476b9f63cc117a6edaa1",
+  "char_count": 201952,
+  "prompt_hash": "c64dd571b481a9e5",
+  "prompt_hash_sha256": "c64dd571b481a9e5b518fa03950ba03df735f7c0ee3d0a9f892f43bb966acccb",
   "final_20_sections": [
     "9_response-engine/persona-compatibility-matrix.md",
     "9_response-engine/persona-selection-algorithm.md",

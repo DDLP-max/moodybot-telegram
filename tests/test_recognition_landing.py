@@ -37,7 +37,7 @@ def test_malformed_landing_family_rejected():
 
 
 def test_landing_engine_version():
-    assert LANDING_ENGINE_VERSION == "signature-line-v2"
+    assert LANDING_ENGINE_VERSION == "signature-line-v3"
 
 
 def test_politics_prefers_statement_not_question():

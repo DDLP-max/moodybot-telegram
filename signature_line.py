@@ -191,34 +191,89 @@ def test_specificity(line: str, conversation_tokens: set) -> Tuple[bool, str]:
     return True, "ok"
 
 
-def test_compression(line: str, body: str) -> Tuple[bool, str]:
-    """Does it reduce the response into a sharper insight — not repeat it?"""
-    if any(m in _norm(line) for m in SUMMARY_MARKERS):
-        return False, "mechanical_summary"
-    if not body:
-        return True, "ok"
-    line_n = _norm(line)
-    sentences = [
-        _norm(s)
-        for s in re.split(r"(?<=[.!?])\s+", body.strip())
+def _body_sentences(body: str) -> List[str]:
+    return [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", (body or "").strip())
         if s.strip() and not s.strip().endswith("?")
     ]
-    if not sentences:
-        return True, "ok"
-    # Exact echo of a body sentence fails (unless isolating it as the last line)
-    # High overlap with the immediately previous sentence fails
-    prev = sentences[-1]
-    if line_n == prev:
-        return True, "ok"  # promoting the body's own landing sentence is compression
+
+
+def body_already_said_this(line: str, body: str) -> bool:
+    """If I removed the last sentence, would the body already have said the same thing?"""
+    line_n = _norm(line)
+    if not line_n or not body:
+        return False
     line_toks = _content_tokens(line)
-    prev_toks = _content_tokens(prev)
-    if line_toks and prev_toks:
-        overlap = len(line_toks & prev_toks) / max(len(line_toks), 1)
-        if overlap >= 0.85 and word_count(line) >= word_count(prev) * 0.9:
-            return False, "repeats_previous"
-    # Must be shorter or equal sharpness vs average body sentence
-    if sentences and word_count(line) > 22:
+    if not line_toks:
+        return False
+    for sent in _body_sentences(body):
+        sent_n = _norm(sent)
+        if not sent_n:
+            continue
+        # Exact / near-exact restatement of any body sentence
+        if line_n == sent_n:
+            return True
+        if line_n.rstrip(".!") == sent_n.rstrip(".!"):
+            return True
+        sent_toks = _content_tokens(sent)
+        if not sent_toks:
+            continue
+        overlap = len(line_toks & sent_toks) / max(len(line_toks), 1)
+        # Same thesis, slightly rephrased — still a restatement
+        if overlap >= 0.78 and len(line_toks - sent_toks) <= 1:
+            return True
+        # Line is a subset paraphrase of a longer thesis sentence
+        if line_toks <= sent_toks and len(line_toks) >= 3:
+            return True
+    return False
+
+
+def adds_deeper_layer(line: str, body: str) -> bool:
+    """Body explains. Signature Line reveals — one layer deeper than the thesis."""
+    if not body:
+        return True
+    line_toks = _content_tokens(line)
+    body_toks = _content_tokens(body)
+    if not line_toks:
+        return False
+    # New conceptual material not already in the body
+    novel = line_toks - body_toks
+    # Reframing turn required — novelty alone is still explanation, not revelation
+    reveal_turn = bool(
+        re.search(
+            r"\b(becomes?|became|stopped being|already ending|runs?\s+out|"
+            r"pretending|needs? permission|survives by|long before|"
+            r"weren't|was already|no longer|instead|don't end|does not end|"
+            r"rarely end|explains?|announces itself)\b",
+            _norm(line),
+        )
+    )
+    # Weak thesis-echo adjectives ("matter", "important", "real") are not depth
+    if re.search(r"\b(matter|matters|important|real|true|valid)\b\.?$", _norm(line)):
+        return False
+    if not reveal_turn:
+        return False
+    # Must bring at least one new hinge the body didn't already state
+    return len(novel) >= 1
+
+
+def test_compression(line: str, body: str) -> Tuple[bool, str]:
+    """Compress the thesis into a deeper observation — never restate it.
+
+    Ask: if I removed the last sentence, would the body already have said
+    the same thing? If yes — FAIL.
+    """
+    if any(m in _norm(line) for m in SUMMARY_MARKERS):
+        return False, "mechanical_summary"
+    if word_count(line) > 22:
         return False, "not_compressed"
+    if not body:
+        return True, "ok"
+    if body_already_said_this(line, body):
+        return False, "restates_thesis"
+    if not adds_deeper_layer(line, body):
+        return False, "no_deeper_layer"
     return True, "ok"
 
 
@@ -418,6 +473,9 @@ def last_line_is_signature(
     paras = re.split(r"\n\s*\n", (text or "").strip())
     last = (paras[-1] if paras else "").strip()
     body = "\n\n".join(paras[:-1]) if len(paras) > 1 else ""
+    # A sole paragraph is the thesis body — not yet a Signature Line.
+    if not body:
+        return False
     ok, _ = validate_signature_line(
         last,
         body=body,
@@ -436,28 +494,33 @@ def extract_signature_from_body(
     anchors: Optional[List[str]] = None,
     central_insight: str = "",
 ) -> Optional[str]:
-    """Discover a last sentence already living inside the draft."""
-    sentences = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", (body or "").strip())
-        if s.strip() and not s.strip().endswith("?")
-    ]
-    best: Optional[str] = None
-    for s in reversed(sentences):
-        others = " ".join(x for x in sentences if x != s)
-        ok, _ = validate_signature_line(
-            s,
-            body=others,
-            user_message=user_message,
-            anchors=anchors,
-            central_insight=central_insight,
-            allow_exceptional_length=True,
-            check_novelty=False,
-        )
-        if ok:
-            best = s
-            break
-    return best
+    """Only keep a draft sentence if it already sits as a deeper last paragraph.
+
+    Mid-body thesis sentences explain. Promoting them is restatement, not revelation.
+    """
+    paras = re.split(r"\n\s*\n", (body or "").strip())
+    if len(paras) < 2:
+        return None
+    last = paras[-1].strip()
+    prior = "\n\n".join(paras[:-1]).strip()
+    if not last or not prior:
+        return None
+    if not is_single_sentence(last):
+        return None
+    if body_already_said_this(last, prior):
+        return None
+    if not adds_deeper_layer(last, prior):
+        return None
+    ok, _ = validate_signature_line(
+        last,
+        body=prior,
+        user_message=user_message,
+        anchors=anchors,
+        central_insight=central_insight,
+        allow_exceptional_length=True,
+        check_novelty=False,
+    )
+    return last if ok else None
 
 
 def _compress_candidate(
@@ -526,7 +589,10 @@ def _conversation_conditioned_line(
         ),
         (
             ("boundary", "boundaries"),
-            ("Boundaries rarely end relationships — they reveal them.",),
+            (
+                "Boundaries don't end relationships — they reveal the ones that were already ending.",
+                "Boundaries rarely end relationships — they reveal them.",
+            ),
         ),
         (
             ("story", "narrative", "defending", "women"),
@@ -549,7 +615,10 @@ def _conversation_conditioned_line(
         ),
         (
             ("dirty talk", "porn", "1995", "sexual language", "script"),
-            ("The script library grew — the language only followed.",),
+            (
+                "The language only followed — the script library had already grown.",
+                "The script usually survives by making the new language feel ordinary.",
+            ),
         ),
         (
             ("cancel", "late at night", "low priority", "only calls"),
@@ -600,16 +669,24 @@ def generate_signature_line(
         if len(sents) >= 2:
             body = " ".join(sents[:-1]).rstrip()
 
-    # 1) Body already ends with a true Signature Line — keep it
+    # Prefer a deeper line that REVEALS — never promote a thesis restatement.
+    # Body explains; Signature Line goes one layer deeper.
+
+    # 1) Body already ends with a Signature Line that adds depth — keep it
     if last_line_is_signature(
         body,
         user_message=user_message,
         anchors=anchors,
         central_insight=insight,
     ):
-        return re.split(r"\n\s*\n", body)[-1].strip()
+        last = re.split(r"\n\s*\n", body)[-1].strip()
+        prior = "\n\n".join(re.split(r"\n\s*\n", body)[:-1])
+        if prior and not body_already_said_this(last, prior) and adds_deeper_layer(last, prior):
+            return last
+        # Sole paragraph = the thesis body. Never keep it as the Signature Line —
+        # go one layer deeper via bank/compression below.
 
-    # 2) Discover a sentence already living in the body
+    # 2) Discover a revealing sentence already in the draft (not a restatement)
     extracted = extract_signature_from_body(
         body,
         user_message=user_message,
@@ -617,9 +694,13 @@ def generate_signature_line(
         central_insight=insight,
     )
     if extracted:
-        return extracted
+        others = body.replace(extracted, " ", 1)
+        if not body_already_said_this(extracted, others) and adds_deeper_layer(
+            extracted, others
+        ):
+            return extracted
 
-    # 3) Compress a late body sentence (react to the draft)
+    # 3) Compress a late body sentence only if the cut adds a deeper layer
     sentences = [
         s.strip()
         for s in re.split(r"(?<=[.!?])\s+", body)
@@ -633,11 +714,21 @@ def generate_signature_line(
             anchors=anchors,
             central_insight=insight,
         )
-        if compressed:
+        if (
+            compressed
+            and not body_already_said_this(compressed, body)
+            and adds_deeper_layer(compressed, body)
+        ):
             return compressed
 
-    # 4) Conversation-conditioned fallback (still must pass quality gates)
-    return _conversation_conditioned_line(user_message, fields, body)
+    # 4) Conversation-conditioned depth when the body only explained the thesis
+    deeper = _conversation_conditioned_line(user_message, fields, body)
+    if deeper and not body_already_said_this(deeper, body) and adds_deeper_layer(
+        deeper, body
+    ):
+        return deeper
+
+    return None
 
 
 # Compat aliases used by recognition_landing
@@ -680,9 +771,15 @@ def ensure_signature_line(
     if not line:
         return base, False, None
 
+    # Validate against the body WITHOUT this line (promotion isn't restatement)
+    prior_for_gate = base
+    if line in base:
+        prior_for_gate = base.replace(line, " ", 1)
+        prior_for_gate = re.sub(r"\s{2,}", " ", prior_for_gate).strip()
+
     ok, _ = validate_signature_line(
         line,
-        body=base,
+        body=prior_for_gate,
         user_message=user_message,
         anchors=anchors,
         central_insight=insight,
@@ -700,13 +797,17 @@ def ensure_signature_line(
 
     # If discovered mid-body, isolate as final paragraph (don't leave duplicate)
     if line in base and last != line:
-        # Remove only a trailing duplicate occurrence
         if last.endswith(line):
             base = base[: base.rfind(line)].rstrip()
         elif line in last:
             without = last.replace(line, "").strip(" ,;")
             paras[-1] = without
             base = "\n\n".join(p for p in paras if p.strip())
+        else:
+            # Sentence earlier in a multi-sentence paragraph
+            base = re.sub(re.escape(line), "", base, count=1).strip()
+            base = re.sub(r"\s{2,}", " ", base)
+            base = re.sub(r"\n{3,}", "\n\n", base).strip()
 
     out = f"{base.rstrip()}\n\n{line}" if base else line
     remember_signature_line(line)
