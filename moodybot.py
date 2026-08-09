@@ -830,6 +830,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             is_trial = chat.id == FREE_GROUP_CHAT_ID or chat.type == "private"
             log_interaction(user_input, content, is_trial=is_trial)
+            try:
+                from inspector.store import record_event
+
+                record_event(
+                    user_input,
+                    content,
+                    finalized.diagnostics,
+                    channel="telegram",
+                    source="live",
+                )
+            except Exception as insp_err:
+                logger.warning("Inspector record failed: %s", insp_err)
 
             # Encoding safety only — do not alter closer/typography after surface render.
             content = safe_emoji(content)

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hall of Fame — Moody Inspector</title>
+  <style>
+    :root {
+      --bg: #121212; --panel: #1a1a1a; --line: #2e2e2e; --text: #e8e4df;
+      --muted: #9a948c; --accent: #d4c4a8;
+      --mono: "IBM Plex Mono", Consolas, monospace;
+      --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+    header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+    header h1 { margin: 0; font-size: 1.1rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+    a { color: var(--accent); }
+    main { max-width: 720px; padding: 1.5rem; }
+    li { margin-bottom: 1rem; list-style: none; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem; }
+    ul { padding: 0; }
+    .line { font-family: var(--mono); font-size: 1.05rem; }
+    .meta { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Hall of Fame</h1>
+    <a href="{{ url_for('inspector_home') }}">← Inspector</a>
+  </header>
+  <main>
+    <p style="color:var(--muted)">Stealable sentences. Training signal for discovery density — not whole replies.</p>
+    <ul class="hall">
+      {% for h in hall %}
+      <li>
+        <div class="line">{{ h.line }}</div>
+        <div class="meta">{{ h.lens or '—' }} · {{ h.ts[:16].replace('T',' ') }}{% if h.note %} · {{ h.note }}{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if not hall %}
+    <p style="color:var(--muted)">Nothing starred yet. Open a response and hit ★ Star discovery.</p>
+    {% endif %}
+  </main>
+</body>
+</html>

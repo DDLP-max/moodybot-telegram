@@ -88,6 +88,63 @@ def health_check():
         "openai_key_available": check_openai_key()
     })
 
+
+@app.route("/inspector")
+def inspector_home():
+    """Moody Inspector — response debugger (logs → cards, not more routing)."""
+    from inspector.score import aggregate_lens_stats, diff_events
+    from inspector.store import get_event, load_events, load_hall_of_fame
+
+    events = load_events(limit=300)
+    selected_id = request.args.get("id")
+    selected = get_event(selected_id) if selected_id else None
+    prev = None
+    diff = None
+    if selected:
+        # previous in time = next in newest-first list
+        for i, e in enumerate(events):
+            if e.get("id") == selected.get("id") and i + 1 < len(events):
+                prev = events[i + 1]
+                break
+        diff_id = request.args.get("diff")
+        if diff_id:
+            other = get_event(diff_id)
+            if other:
+                diff = diff_events(other, selected)
+        elif prev:
+            diff = None  # only when explicitly requested
+    return render_template(
+        "inspector.html",
+        events=events,
+        selected=selected,
+        prev=prev,
+        diff=diff,
+        hall=load_hall_of_fame(limit=50),
+        lens_stats=aggregate_lens_stats(events),
+    )
+
+
+@app.route("/inspector/hall")
+def inspector_hall():
+    from inspector.store import load_hall_of_fame
+
+    return render_template("inspector_hall.html", hall=load_hall_of_fame(limit=500))
+
+
+@app.route("/inspector/star", methods=["POST"])
+def inspector_star():
+    from inspector.store import star_discovery
+
+    line = (request.form.get("line") or "").strip()
+    if line:
+        star_discovery(
+            line,
+            event_id=request.form.get("event_id") or "",
+            lens=request.form.get("lens") or "",
+            note=request.form.get("note") or "",
+        )
+    return redirect(url_for("inspector_hall"))
+
 @app.route('/start-bot', methods=['POST'])
 def start_bot():
     """Start the Telegram bot process."""

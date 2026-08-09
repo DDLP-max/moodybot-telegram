@@ -26,6 +26,7 @@ moodybot.lock
 trial_users.json
 hs_err_pid*.log
 instance/
+data/inspector/
 
 # Large / local-only artifacts
 moodybot_log.txt
