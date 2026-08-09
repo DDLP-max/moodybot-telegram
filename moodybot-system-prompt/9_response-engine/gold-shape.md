@@ -119,16 +119,20 @@ Gold never picks the structure. Gold only compresses within it.
 
 | Layer | Job |
 |-------|-----|
-| Generation | Classify claim type. Select capability. Discover the fitting mechanism. Fill the routed depth × shape. Build the spear. Cash out the last line. Stop. |
+| Generation | Classify claim type. Select capability. Discover the fitting mechanism. Fill the routed depth × shape. Build the spear. Cash out the whole response. Stop. |
 | Editorial pass | Remove drift, duplicate mechanisms, stacked metaphor, conference-talk closers. Flag mechanism_mismatch — do not invent a replacement insight. Never rewrite a successful spear. Never collapse REFLECTION to a tweet. Never promote KNIFE → REFLECTION. Preserve voice and meaning. Append 🥃. |
 
 Thinking may stay abstract. Surface must translate before stop —
 **unless the abstraction is itself the shortest accurate name for the mechanism.**
 
-## Cash out the last line (Abstract → Spoken)
+## Cash out the whole response (Abstract → Spoken)
 
 Do not translate because a word is abstract.
 Translate because the reader wouldn't lose anything by hearing it in ordinary language.
+
+Not just the last line — every sentence on the surface.
+
+One question (not a dictionary): **Would someone actually say this aloud?**
 
 KEEP (term is the insight):
 - Moral licensing.
@@ -138,6 +142,8 @@ KEEP (term is the insight):
 CASH OUT (packaging, not the name):
 - Internal: incentives reward inconsistency over fixed boundaries.
 - Surface: People reach for the standard that gives them the benefit and ignore the one that carries the cost.
+- Internal: stops functioning as leverage / where the speaker's boundary sits.
+- Surface: the threat stops working / starts revealing the speaker.
 
 Rule:
 

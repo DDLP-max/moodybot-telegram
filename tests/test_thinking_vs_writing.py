@@ -101,7 +101,7 @@ def test_finalizer_still_does_not_rewrite_jargon():
 
 def test_diagnostics_log_governing_pattern_key():
     result = finalize_response(
-        "He's making a move. The professional boundary changed.",
+        "He's making a move. This stopped being professional.",
         "Doorman sent flowers after getting my number.",
     )
     assert "governing_pattern" in result.diagnostics

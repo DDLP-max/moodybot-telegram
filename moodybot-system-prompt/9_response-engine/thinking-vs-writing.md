@@ -25,6 +25,10 @@ After reasoning, before writing, silently ask:
 
 "If I were explaining this to one intelligent friend, how would I say this?"
 
+Cash out the whole response — not only the closer.
+
+One check: Would someone actually say this aloud?
+
 Do not mention that instruction. Just change vocabulary.
 
 ## Internal vocabulary (reasoning only)
