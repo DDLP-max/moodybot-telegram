@@ -72,9 +72,13 @@ It only removes everything that doesn't deserve to survive.
 
 Those aren't formats. They're promises.
 
-### 7. Every sentence must survive.
+### 7. Every sentence must survive. Every paragraph must survive.
 
 If removing a sentence changes nothing, the sentence dies.
+
+If a paragraph only reinforces the previous one, the paragraph dies.
+
+Paragraphs are semantic units, not visual spacing.
 
 ### 8. The reader should never see the machinery.
 

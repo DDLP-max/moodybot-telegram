@@ -84,7 +84,7 @@ def test_core_write_has_depth_times_shape():
     assert "necessary development" in lower or "expand topics" in lower
     assert "surprise the reader" in lower
     assert "reframe the reader" in lower
-    assert "earn every paragraph" in lower
+    assert "semantic units" in lower or "every paragraph must survive" in lower
     assert "observation" in lower and "deepening" in lower and "acceptance" in lower
 
 
@@ -92,8 +92,42 @@ def test_reflection_guidance_names_purpose_and_diamond():
     plan = build_response_plan(FORTIES)
     g = plan_closer_instruction(plan).lower()
     assert "seeing their own life differently" in g
-    assert "earn every paragraph" in g
-    assert "same diamond" in g or "rotate the same diamond" in g
+    assert "new layer" in g or "reinforce" in g
+    assert "and then" in g
+    assert "semantic units" in g
+    assert "3–6" in g or "3-6" in g or "paragraphs" in g
+
+
+def test_editor_preserves_reflection_paragraphs_and_cuts_restatement():
+    multi = (
+        "People usually threaten others with the loss they'd fear most themselves. "
+        "The cat lady line only works if the speaker assumes everyone experiences loneliness the way he does.\n\n"
+        "That's the mistake. Most failed persuasion comes from projecting your own emotional landscape onto someone else. "
+        "The argument isn't really about cats or marriage. It's about assuming your deepest fear must be universal.\n\n"
+        "People usually threaten others with the loss they'd fear most themselves. "
+        "The cat lady line only works if loneliness is assumed to sting everyone the same way.\n\n"
+        "The moment a threat stops landing, repeating it doesn't make it stronger. "
+        "It only reveals that you've misunderstood the person you're trying to influence."
+    )
+    failures = evaluate_gold_shape(CAT_LADY, multi, "KNIFE", response_budget="high")
+    assert "paragraph_restatement" in failures
+    out, report = apply_gold_shape_pass(
+        CAT_LADY, multi, preferred_structure="KNIFE", response_budget="high"
+    )
+    assert "\n\n" in out  # cadence preserved
+    assert out.count("\n\n") <= multi.count("\n\n")
+    # Restating third paragraph should be gone or merged away
+    assert out.lower().count("threaten others with the loss") <= 1
+
+
+def test_core_write_has_progression_and_cadence_rules():
+    lower = CORE_WRITE_DIRECTIVE.lower()
+    assert "and then" in lower
+    assert "new layer" in lower or "over-confirming" in lower or "over confirming" in lower
+    assert "semantic units" in lower
+    assert "not visual spacing" in lower
+    assert "every paragraph must survive" in lower
+    assert "3–6" in lower or "3-6" in lower
 
 
 def test_high_budget_gold_does_not_flag_developed_knife():

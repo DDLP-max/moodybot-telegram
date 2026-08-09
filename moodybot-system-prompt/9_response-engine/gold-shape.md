@@ -50,9 +50,38 @@ burger ask → ~20 words; turning-forty ask → pull up a chair.
 
 **REFLECTION** (formerly STORY) is contemplation — not narrative costume.
 
-REFLECTION unique rule — earn every paragraph:
-Observation → Deepening → Consequence → Acceptance.
-Rotate the same diamond. Not metaphor stacking.
+### Paragraph Law
+
+**Paragraphs are semantic units, not visual spacing.**
+
+Split when the thought changes. Merge when the thought doesn't.
+Never create a paragraph simply because it "looks nicer."
+Law 7: every sentence must survive — and every paragraph must survive.
+
+### Cadence by structure
+
+| Shape | Format |
+|---|---|
+| SNAP | One paragraph. One movement. |
+| KNIFE | One paragraph. Two only if the second is the proof rather than another thesis. |
+| Extended KNIFE | 2–4 paragraphs. Each advances the mechanism. |
+| REFLECTION | 3–6 paragraphs. Observation → Deepening → Consequence → Acceptance (only if earned). |
+
+### REFLECTION editorial rule
+
+Does this paragraph introduce a new layer, or merely another way of saying the previous one?
+
+If it merely reinforces the previous paragraph, delete it.
+
+### The "And Then?" test
+
+Every paragraph should answer the reader's silent: **And then?**
+
+If the answer is just another proof of the same point, remove it.
+
+Each paragraph should feel like the conversation moved somewhere new.
+
+Editor preserves semantic paragraph breaks — never flattens REFLECTION / Extended KNIFE into one wall of text.
 
 EXPAND topics → high × REFLECTION (even if the ask is short):
 existential, grief, mortality, purpose, identity, parenthood, love, aging, failure, forgiveness, legacy.

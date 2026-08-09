@@ -811,6 +811,7 @@ def response_budget_guidance(budget: str, structure: str = "", topic_mode: str =
         return (
             "\nRESPONSE BUDGET — Depth: low × Shape: SNAP.\n"
             "PURPOSE: Surprise the reader.\n"
+            "FORMAT: one paragraph; one movement. Usually 1–3 sentences.\n"
             "Stop at the spear. Soft ~15–70 words (consequence, not the design).\n"
             "PASS: \"That's like saying prison is just a room.\"\n"
             "Do not pad. Do not lyricize.\n"
@@ -819,28 +820,36 @@ def response_budget_guidance(budget: str, structure: str = "", topic_mode: str =
         return (
             "\nRESPONSE BUDGET — Depth: high × Shape: REFLECTION.\n"
             "PURPOSE: Leave the reader seeing their own life differently.\n"
-            "Contemplation, not narrative. Soft ~250–450 words may follow — length is a consequence.\n"
-            "Unique rule: EARN EVERY PARAGRAPH.\n"
-            "Beat shape: Observation → Deepening → Consequence → Acceptance.\n"
-            "Rotate the same diamond. Do not stack metaphors for beauty.\n"
-            "FAIL: Idea → metaphor → different metaphor → another metaphor → emotional callback.\n"
-            "FAIL: one punchy observation that ignores an existential ask.\n"
-            "PASS: time sneaks up… body whispers… purpose when the chase ends… "
-            "— same truth, turned slowly.\n"
-            "Gold still edits. Do not collapse to a tweet.\n"
+            "PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.\n"
+            "Split when the thought changes. Merge when it doesn't. "
+            "Never create a paragraph simply because it looks nicer.\n"
+            "FORMAT: 3–6 paragraphs. Observation → Deepening → Consequence → "
+            "Acceptance (only if earned).\n"
+            "REFLECTION EDITORIAL RULE: Does this paragraph introduce a new layer, "
+            "or merely another way of saying the previous one? "
+            "If it merely reinforces — delete it.\n"
+            "AND THEN? TEST: every paragraph answers the reader's silent \"And then?\" "
+            "If the answer is just another proof of the same point, remove it.\n"
+            "Each paragraph should feel like the conversation moved somewhere new.\n"
+            "FAIL: Observation → Proof → Proof again → Summary → Moral.\n"
+            "PASS: three clean paragraphs that deepen once each, then stop.\n"
         )
     if b == "high":
         return (
             "\nRESPONSE BUDGET — Depth: high × Shape: Extended KNIFE.\n"
             "PURPOSE: Develop one mechanism until it feels inevitable.\n"
+            "PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.\n"
+            "FORMAT: 2–4 paragraphs. Each advances the mechanism. "
+            "Never split because it looks nicer.\n"
             f"Topic mode: {mode or 'argument'}. Soft ~100–260 words (consequence).\n"
-            "Stop after the proof is complete — not after the first line.\n"
+            "AND THEN? TEST: if the next paragraph is just another proof of the same point, remove it.\n"
             "Do NOT flip into lyrical REFLECTION on politics/hot-takes.\n"
-            "Compression removes redundancy. It must not remove necessary development.\n"
         )
     return (
         "\nRESPONSE BUDGET — Depth: medium × Shape: KNIFE.\n"
         "PURPOSE: Reframe the reader.\n"
+        "FORMAT: one paragraph / one movement. Two only if the second is the proof "
+        "rather than another thesis.\n"
         "Stop after the proof. Soft ~50–140 words (consequence).\n"
         "Reframe → proof → spear. Develop enough to land — do not force SNAP.\n"
     )
@@ -1255,22 +1264,42 @@ New failure: every prompt deserves one observation.
 Neither is right. Don't ramble ≠ be short.
 Law: every sentence must survive — if removing it changes nothing, it dies.
 
-REFLECTION unique rule — EARN EVERY PARAGRAPH:
-Observation → Deepening → Consequence → Acceptance.
-Rotate the same diamond. Not Idea → metaphor → different metaphor → callback.
-350 words is fine if every paragraph introduces another layer — not another flourish.
+PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.
+Split when the thought changes. Merge when the thought doesn't.
+Never create a paragraph simply because it "looks nicer."
+Law 7 extension: every sentence must survive — and every paragraph must survive.
+
+CADENCE BY STRUCTURE:
+- SNAP: one paragraph; one movement.
+- KNIFE: one paragraph; two only if the second is the proof rather than another thesis.
+- Extended KNIFE: 2–4 paragraphs; each advances the mechanism.
+- REFLECTION: 3–6 paragraphs — Observation → Deepening → Consequence → Acceptance (only if earned).
+
+REFLECTION EDITORIAL RULE:
+Does this paragraph introduce a new layer, or merely another way of saying the previous one?
+If it merely reinforces the previous paragraph, delete it.
+
+THE "AND THEN?" TEST:
+Every paragraph should answer the reader's silent "And then?"
+If the answer is just another proof of the same point, remove it.
+Each paragraph should feel like the conversation moved somewhere new.
+FAIL: insight lands, then three more sentences making sure it landed (over-confirming).
+PASS: each paragraph deepens once; trust the reader; stop.
+
+Editor check (not a routing rule): every paragraph must deepen.
+If a paragraph only restates or reinforces the previous one, remove it. Preserve semantic paragraph breaks.
 
 ONE MECHANISM:
 one thesis → one mechanism → prove it (with enough development for the depth).
 ONE RESPONSE. ONE THESIS.
 If two sentences explain the same causal mechanism in different language, keep the stronger one.
 Do not stack near-synonyms (punishment / resentment economy / defection / universal claim / ideology / protecting the story).
-Development of one mechanism through a rich or existential prompt is not multi-mechanism essay.
+Development of one mechanism is not re-proving it six ways.
 
 SPEAR:
 Every reply has one memorable line that carries the answer.
-Once the spear lands — stop padding. No second mechanism, summary, moral, CTA, invitation, "the real lesson is…", or "and that's why…".
-On REFLECTION / high-depth, the spear may close a developed piece — do not delete the development to keep only the spear.
+Once the spear lands — stop padding / over-confirming. No second mechanism, summary, moral, CTA, invitation, "the real lesson is…", or "and that's why…".
+On REFLECTION / high-depth, the spear may close a developed multi-paragraph piece — do not delete necessary deepening; do delete re-proof.
 Then end with 🥃 alone (no catchphrase before it).
 
 CASH OUT THE LAST LINE (Abstract → Spoken translation):

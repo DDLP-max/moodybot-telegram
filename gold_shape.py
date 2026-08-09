@@ -159,6 +159,14 @@ def words(text: str) -> List[str]:
     return WORD_RE.findall(text or "")
 
 
+def paragraphs(text: str) -> List[str]:
+    """Blank-line separated units of thought."""
+    body = strip_whiskey(text or "").strip()
+    if not body:
+        return []
+    return [p.strip() for p in re.split(r"\n\s*\n+", body) if p.strip()]
+
+
 def sentences(text: str) -> List[str]:
     body = strip_whiskey(text).strip()
     if not body:
@@ -430,7 +438,107 @@ def evaluate_gold_shape(
     if structure == "REFLECTION" and len(ss) > caps["reflection_sentences"]:
         failures.append("reflection_too_many_sentences")
 
+    # Progression: paragraphs that only reinforce an earlier one (not visual spacing)
+    paras = paragraphs(body)
+    if reflection or high:
+        restaty_paras = 0
+        for i in range(1, len(paras)):
+            if len(words(paras[i])) < 12:
+                continue
+            if any(_overlap_ratio(paras[i], prev) >= 0.48 for prev in paras[:i]):
+                restaty_paras += 1
+        if restaty_paras >= 1:
+            failures.append("paragraph_restatement")
+        # Single-block over-confirm: many sentences after proof that restate early lines
+        if len(ss) >= 5:
+            head = " ".join(ss[:2])
+            confirm = sum(
+                1
+                for s in ss[2:]
+                if _overlap_ratio(s, head) >= 0.45 and len(words(s)) >= 8
+            )
+            if confirm >= 2:
+                failures.append("over_confirming")
+
     return failures
+
+
+def _strip_tail_noise(sentence: str) -> str:
+    last = CTA_TAIL.sub("", sentence).strip()
+    last = COSTUME_CLOSER.sub("", last).strip()
+    last = re.sub(
+        r"\s*(Stay (dangerous|sharp)\.?|That'?s the game\.?)\s*$",
+        "",
+        last,
+        flags=re.I,
+    ).strip()
+    return last
+
+
+def _drop_over_confirming_sentences(ss: List[str]) -> List[str]:
+    """Keep forward motion — delete lines that only restate earlier proof."""
+    if len(ss) < 3:
+        return ss
+    kept: List[str] = [ss[0]]
+    for s in ss[1:]:
+        if len(words(s)) >= 8 and any(_overlap_ratio(s, k) >= 0.52 for k in kept):
+            # Allow one short spear-like contrast even with overlap
+            if SPEAR_MARKERS.search(s) and len(words(s)) <= 18:
+                kept.append(s)
+            continue
+        kept.append(s)
+    return kept if kept else ss
+
+
+def _compress_paragraph_units(
+    user_message: str,
+    paras: List[str],
+    failures: List[str],
+) -> List[str]:
+    """Editor on paragraph beats: semantic units, not visual spacing. Progression only."""
+    cleaned: List[str] = []
+    for p in paras:
+        ss = sentences(p)
+        if not ss:
+            continue
+        ss[-1] = _strip_tail_noise(ss[-1]) or ss[-1]
+        if not ss[-1]:
+            ss = ss[:-1]
+        if not ss:
+            continue
+        # Within-paragraph sentence restatement
+        compact: List[str] = [ss[0]]
+        for s in ss[1:]:
+            if _overlap_ratio(s, compact[-1]) >= 0.68:
+                continue
+            compact.append(s)
+        if "over_confirming" in failures or "paragraph_restatement" in failures:
+            compact = _drop_over_confirming_sentences(compact)
+        if "premise_restatement" in failures:
+            compact = [
+                s
+                for s in compact
+                if not (
+                    _overlap_ratio(s, user_message) >= 0.65
+                    and len(words(s)) >= 8
+                    and not (SPEAR_MARKERS.search(s) and len(words(s)) <= 20)
+                )
+            ] or compact
+        para = " ".join(compact).strip()
+        para = re.sub(r"[ \t]{2,}", " ", para)
+        if para:
+            cleaned.append(para)
+
+    if len(cleaned) < 2:
+        return cleaned
+
+    # Drop paragraphs that only restate a previous one ("and then?" → same thing)
+    out: List[str] = [cleaned[0]]
+    for p in cleaned[1:]:
+        if any(_overlap_ratio(p, prev) >= 0.48 for prev in out) and len(words(p)) >= 12:
+            continue
+        out.append(p)
+    return out if out else cleaned
 
 
 def _compress_once(
@@ -444,30 +552,41 @@ def _compress_once(
 
     Compress within the allocated response_budget. Do not gut high-budget
     development — especially REFLECTION — down to a SNAP one-liner.
+    Preserve paragraph cadence for REFLECTION / Extended KNIFE.
     """
     structure = _normalize_structure_name(structure)
     body = strip_whiskey(draft)
+    high = (response_budget or "").lower() == "high"
+    reflection = structure == "REFLECTION"
+    keep_paragraphs = reflection or high
+    paras = paragraphs(body)
+
+    # Multi-paragraph path — cadence is part of the writing
+    if keep_paragraphs and len(paras) >= 2:
+        out_paras = _compress_paragraph_units(user_message, paras, failures)
+        if "abstract_closer" in failures and out_paras:
+            last_ss = sentences(out_paras[-1])
+            if len(last_ss) >= 1 and _is_conference_talk_sentence(last_ss[-1]):
+                if len(last_ss) >= 2:
+                    out_paras[-1] = " ".join(last_ss[:-1]).strip()
+                elif len(out_paras) >= 2 and any(
+                    not _is_conference_talk_sentence(s)
+                    for s in sentences(out_paras[-2])
+                ):
+                    out_paras = out_paras[:-1]
+        text = "\n\n".join(p for p in out_paras if p)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text
+
     ss = sentences(body)
     if not ss:
         return draft
 
     # Strip CTA / costume verbal tails from last sentence
-    if ss:
-        last = ss[-1]
-        last = CTA_TAIL.sub("", last).strip()
-        last = COSTUME_CLOSER.sub("", last).strip()
-        # strip catchphrase before whiskey style endings
-        last = re.sub(
-            r"\s*(Stay (dangerous|sharp)\.?|That'?s the game\.?)\s*$",
-            "",
-            last,
-            flags=re.I,
-        ).strip()
-        if last:
-            ss[-1] = last
-        else:
-            ss = ss[:-1]
-
+    ss[-1] = _strip_tail_noise(ss[-1])
+    if not ss[-1]:
+        ss = ss[:-1]
     if not ss:
         return body
 
@@ -476,7 +595,6 @@ def _compress_once(
         kept: List[str] = []
         for s in ss:
             if _overlap_ratio(s, user_message) >= 0.65 and len(words(s)) >= 8:
-                # keep if it's a sharp reframe despite overlap tokens
                 if SPEAR_MARKERS.search(s) and len(words(s)) <= 20:
                     kept.append(s)
                 continue
@@ -490,12 +608,14 @@ def _compress_once(
         for s in ss[1:]:
             prev = compact[-1]
             if _overlap_ratio(s, prev) >= 0.68:
-                # keep the punchier one
                 if len(words(s)) < len(words(prev)) and SPEAR_MARKERS.search(s):
                     compact[-1] = s
                 continue
             compact.append(s)
         ss = compact
+
+    if "over_confirming" in failures or (keep_paragraphs and len(ss) >= 5):
+        ss = _drop_over_confirming_sentences(ss)
 
     # Stacked metaphor: if 2+ like-a, try to drop later metaphor sentences
     if count_like_metaphors(" ".join(ss)) >= 2:
@@ -511,11 +631,8 @@ def _compress_once(
         if filtered:
             ss = filtered
 
-    structure = _normalize_structure_name(structure)
     # Post-payoff: only trim clear restatement tails — never gut REFLECTION / high-depth proofs
     spear_ok, spear, spear_i = detect_spear(ss)
-    high = (response_budget or "").lower() == "high"
-    reflection = structure == "REFLECTION"
     if (
         spear_ok
         and spear_i >= 0
@@ -524,13 +641,12 @@ def _compress_once(
         and not high
         and not reflection
     ):
-        # Keep through spear; drop only trailing restaty lines after last proof
         trimmed = ss[: spear_i + 1]
         for s in ss[spear_i + 1 :]:
             if _overlap_ratio(s, spear) >= 0.6:
                 continue
             trimmed.append(s)
-            break  # at most one non-restating proof after spear
+            break
         if trimmed:
             ss = trimmed
 
@@ -548,6 +664,7 @@ def _compress_once(
         "snap_overlong",
         "reflection_overlong",
         "thesis_repetition",
+        "over_confirming",
     )
     if (
         structure in {"SNAP", "KNIFE", "REFLECTION"}
@@ -564,7 +681,6 @@ def _compress_once(
                     keep_idx.add(spear_i - 1)
                 if spear_i + 1 < len(ss):
                     keep_idx.add(spear_i + 1)
-            # Keep early contemplative beats for REFLECTION
             if reflection:
                 for i in range(min(6, len(ss))):
                     keep_idx.add(i)
@@ -579,23 +695,18 @@ def _compress_once(
                 keep_idx.add(spear_i - 1)
             ss = [s for i, s in enumerate(ss) if i in keep_idx]
 
-    # Essay diction: light signal only — no growing replacement dictionary.
-    # Generation owns Abstract→Spoken translation; pass deletes conference closers.
     text = " ".join(ss)
 
-    # Cash out the last line (editorial): if the closer is conference-talk and
-    # an earlier spoken sentence already carries the insight, drop the closer.
-    # Principle: do not invent a spoken paraphrase here — only remove white-paper tails.
     if "abstract_closer" in failures:
         ss2 = sentences(text) if text else ss
         if len(ss2) >= 2 and _is_conference_talk_sentence(ss2[-1]):
             prior = ss2[:-1]
-            # Keep if prior already has concrete / spear content
             if any(
                 not _is_conference_talk_sentence(p) and len(words(p)) >= 6 for p in prior
             ):
                 text = " ".join(prior).strip()
 
+    # SNAP / medium KNIFE: single block. High / REFLECTION single-block: keep spaces only.
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     return text
@@ -655,6 +766,8 @@ def apply_gold_shape_pass(
         "knife_too_many_sentences",
         "reflection_overlong",
         "reflection_too_many_sentences",
+        "paragraph_restatement",
+        "over_confirming",
         "essay_diction",
         "abstract_closer",
     }

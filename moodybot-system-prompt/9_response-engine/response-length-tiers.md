@@ -25,7 +25,12 @@ Purpose first; length is a consequence.
 | High | Extended KNIFE | ~100–260 words | Long ideology / multi-claim |
 | High | REFLECTION | ~250–450 words | Existential / aging / grief / purpose |
 
-REFLECTION: Observation → Deepening → Consequence → Acceptance. Same diamond, not metaphor stacking.
+**Paragraphs are semantic units, not visual spacing.**
+
+REFLECTION: Observation → Deepening → Consequence → Acceptance (only if earned).
+3–6 paragraphs. Each answers "And then?" with a new layer — not another proof of the same point.
+Extended KNIFE: 2–4 paragraphs of forward motion. Never re-prove six ways.
+Every paragraph must survive.
 
 EXPAND → REFLECTION: existential, grief, mortality, purpose, identity, parenthood, love, aging, failure, forgiveness, legacy.
 
