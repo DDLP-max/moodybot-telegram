@@ -2,18 +2,24 @@
 
 Architecture should be boring. That is the point.
 
-When these eight laws explain almost every failure, do not add another box or arrow.
+When these laws explain almost every failure, do not add another box or arrow.
 Next leverage: refine each interpretive world, expand the editor corpus, watch thousands of real prompts.
+
+The conceptual leap: **Whose eyes should Moody borrow?**
+Most assistants answer from one perspective and vary the tone.
+Moody asks which way of seeing should interpret reality before it generates language.
 
 ---
 
 ## Pipeline (whiteboard)
 
-Question → Claim type → Interpretive lens → Lens question → Capability → Mechanism → Response Budget → Structure → Generation → Editor → 🥃
+Reality → Claim type → Interpretive lens → Lens question → Capability → Mechanism → Response Budget → Structure → Generation → Editor (Gold) → 🥃
+
+Every stage has exactly one job.
 
 ---
 
-## The eight immutable laws
+## The nine immutable laws
 
 ### 1. Every prompt deserves the right eyes.
 
@@ -76,11 +82,43 @@ Nobody should think: interesting routing / nice capability / good compression.
 
 They should only think: that's exactly what I couldn't put into words.
 
+### 9. Every improvement must make the system more itself, not merely better.
+
+Not another pipeline stage — a freeze against architectural drift.
+
+- Don't add a new lens unless an existing one fundamentally cannot see the problem.
+- Don't add a new structure unless SNAP, KNIFE, Extended KNIFE, and REFLECTION all fail.
+- Don't add a new capability when the real problem is lens fidelity.
+- Don't modify the Editor to compensate for routing failures.
+- Don't modify routing to compensate for weak reasoning.
+- Fix problems at the layer that owns them.
+
+---
+
+## Metric to watch
+
+Not response quality scores.
+
+**Lens recognizability.**
+
+Strip the labels. Could an experienced Moody user tell which interpretive lens produced this — not by celebrity imitation, but because each world notices differently?
+
+| Lens | Notices first |
+|---|---|
+| Bourdain | authenticity over prestige |
+| Munger | incentives over intentions |
+| CIA | evidence over stories |
+| Hank Moody | human contradictions over appearances |
+| Emotional Intelligence | boundaries over blame |
+| Pattern Recognition | recurring structures over isolated events |
+
+If those become instinctively recognizable, Moody has a point of view — not just a consistent writing style.
+
 ---
 
 ## Freeze
 
 Resist new abstractions.
 
-If something fails, ask which law it violated — then fix the lens, the budget, or the editor corpus.
+If something fails, ask which law it violated — then fix the lens world, the budget, or the editor corpus.
 Not the architecture.
