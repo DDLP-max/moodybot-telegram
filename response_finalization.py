@@ -201,9 +201,15 @@ class ResponsePlan:
     claim_domain: str = "general"  # taste_preference | social_power | relationship | ...
     # Interpretive lens / perspective selection (code name). Internally: "whose eyes?"
     # Identity layer — NOT a capability. Gold never picks this.
-    lens: str = ""  # Bourdain | Munger | Hank Moody | CIA | Noir Detective | ...
+    lens: str = ""  # Bourdain | Munger | Hank Moody | CIA | Pattern Recognition | ...
+    # Immutable copy of routing decision — finalize restores lens from this if mutated.
+    routed_lens: str = ""
+    # Invisible step after lens: the one internal question that opens many capabilities.
+    lens_question: str = ""
     preferred_structure: str = ""  # SNAP | KNIFE | STORY — writing layer hint
     mechanism_hint: str = ""  # expected mechanism family for diversity telemetry
+    # Lens persistence: True after routing. Generation/Gold/editorial must not change lens.
+    lens_locked: bool = False
     closing_strategy: str = "none"  # legacy alias of landing
     landing: str = "silence"  # body_ends_response | signature_line | callback | action | silence
     allow_question: bool = False
@@ -407,7 +413,8 @@ def classify_claim_domain(user_message: str) -> str:
         return "travel"
 
     if re.search(
-        r"\b(court|evidence|affidavit|testimony|prosecutor|cross[- ]examin)\b",
+        r"\b(court|evidence|affidavit|testimony|prosecutor|cross[- ]examin|"
+        r"my boss|became distant|suddenly (distant|cold|quiet)|mixed signals from)\b",
         text,
     ):
         return "court"
@@ -415,7 +422,8 @@ def classify_claim_domain(user_message: str) -> str:
     if re.search(
         r"\b(business|invest|roi|startup|market share|incentive structure|"
         r"portfolio|acquisition|promotion|salary|tradeoff|trade-off|"
-        r"opportunity cost|compounds?|circle of competence)\b",
+        r"opportunity cost|compounds?|circle of competence|"
+        r"ferrari|impress clients|to impress|closes deals)\b",
         text,
     ):
         return "business"
@@ -440,7 +448,8 @@ def classify_claim_domain(user_message: str) -> str:
         "girlfriend", "boyfriend", "wife", "husband", "ex ", "dating",
         "relationship", "she said", "he said", "marriage", "cheat",
         "situationship", "texted", "left me", "my friend", "friend only",
-        "only texts", "friendship", "best friend", "affection",
+        "only texts", "friendship", "best friend", "affection", "divorce",
+        "divorced",
     )
     if any(t in text for t in relationship):
         return "relationship"
@@ -451,6 +460,13 @@ def classify_claim_domain(user_message: str) -> str:
     # Hot take / ranking opinion without social framing
     if re.search(r"\b(best|worst|greatest|easily the|overrated|underrated)\b", text):
         return "preference_claim"
+
+    if re.search(
+        r"\b(i feel|i'm feeling|feeling |anxious|overwhelmed|my boundary|boundaries|"
+        r"hurt that|scared that|i'm scared|emotionally)\b",
+        text,
+    ):
+        return "emotional"
 
     return "general"
 
@@ -517,7 +533,7 @@ def select_interpretive_lens(domain: str, user_message: str = "") -> dict:
             "mechanism_hint": "evidence_vs_inference",
         },
         "social_power": {
-            "lens": "Noir Detective",
+            "lens": "Pattern Recognition",
             "primary": "Power / Incentive Analysis",
             "supporting": "Pattern Forensics",
             "voice": "Hardboiled Observation",
@@ -572,6 +588,14 @@ def select_interpretive_lens(domain: str, user_message: str = "") -> dict:
             "preferred_structure": "KNIFE",
             "mechanism_hint": "prompt_specific",
         },
+        "emotional": {
+            "lens": "Emotional Intelligence",
+            "primary": "Emotional State Recognition",
+            "supporting": "Boundary Analysis",
+            "voice": "Human Realism",
+            "preferred_structure": "KNIFE",
+            "mechanism_hint": "feeling_or_boundary",
+        },
     }
     return dict(table.get(domain, table["general"]))
 
@@ -609,10 +633,16 @@ def domain_mechanism_guidance(
             f"INTERPRETIVE LENS: {lens or 'Bourdain'} (Identity — not a capability).\n"
             f"CAPABILITY: {cap or 'Everyday Preference Analysis'} "
             "(tool within the lens; Sensory Realism may support).\n"
-            "MECHANISM FAMILY: familiarity vs quality / consistency ≠ excellence.\n"
+            "MECHANISM FAMILY: familiarity vs quality / consistency ≠ excellence "
+            "(hold internally — do not announce the psych label).\n"
+            "BOURDAIN VOICE: prefer observation over diagnosis.\n"
             "STRUCTURE BIAS: SNAP — one killing lived line.\n"
             "PASS: \"That's like saying prison is just a room.\"\n"
-            "PASS: \"McDonald's doesn't make the best burger. It makes the safest decision.\"\n"
+            "PASS: \"McDonald's doesn't win because it's the best. "
+            "It wins because you already know exactly what it tastes like.\"\n"
+            "PASS: \"People mistake consistency for quality all the time. "
+            "McDonald's just built a business around it.\"\n"
+            "FAIL: \"Familiarity bias.\"\n"
             "FAIL: \"The pattern is rule-shopping.\"\n"
         ),
         "travel": (
@@ -620,6 +650,7 @@ def domain_mechanism_guidance(
             f"INTERPRETIVE LENS: {lens or 'Bourdain'}.\n"
             f"CAPABILITY: {cap or 'Lived Experience Analysis'}.\n"
             "MECHANISM FAMILY: place, texture, honesty — not ideology.\n"
+            "BOURDAIN VOICE: observation over diagnosis. Show the place; don't name the bias.\n"
         ),
         "consumer_preference": (
             "CLAIM DOMAIN: consumer / brand preference.\n"
@@ -648,9 +679,16 @@ def domain_mechanism_guidance(
         ),
         "social_power": (
             "CLAIM DOMAIN: social / power / ideology.\n"
-            f"INTERPRETIVE LENS: {lens or 'Noir Detective'}.\n"
+            f"INTERPRETIVE LENS: {lens or 'Pattern Recognition'}.\n"
             f"CAPABILITY: {cap or 'Power / Incentive Analysis'}.\n"
             "MECHANISM FAMILY: power, incentives, enforcement — only when evidenced.\n"
+            "Only when the pattern is actually present — do not force ideology onto unrelated prompts.\n"
+        ),
+        "emotional": (
+            "CLAIM DOMAIN: feeling / boundary.\n"
+            f"INTERPRETIVE LENS: {lens or 'Emotional Intelligence'}.\n"
+            f"CAPABILITY: {cap or 'Emotional State Recognition'}.\n"
+            "MECHANISM FAMILY: feeling or boundary driving the move — plain language, no therapy-speak.\n"
         ),
         "relationship": (
             "CLAIM DOMAIN: relationship / interpersonal.\n"
@@ -717,6 +755,7 @@ def build_response_plan(
         "technical",
         "grief",
         "practical",
+        "emotional",
     }
     insight = (
         is_cultural_or_insight(user_message)
@@ -743,6 +782,7 @@ def build_response_plan(
 
     preferred_structure = lens_bundle.get("preferred_structure") or "KNIFE"
     mechanism_hint = lens_bundle.get("mechanism_hint") or "prompt_specific"
+    # lens assigned below; question + lock applied at return
 
     if missing:
         intent = "clarify"
@@ -785,6 +825,7 @@ def build_response_plan(
         "court",
         "social_power",
         "relationship",
+        "emotional",
     }:
         intent = "explore"
         confidence = "medium"
@@ -833,8 +874,11 @@ def build_response_plan(
         original_subject=subject,
         claim_domain=domain,
         lens=lens,
+        routed_lens=lens,
+        lens_question=lens_internal_question(lens),
         preferred_structure=preferred_structure,
         mechanism_hint=mechanism_hint,
+        lens_locked=True,  # only routing may set/change lens
         closing_strategy=legacy_map.get(landing, "none"),
         landing=landing,
         allow_question=decision.allow_question,
@@ -851,25 +895,34 @@ CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
 Surface geometry (mandatory): CUT → NAME → PROVE ONCE → STOP → 🥃
 Deep reasoning stays internal. External delivery is aggressive compression.
 
-Four independent layers (mandatory):
+Layers (mandatory — keep independent):
 1) Identity — interpretive lens (perspective selection). Internally: whose eyes?
-2) Intelligence — broad capability / mental tool
-3) Writing — SNAP / KNIFE / STORY
-4) Editing — Gold compression only
+2) Question — one invisible ask that opens many capabilities under that lens
+3) Intelligence — capability / mental tool (NOT an alias for the lens)
+4) Writing — SNAP / KNIFE / STORY
+5) Editing — Gold compression only
 
 Pipeline:
-claim type → interpretive lens → capability → mechanism fit → structure → generate → Gold → 🥃
+claim type → interpretive lens → question → capability → mechanism fit → structure → generate → Gold → 🥃
+
+LENS PERSISTENCE (invariant): once routing selects the lens, generation cannot change it,
+Gold cannot change it, editorial cannot change it. Only routing can.
+If output sounds like another lens, debug routing/generation — never re-lens in the editor.
 
 Gold never decides what Moody thinks. Gold only decides how he says it.
 Protect that boundary — Gold must not become a co-author or pick the lens.
 Do NOT jump straight to Power / Incentive Analysis for every prompt.
 
-INTERPRETIVE LENS (Identity — never name in the reply):
-Food / travel → Bourdain
-Relationships / life → Hank Moody
-Power / ideology → Noir Detective
-Business / brands → Munger
-Court / evidence → CIA
+INTERPRETIVE LENS = way of seeing (what you notice first) — not a style theme.
+Never name the lens in the reply. One internal question each:
+Bourdain → What would someone who's lived this notice?
+Munger → What's the incentive?
+CIA → What do we actually know?
+Hank Moody → What's the human truth nobody wants to admit?
+Pattern Recognition → What pattern repeats here?
+Emotional Intelligence → What feeling or boundary is driving this?
+The question can produce many capabilities (Sensory Realism, opportunity cost, missing info…).
+Capability ≠ lens.
 
 BROAD CAPABILITIES (Intelligence — not a taxonomy zoo):
 taste/preference → Everyday Preference Analysis
@@ -891,7 +944,10 @@ Do NOT optimize for finding the same mechanism repeatedly (especially rule-shopp
 If no social or ideological mechanism is present, do not invent one.
 Do not open with "The pattern is…" unless the pattern is evidenced by the prompt.
 Taste example: claim=taste_preference, lens=Bourdain, capability=Everyday Preference Analysis,
-mechanism=familiarity vs quality, structure=SNAP.
+mechanism=familiarity vs quality (internal), structure=SNAP.
+Under Bourdain: prefer observation over diagnosis. Do not open with psych labels.
+FAIL: "Familiarity bias. McDonald's wins because it never surprises you."
+PASS: "McDonald's doesn't win because it's the best. It wins because you already know exactly what it tastes like."
 PASS: "That's like saying prison is just a room."
 FAIL: "The pattern is rule-shopping."
 
@@ -986,6 +1042,194 @@ If practical action was requested, include a concrete next step before 🥃.
 """
 
 
+# One internal question per lens — more valuable than pages of description.
+# Lenses are ways of seeing (what they notice first), not style themes.
+LENS_INTERNAL_QUESTIONS = {
+    "Bourdain": "What would someone who's lived this notice?",
+    "Munger": "What's the incentive?",
+    "CIA": "What do we actually know?",
+    "Hank Moody": "What's the human truth nobody wants to admit?",
+    "Pattern Recognition": "What pattern repeats here?",
+    "Emotional Intelligence": "What feeling or boundary is driving this?",
+    "Quiet Presence": "What weight needs witnessing, not solving?",
+    "Field Operator": "What's the next concrete move?",
+    "Builder": "What's broken and how do we fix it?",
+}
+
+# Question → many capabilities. Prevents capabilities becoming aliases for lenses.
+LENS_CAPABILITY_FAMILIES = {
+    "Bourdain": (
+        "Sensory Realism",
+        "Authenticity detection",
+        "Craft appreciation",
+        "Travel anthropology",
+        "Anti-pretension",
+        "Working-class respect",
+        "Everyday Preference Analysis",
+        "Lived Experience Analysis",
+    ),
+    "Munger": (
+        "Opportunity cost",
+        "Second-order effects",
+        "Compounding",
+        "Asymmetric payoff",
+        "Circle of competence",
+        "Business / Tradeoff Analysis",
+        "Hidden Incentive Analysis",
+    ),
+    "CIA": (
+        "Evidence weighting",
+        "Contradiction detection",
+        "Missing information",
+        "Deception analysis",
+        "Competing hypotheses",
+        "Evidence / Contradiction Analysis",
+        "Evidence vs Inference",
+    ),
+    "Hank Moody": (
+        "Relationship Pattern Recognition",
+        "Emotional contradiction",
+        "Narrative Weight",
+        "Boundary Analysis",
+    ),
+    "Pattern Recognition": (
+        "Power / Incentive Analysis",
+        "Pattern Forensics",
+        "Power Dynamics",
+    ),
+    "Emotional Intelligence": (
+        "Emotional State Recognition",
+        "Boundary Analysis",
+        "Emotional Validation",
+    ),
+}
+
+# Architectural invariant: only routing selects/changes the lens.
+LENS_PERSISTENCE_INVARIANT = (
+    "LENS PERSISTENCE (invariant): once routing selects the interpretive lens, "
+    "generation cannot change it, Gold cannot change it, editorial cannot change it. "
+    "Only routing can. If output sounds like another lens, debug routing or generation "
+    "fidelity — never silently re-lens in the editor."
+)
+
+
+def lens_internal_question(lens: str) -> str:
+    return LENS_INTERNAL_QUESTIONS.get((lens or "").strip(), "")
+
+
+def lens_capability_family(lens: str) -> tuple:
+    return LENS_CAPABILITY_FAMILIES.get((lens or "").strip(), ())
+
+
+def lens_voice_guidance(lens: str) -> str:
+    """Make each interpretive lens a way of seeing — not a style theme.
+
+    Not about prose costume. About what each lens notices first.
+    """
+    name = (lens or "").strip()
+    q = lens_internal_question(name)
+    q_line = f'Internal question (ask before writing): "{q}"\n' if q else ""
+
+    family = ", ".join(lens_capability_family(name)[:6])
+    family_line = (
+        f"This question can open many capabilities (not aliases for the lens): {family}.\n"
+        if family
+        else ""
+    )
+
+    if name == "Bourdain":
+        return (
+            "\nLENS AUTHENTICITY — Bourdain (way of seeing, not a theme):\n"
+            f"{q_line}"
+            f"{family_line}"
+            "Notices first: lived experience, craft, authenticity, sensory detail, anti-pretension.\n"
+            "Shows before explaining. Prefer observation over diagnosis.\n"
+            "Common failure: diagnoses with psychology or philosophy.\n"
+            "GENERIC (any lens could write this): \"People mistake consistency for quality.\"\n"
+            "DISTINCTIVE (Bourdain notices): \"You already know exactly what it's going to taste like.\"\n"
+            "PASS: \"That's like saying prison is just a room.\"\n"
+            "FAIL: \"Familiarity bias.\"\n"
+        )
+    if name == "Munger":
+        return (
+            "\nLENS AUTHENTICITY — Munger (way of seeing, not a theme):\n"
+            f"{q_line}"
+            f"{family_line}"
+            "Notices first: incentive, opportunity cost, second-order effect. Does not moralize.\n"
+            "Common failure: generic business advice or status-psychology costume.\n"
+            "GENERIC (any lens): \"Incentives matter.\"\n"
+            "DISTINCTIVE (Munger notices): \"Show me where the money changes direction.\"\n"
+            "Prompt: \"Should I buy a Ferrari to impress clients?\"\n"
+            "FAIL: \"Status signalling often reflects insecurity…\"\n"
+            "PASS: \"If a Ferrari closes deals, it's an investment. "
+            "If it only impresses strangers, it's an expense.\"\n"
+        )
+    if name == "CIA":
+        return (
+            "\nLENS AUTHENTICITY — CIA (way of seeing, not a theme):\n"
+            f"{q_line}"
+            f"{family_line}"
+            "Notices first: evidence vs inference, contradictions, missing information, "
+            "alternative hypotheses. Always respects uncertainty.\n"
+            "Common failure: Sherlock Holmes certainty — turning every mystery into a conclusion.\n"
+            "GENERIC (any lens): \"You're missing information.\"\n"
+            "DISTINCTIVE (CIA notices): \"You have one fact and three assumptions.\"\n"
+            "Prompt: \"My boss suddenly became distant.\"\n"
+            "FAIL: \"He's planning to fire you.\"\n"
+            "PASS: \"You have one data point and a story you've attached to it. "
+            "Separate the two before you make a decision.\"\n"
+        )
+    if name == "Hank Moody":
+        return (
+            "\nLENS AUTHENTICITY — Hank Moody (way of seeing, not a theme):\n"
+            f"{q_line}"
+            f"{family_line}"
+            "Notices first: emotional contradiction, the human truth under the mess.\n"
+            "Wry, flawed, emotionally perceptive — not just sarcastic or profane.\n"
+            "Common failure: imitating Hank by swearing / cynicism costume.\n"
+            "GENERIC (any lens): \"Breakups are hard.\"\n"
+            "DISTINCTIVE (Hank notices): \"Sometimes the loneliest part of a relationship "
+            "is having someone beside you.\"\n"
+            "Prompt: \"I'm happier after my divorce.\"\n"
+            "FAIL: cynical swagger with no emotional perception.\n"
+        )
+    if name == "Pattern Recognition":
+        return (
+            "\nLENS AUTHENTICITY — Pattern Recognition (way of seeing, not a theme):\n"
+            f"{q_line}"
+            f"{family_line}"
+            "Notices first: recurring social structures — only when actually present.\n"
+            "Common failure: finding the same mechanism every time; forcing ideology onto "
+            "unrelated prompts (food, travel, ordinary preference).\n"
+            "If no social pattern is evidenced, this lens should not have been selected.\n"
+            "One mechanism. Prove once. Stop.\n"
+        )
+    if name == "Emotional Intelligence":
+        return (
+            "\nLENS AUTHENTICITY — Emotional Intelligence (way of seeing, not a theme):\n"
+            f"{q_line}"
+            f"{family_line}"
+            "Notices first: feeling, boundary, motivation — in plain language.\n"
+            "Common failure: therapy-speak / validating everything.\n"
+            "Name the feeling or boundary. Don't pad with unconditional affirmation.\n"
+            "FAIL: \"It sounds like you're feeling a lot of feelings and that's valid…\"\n"
+            "PASS: plain recognition of the feeling or the crossed line.\n"
+        )
+    if name == "Quiet Presence":
+        return (
+            "\nLENS AUTHENTICITY — Quiet Presence:\n"
+            f"{q_line}"
+            "Witness. Do not force clever mechanisms or fixes.\n"
+        )
+    if name in {"Field Operator", "Builder"}:
+        return (
+            f"\nLENS AUTHENTICITY — {name}:\n"
+            f"{q_line}"
+            "Concrete. Operational. No social-pattern costume.\n"
+        )
+    return ""
+
+
 def plan_closer_instruction(plan: ResponsePlan) -> str:
     """Generation guidance — perspective → capability → mechanism → Gold."""
     extra = ""
@@ -999,17 +1243,34 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
     lens = getattr(plan, "lens", None) or select_interpretive_lens(domain).get("lens", "")
     cap = getattr(plan, "primary_capability", None) or "Everyday Preference Analysis"
     domain_block = domain_mechanism_guidance(domain, lens=lens, capability=cap)
+    lens_voice = lens_voice_guidance(lens)
+    q = getattr(plan, "lens_question", None) or lens_internal_question(lens)
     voice = getattr(plan, "voice", None) or ""
     structure = getattr(plan, "preferred_structure", None) or ""
     mech = getattr(plan, "mechanism_hint", None) or ""
     voice_bit = f" Voice: {voice}." if voice else ""
     struct_bit = f" Preferred structure: {structure}." if structure else ""
-    mech_bit = f" Mechanism family: {mech}." if mech else ""
+    mech_bit = f" Mechanism family (internal): {mech}." if mech else ""
+    q_bit = f'\nQuestion (invisible step — ask before capability): "{q}"\n' if q else "\n"
+    family = lens_capability_family(lens)
+    family_bit = (
+        f"Capabilities this question may open (pick one tool, not a lens alias): "
+        + ", ".join(family[:5])
+        + ".\n"
+        if family
+        else ""
+    )
     return (
         CORE_WRITE_DIRECTIVE
-        + f"\nInterpretive lens (Identity): {lens}. Capability (Intelligence): {cap}."
-        + f"{voice_bit}{struct_bit}{mech_bit} Claim type: {domain}.\n"
-        + "Lens first, then tool, then mechanism. Gold only compresses. Never name the lens in prose.\n"
+        + f"\n{LENS_PERSISTENCE_INVARIANT}\n"
+        + f"Interpretive lens (Identity, locked): {lens}. Capability (Intelligence): {cap}."
+        + f"{voice_bit}{struct_bit}{mech_bit} Claim type: {domain}."
+        + q_bit
+        + family_bit
+        + "Pipeline: claim type → lens → question → capability → mechanism → structure → Gold.\n"
+        + "Lens = way of seeing (what you notice first), not a style theme. "
+        "Capability ≠ lens. Gold only compresses. Never name the lens in prose.\n"
+        + lens_voice
         + domain_block
         + extra
     )
@@ -1271,6 +1532,20 @@ def finalize_response(
         channel=channel,
         mode=mode,
     )
+    # Lens persistence: restore from routing decision if anything mutated plan.lens.
+    if not plan.routed_lens:
+        plan.routed_lens = plan.lens or ""
+    locked_lens = plan.routed_lens
+    if plan.lens != locked_lens:
+        logger.error(
+            "LENS_PERSISTENCE_VIOLATION routed=%s mutated=%s — restoring",
+            locked_lens,
+            plan.lens,
+        )
+        plan.lens = locked_lens
+    plan.lens_locked = True
+    if not plan.lens_question:
+        plan.lens_question = lens_internal_question(locked_lens)
     pattern = plan.governing_pattern or plan.central_insight or infer_governing_pattern(
         user_message, draft
     )
@@ -1328,11 +1603,20 @@ def finalize_response(
         post_reasons.append("duplicate_removed")
 
     # 4b) Gold-shape quality pass — at most one structural compression
+    # Gold compresses delivery only — never selects or changes interpretive lens.
     text, gold_report = apply_gold_shape_pass(
         user_message,
         text,
         preferred_structure=getattr(plan, "preferred_structure", None) or None,
     )
+    if plan.lens != locked_lens:
+        logger.error(
+            "LENS_PERSISTENCE_VIOLATION locked=%s got=%s — restoring routing lens",
+            locked_lens,
+            plan.lens,
+        )
+        plan.lens = locked_lens
+    plan.lens = locked_lens  # hard pin after Gold
     if gold_report.quality_rewrite_triggered:
         post_reasons.append("gold_shape_compress")
     # Surface invariant baseline is post-gold (whiskey-only changes after this)
@@ -1404,6 +1688,9 @@ def finalize_response(
         "claim_domain": plan.claim_domain or "",
         "lens": plan.lens or "",
         "interpretive_lens": plan.lens or "",
+        "lens_question": plan.lens_question or "",
+        "lens_locked": str(bool(plan.lens_locked)).lower(),
+        "lens_persistence": "routing_only",
         "preferred_structure": plan.preferred_structure or "",
         "mechanism_hint": plan.mechanism_hint or "",
         "intervention": plan.intervention or "",

@@ -24,10 +24,14 @@ McDonald's stack:
 claim_type = taste_preference
 lens = Bourdain
 capability = Everyday Preference Analysis (supporting: Sensory Realism)
-mechanism = familiarity vs quality
+mechanism = familiarity vs quality (internal)
 structure = SNAP
-→ "That's like saying prison is just a room." 🥃
-Not rule-shopping.
+
+Bourdain voice: prefer observation over diagnosis.
+FAIL: "Familiarity bias. …"
+PASS: "That's like saying prison is just a room." 🥃
+PASS: "McDonald's doesn't win because it's the best. It wins because you already know exactly what it tastes like." 🥃
+Not rule-shopping. Not a psychology textbook.
 
 ## Separation of responsibilities
 

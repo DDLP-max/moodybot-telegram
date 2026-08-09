@@ -505,6 +505,7 @@ def apply_gold_shape_pass(
     draft → evaluate → at most one compression → ensure whiskey later in surface.
     Returns body WITHOUT requiring whiskey (surface_render adds it).
     Editing layer only — never invents a lens or mechanism.
+    Lens persistence: must not select or change the interpretive lens.
     """
     structure = structure or select_structure(
         user_message, draft, preferred=preferred_structure

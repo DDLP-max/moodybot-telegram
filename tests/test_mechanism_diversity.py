@@ -53,7 +53,7 @@ DIVERSITY_CASES = [
     (
         "Feminists hate when a woman genuinely appreciates her man.",
         "social_power",
-        "Noir Detective",
+        "Pattern Recognition",
         "Power / Incentive",
         "power_incentives",
     ),
@@ -109,6 +109,18 @@ def test_mcdonalds_four_layer_stack():
     assert "everyday preference" in guidance
     assert "prison is just a room" in guidance
     assert "gold never" in guidance
+    assert "observation over diagnosis" in guidance
+    assert "familiarity bias" in guidance  # as a FAIL example
+    assert "psychology" in guidance or "psych" in guidance
+
+
+def test_bourdain_prefers_observation_not_psych_label():
+    from response_finalization import lens_voice_guidance
+
+    voice = lens_voice_guidance("Bourdain").lower()
+    assert "observation over diagnosis" in voice
+    assert "familiarity bias" in voice
+    assert "taste like" in voice or "lived this notice" in voice
 
 
 def test_lens_is_not_capability():
@@ -168,6 +180,7 @@ def test_gold_guidance_says_editor_not_coauthor():
 
 if __name__ == "__main__":
     test_mcdonalds_four_layer_stack()
+    test_bourdain_prefers_observation_not_psych_label()
     test_lens_is_not_capability()
     test_unrelated_prompts_diversify_mechanism_hints()
     test_food_and_power_do_not_share_mechanism_family()
