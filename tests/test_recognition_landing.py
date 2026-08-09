@@ -36,7 +36,7 @@ def test_malformed_landing_family_rejected():
 
 
 def test_landing_engine_version():
-    assert LANDING_ENGINE_VERSION == "minimal-write-v1"
+    assert LANDING_ENGINE_VERSION == "protect-only-v1"
 
 
 def test_politics_strips_broken_closer_and_may_stop():

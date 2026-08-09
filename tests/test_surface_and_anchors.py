@@ -43,7 +43,8 @@ def test_extract_script_anchor():
     assert cb and "script" in cb.lower()
 
 
-def test_dirty_talk_callback_uses_user_anchors():
+def test_dirty_talk_protect_only_no_forced_callback():
+    """Protect-only: strip junk CTA; do not manufacture a stretch callback."""
     user = (
         "How has dirty talk changed between 1995 and 2026, "
         "and did pornography influence the language? What got stretched out for you?"
@@ -56,17 +57,13 @@ def test_dirty_talk_callback_uses_user_anchors():
     )
     result = finalize_response(draft, user, selected_command="/thoughts")
     lower = result.text.lower()
-    closer = result.text.strip().split("\n\n")[-1].lower()
-    closer_q = closer.replace("🥃", "").strip()
     assert "say the word" not in lower
     assert "thousands of hours" not in lower
-    assert "the average person" not in lower or "vastly more exposure" in lower
-    assert closer_q.endswith("?")
-    # Authorial stretch earns a question; topic stapling does not
-    assert "stretch" in closer
-    assert "seen it named" not in closer
-    assert "familiar or alien" not in closer
-    assert result.plan.landing == "recognition_callback"
+    assert "familiar or alien" not in lower
+    assert "seen it named" not in lower
+    assert result.diagnostics.get("landing_added") == "false"
+    assert result.plan.landing == "body_ends_response"
+    assert "camera needs degradation" in lower
 
 
 def test_generic_reflective_closer_fails_anchor_check():
@@ -109,7 +106,8 @@ def test_surface_render_space_before_punctuation():
     assert changed
     assert "neutral ." not in text
     assert "neutral." in text
-    assert re.search(r"\n\nAnd ", text) or "And anything" in text
+    # Typography only — do not rewrite capitalization / cadence
+    assert "\n\nand anything" in text or "and anything" in text
 
 
 def test_surface_render_double_spaces_and_paragraphs():
@@ -152,7 +150,7 @@ if __name__ == "__main__":
     test_extract_carrying_anchor()
     test_extract_cracked_anchor()
     test_extract_script_anchor()
-    test_dirty_talk_callback_uses_user_anchors()
+    test_dirty_talk_protect_only_no_forced_callback()
     test_generic_reflective_closer_fails_anchor_check()
     test_broad_cultural_and_quantitative_rewrite()
     test_technical_still_no_emotional_callback()

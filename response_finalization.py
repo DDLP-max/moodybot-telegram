@@ -1,22 +1,17 @@
 # -*- coding: utf-8 -*-
 """Protective finalization — not a second writer.
 
-ANALYZE → ROUTE → GENERATE DRAFT → LIGHT QUALITY CHECK → SEND
+Generation creates. Finalization protects. Nothing else.
 
-Default path may:
-  - calibrate fabricated hidden schemes / invented precision
-  - strip generic CTA
-  - strip malformed closers / trailing quiz questions
-  - light formatting cleanup
+Finalization may ONLY:
+  1. Remove obvious hallucinated mechanics
+  2. Remove generic assistant garbage
+  3. Fix broken formatting
+  4. Remove duplicated ideas
+  5. Enforce safety (malformed/banned closers)
 
-Default path may NOT:
-  - invent Signature Lines / Recognition Callbacks
-  - paraphrase the thesis
-  - add metaphors or quotable closers
-  - "improve" an already complete ending
-
-Creative ending tools remain in recognition_landing / signature_line
-but are OFF unless MOODYBOT_CREATIVE_ENDINGS=1.
+If the draft is coherent: DO NOT TOUCH IT.
+Average creative rewrites target ≈ 0.
 """
 
 from __future__ import annotations
@@ -124,24 +119,7 @@ CONSEQUENTIAL_REWRITES = [
     ),
 ]
 
-# Coordinated necessity ("must") implying hidden collective machinery.
-# Preserve rhetorical force; do not hedge ordinary social inference.
-COORDINATED_NECESSITY_REWRITES = [
-    (
-        r"\bthe enforcers must punish the breach\b",
-        "the pressure shifts toward punishing the breach",
-    ),
-    (
-        r"\bthe system must (?:punish|police)\b",
-        "the system responds by policing",
-    ),
-    (
-        r"\bthey must punish the breach\b",
-        "the breach gets punished",
-    ),
-]
-
-# Invented quantitative specificity only (distance-agnostic precision abuse).
+# Invented quantitative specificity only (obvious hallucination).
 INVENTED_PRECISION_REWRITES = [
     (
         r"\b[Tt]he average person'?s sexual vocabulary has been trained by thousands of hours\b",
@@ -151,12 +129,6 @@ INVENTED_PRECISION_REWRITES = [
     (r"\b\d{1,3}(?:,\d{3})+\s+hours\b", "vastly more exposure"),
     (r"\b(?:hundreds|thousands|millions) of (?:hours|times)\b", "vastly more exposure"),
     (r"\b\d{2,}\s*%\b", "a sizable share"),
-]
-
-# Absolute universals that invent coverage (keep light — not thesis-killing).
-UNIVERSAL_PRECISION_REWRITES = [
-    (r"\b(?:almost )?everyone\b", "a lot of people"),
-    (r"\balmost all\b", "a large share of"),
 ]
 
 
@@ -477,56 +449,6 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
     return CORE_WRITE_DIRECTIVE + extra
 
 
-# Mechanism / interpretive hinges — proofs should lean on these, not plot recap.
-_MECHANISM_MARKERS = (
-    "earned", "consequence", "cause and effect", "cause", "contract", "trust",
-    "logic", "incentive", "boundary", "identity", "status", "power",
-    "mechanism", "pattern", "because", "stopped", "abandoned", "skipped",
-    "without earning", "bent", "collapsed because", "failed because",
-)
-
-# Character/outcome inventory without interpretive hinge.
-_PLOT_OUTCOME_STACK = re.compile(
-    r"(?:daenerys|jon(?:\s+snow)?|bran|cersei|arya|tyrion).{0,80}"
-    r"(?:became|was|were|ended|ascended|exile|king|queen|tyrant|mad)",
-    re.IGNORECASE,
-)
-
-
-def looks_like_plot_inventory(text: str) -> bool:
-    """Diagnostic only — does not rewrite. True when examples look like recap."""
-    t = (text or "").strip()
-    if not t:
-        return False
-    paras = [p.strip() for p in re.split(r"\n\s*\n", t) if p.strip()]
-    if len(paras) < 2:
-        # Single block listing multiple character outcomes
-        hits = len(_PLOT_OUTCOME_STACK.findall(t))
-        return hits >= 2 and not any(m in t.lower() for m in ("because", "earned", "mechanism", "pattern"))
-    later = " ".join(paras[1:])
-    outcome_hits = len(_PLOT_OUTCOME_STACK.findall(later))
-    mechanism_hits = sum(1 for m in _MECHANISM_MARKERS if m in later.lower())
-    # Multiple outcome lines with little mechanism language
-    return outcome_hits >= 2 and mechanism_hits < 2
-
-
-def looks_like_thesis_proof(text: str) -> bool:
-    """Diagnostic: first sentence has a take; later text has mechanism language."""
-    t = (text or "").strip()
-    if not t:
-        return False
-    first = re.split(r"(?<=[.!?])\s+", t)[0].lower()
-    has_thesis = any(
-        m in first
-        for m in (
-            "because", "failed", "collapsed", "stopped", "didn't", "did not",
-            "rule", "pattern", "earned", "contract", "consequence",
-        )
-    )
-    has_mechanism = any(m in t.lower() for m in _MECHANISM_MARKERS)
-    return has_thesis and has_mechanism and not looks_like_plot_inventory(t)
-
-
 def detect_generic_cta(text: str) -> bool:
     if not text:
         return False
@@ -559,47 +481,27 @@ def strip_generic_cta(text: str) -> Tuple[str, bool]:
 
 
 def run_epistemic_check(draft: str, plan: ResponsePlan) -> Tuple[str, bool]:
-    """Calibrate only overreach (distance 3–4) and invented precision.
-
-    Ordinary human inference and interpretive theses (distance 0–2) stay.
-    Do not auto-hedge perception into deposition language.
-    """
+    """Remove obvious hallucinated mechanics only. Never polish prose."""
     _ = plan
     text = draft or ""
     changed = False
 
-    # 1) Hidden schemes (distance 4) — always rewrite
     for pattern, replacement in HIDDEN_SCHEME_REWRITES:
         new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
             text = new_text
             changed = True
 
-    # 2) Consequential attributions (distance 3)
     for pattern, replacement in CONSEQUENTIAL_REWRITES:
         new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
             text = new_text
             changed = True
 
-    # 2b) Coordinated "must" necessity — keep force, drop invented machinery
-    for pattern, replacement in COORDINATED_NECESSITY_REWRITES:
+    for pattern, replacement in INVENTED_PRECISION_REWRITES:
         new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
         if n:
             text = new_text
-            changed = True
-
-    # 3) Invented quantitative / universal precision only
-    for pattern, replacement in INVENTED_PRECISION_REWRITES + UNIVERSAL_PRECISION_REWRITES:
-        new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.IGNORECASE)
-        if n:
-            text = new_text
-            changed = True
-
-    # 4) Strip hedge-soup if present (do not introduce it)
-    for weak in (r"\bone might argue\b",):
-        if re.search(weak, text, flags=re.IGNORECASE):
-            text = re.sub(weak, "The pattern is", text, count=1, flags=re.IGNORECASE)
             changed = True
 
     return text, changed
@@ -757,12 +659,27 @@ def _apply_closing_strategy(
     return new_text, modified, landing_added
 
 
-def compress_if_overwritten(text: str) -> Tuple[str, bool]:
-    """Light compression: collapse triple newlines; trim filler openers."""
-    original = text
-    text = re.sub(r"\n{3,}", "\n\n", text or "")
-    text = re.sub(r"^(?:Look,?|So,?|Well,?)\s+", "", text.strip(), count=1, flags=re.IGNORECASE)
-    return text, text != original
+def remove_duplicate_paragraphs(text: str) -> Tuple[str, bool]:
+    """Drop consecutive duplicate paragraphs only — not paraphrase scoring."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", (text or "").strip()) if p.strip()]
+    if len(paras) < 2:
+        return (text or "").strip(), False
+    kept: List[str] = []
+    for p in paras:
+        if kept and _normalize_compare(p) == _normalize_compare(kept[-1]):
+            continue
+        kept.append(p)
+    out = "\n\n".join(kept)
+    return out, out != (text or "").strip()
+
+
+def fix_broken_formatting(text: str) -> Tuple[str, bool]:
+    """Whitespace / newline collapse only. No opener trimming. No prose compress."""
+    original = text or ""
+    out = re.sub(r"\n{3,}", "\n\n", original)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = out.strip()
+    return out, out != original.strip()
 
 
 def _normalize_compare(text: str) -> str:
@@ -780,7 +697,7 @@ def finalize_response(
     prompt_hash: str = "",
     git_commit: str = "",
 ) -> FinalizeResult:
-    """Protective quality check. Most good drafts should ship nearly unchanged."""
+    """Protect only. If not obviously broken — ship it."""
     t0 = time.time()
     plan = plan or build_response_plan(
         user_message,
@@ -808,39 +725,43 @@ def finalize_response(
     closer_replaced = False
     surface_cleaned = False
     landing_added = False
+    deduped = False
     post_reasons: List[str] = []
 
-    # 1) Epistemic — only remote invention / fake precision
+    # 1) Obvious hallucinated mechanics only
     text, epistemic_rewrite = run_epistemic_check(text, plan)
     if epistemic_rewrite:
-        post_reasons.append("epistemic_calibration")
+        post_reasons.append("hallucinated_mechanics")
     after_epistemic_last = _last_sentence(text)
 
-    # 2) Generic CTA strip
-    if plan.missing_required_info and len(text.split()) < 40:
-        pass
-    else:
+    # 2) Generic assistant garbage / CTA
+    if not (plan.missing_required_info and len(text.split()) < 40):
         text, generic_removed = strip_generic_cta(text)
         if generic_removed:
             post_reasons.append("cta_removed")
 
-    # 3) Protective closer cleanup (creative endings OFF by default)
+    # 3) Safety: strip only obviously broken closers (no writing tools)
     text, closer_replaced, landing_added = _apply_closing_strategy(
         text, plan, user_message, anchors
     )
     if closer_replaced:
         post_reasons.append("malformed_closer_stripped")
     if landing_added:
+        # Should be ~never on default path
         post_reasons.append("landing_added")
     after_landing = text
     after_landing_last = _last_sentence(after_landing)
 
-    # 4) Light formatting only
-    text, compressed = compress_if_overwritten(text)
-    if compressed:
-        post_reasons.append("format_compress")
+    # 4) Duplicate paragraphs
+    text, deduped = remove_duplicate_paragraphs(text)
+    if deduped:
+        post_reasons.append("duplicate_removed")
 
-    # 5) Surface typography — must not invent meaning
+    # 5) Broken formatting + typography (no prose repair)
+    text, formatted = fix_broken_formatting(text)
+    if formatted:
+        post_reasons.append("format_fix")
+
     text, surface_cleaned = final_surface_render(text)
     after_surface_last = _last_sentence(text)
 
@@ -850,20 +771,30 @@ def finalize_response(
         if os.environ.get("MOODYBOT_STRICT_SURFACE", "1") == "1" and os.environ.get(
             "MOODYBOT_ENV", "development"
         ) != "production":
-            raise AssertionError(
-                "SURFACE_INVARIANT: final_surface_render changed wording beyond typography"
-            )
+            # Whiskey watermark alone is allowed; meaning changes are not
+            body_a = re.sub(r"\s*🥃\s*", " ", after_landing).strip()
+            body_b = re.sub(r"\s*🥃\s*", " ", text).strip()
+            if _normalize_compare(body_a) != _normalize_compare(body_b):
+                raise AssertionError(
+                    "SURFACE_INVARIANT: final_surface_render changed wording beyond typography"
+                )
         text = strip_malformed_closers(text)
         post_reasons.append("surface_safety_strip")
 
     if surface_cleaned:
         post_reasons.append("surface_typography")
 
-    post_finalizer_changed = _normalize_compare(body_generated) != _normalize_compare(text)
-    # Creative rewrite signal: meaning changed beyond CTA/format/epistemic safety
+    post_finalizer_changed = _normalize_compare(body_generated) != _normalize_compare(
+        re.sub(r"\s*🥃\s*", " ", text)
+    )
     creative_touch = landing_added
     finalization_rewrite = (
-        epistemic_rewrite or generic_removed or closer_replaced or compressed or surface_cleaned
+        epistemic_rewrite
+        or generic_removed
+        or closer_replaced
+        or deduped
+        or formatted
+        or surface_cleaned
     )
     duration_ms = int((time.time() - t0) * 1000)
 
@@ -882,8 +813,6 @@ def finalize_response(
         "landing_added": str(landing_added).lower(),
         "cta_removed": str(generic_removed).lower(),
         "creative_touch": str(creative_touch).lower(),
-        "plot_inventory_risk": str(looks_like_plot_inventory(text)).lower(),
-        "thesis_proof_shape": str(looks_like_thesis_proof(text)).lower(),
         "primary_capability": plan.primary_capability or "",
         "supporting_capability": plan.supporting_capability or "",
         "intervention": plan.intervention or "",

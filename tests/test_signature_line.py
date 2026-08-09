@@ -35,7 +35,7 @@ def _clear():
 
 
 def test_engine_version():
-    assert LANDING_ENGINE_VERSION == "minimal-write-v1"
+    assert LANDING_ENGINE_VERSION == "protect-only-v1"
 
 
 def test_body_can_end_response():
@@ -176,16 +176,14 @@ def test_remote_hidden_motive_still_calibrated():
     assert "from the beginning" not in lower
 
 
-def test_coordinated_must_calibrated_without_killing_landing():
-    """'must punish' coordinated necessity softens; body still ends response."""
+def test_must_prose_left_to_the_writer():
+    """Protect-only: rhetorical 'must' is not a finalizer rewrite target."""
     _clear()
     result = finalize_response(PICK_ME_BODY, "Why pick-me?")
     assert result.plan.landing == "body_ends_response"
     lower = result.text.lower()
     assert "before the example spreads" in lower
-    # Coordinated necessity rewrite should fire
-    assert "enforcers must punish" not in lower
-    assert "pressure shifts toward punishing" in lower or "punish" in lower
+    assert "enforcers must punish" in lower
 
 
 def test_body_already_lands_no_signature():
@@ -249,7 +247,7 @@ if __name__ == "__main__":
     test_no_cta_after_strong_body()
     test_reasonable_inference_survives_finalization()
     test_remote_hidden_motive_still_calibrated()
-    test_coordinated_must_calibrated_without_killing_landing()
+    test_must_prose_left_to_the_writer()
     test_body_already_lands_no_signature()
     test_fortune_cookies_rejected()
     test_grief_silence()

@@ -33,7 +33,7 @@ from signature_line import (
 
 LandingType = str
 
-LANDING_ENGINE_VERSION = "minimal-write-v1"
+LANDING_ENGINE_VERSION = "protect-only-v1"
 
 # Default OFF — do not manufacture endings after generation.
 # Set MOODYBOT_CREATIVE_ENDINGS=1 to re-enable signature/callback discovery.
@@ -390,20 +390,33 @@ def apply_landing(
 
 
 def protective_cleanup(text: str) -> Tuple[str, bool]:
-    """Strip broken closers / trailing quiz — never invent a new ending."""
+    """Strip only obviously broken / engagement garbage — never edit good prose."""
     before = (text or "").strip()
     out = strip_malformed_closers(before)
-    # Drop trailing engagement question paragraphs
     paras = re.split(r"\n\s*\n", out)
     while len(paras) >= 2:
         last = paras[-1].strip()
-        if last.endswith("?") or not would_keep_if_nobody_could_reply(last):
+        lower = last.lower()
+        junk = (
+            not validate_landing(last)[0]
+            or any(
+                m in lower
+                for m in (
+                    "do you want", "would you like", "say the word", "let me know",
+                    "does that make sense", "seen it named",
+                )
+            )
+            or (
+                last.endswith("?")
+                and any(
+                    m in lower
+                    for m in ("what about", "which aspect", "what are you actually")
+                )
+            )
+        )
+        if junk:
             paras = paras[:-1]
             out = "\n\n".join(paras).strip()
             continue
         break
-    if out.rstrip().endswith("?"):
-        sentences = re.split(r"(?<=[.!?])\s+", out.rstrip())
-        if len(sentences) >= 2:
-            out = " ".join(sentences[:-1]).rstrip()
     return out, out != before
