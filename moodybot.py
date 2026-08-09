@@ -970,61 +970,48 @@ def load_system_prompt():
     with open("system_prompt.txt", "r", encoding="utf-8") as f:
         return f.read().strip()
 
-async def main_async():
-    # Skip lock file check when running both bots
-    lock_file = "moodybot.lock"
-    
-    # Create lock file
-    try:
-        with open(lock_file, "w") as f:
-            f.write(str(os.getpid()))
-    except Exception as e:
-        print(f"Could not create lock file: {e}")
-        return
-    
-    # Signal handler for cleanup
-    def signal_handler(signum, frame):
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-        except:
-            pass
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Check if API keys are available
+def main():
+    """Run the Telegram worker.
+
+    Render restarts spawn a new process before the old one fully dies. Telegram
+    allows only one getUpdates long-poll per token, so overlapping deploys
+    briefly log 409 Conflict. PTB must own SIGTERM so it can release the poll;
+    do not sys.exit() from a custom signal handler.
+    """
     if not TELEGRAM_BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set!")
         print("Run 'python quick_setup.py' to configure your API keys.")
         return
-    
+
     if not OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY is not set!")
         print("Run 'python quick_setup.py' to configure your API keys.")
         return
-    
-    # Debug: Show which token is being used
+
     print(f"Using Telegram Token: {TELEGRAM_BOT_TOKEN[:20]}...")
     print(f"Using OpenRouter Key: {OPENROUTER_API_KEY[:20]}...")
-    
+
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Register command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("validate", validate_command))
     app.add_handler(CommandHandler("jukebox", jukebox_command))
     app.add_handler(CommandHandler("help", help_command))
-    
-    # Register message handler for all messages
     app.add_handler(MessageHandler(filters.TEXT, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Add error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.error(f"Exception while handling an update: {context.error}")
-        if update and hasattr(update, 'message') and update.message:
+        err = context.error
+        # Deploy overlap: expected for a few seconds; don't treat as a user-facing crash.
+        if err is not None and "Conflict" in str(err) and "getUpdates" in str(err):
+            logger.warning(
+                "Telegram getUpdates conflict (usually a Render deploy overlap). "
+                "Waiting for the old instance to release the poll: %s",
+                err,
+            )
+            return
+        logger.error(f"Exception while handling an update: {err}")
+        if update and hasattr(update, "message") and update.message:
             await send_simple_message(update, "Something went wrong. Try again later.")
 
     app.add_error_handler(error_handler)
@@ -1032,26 +1019,17 @@ async def main_async():
     logger.info("MoodyBot running with OpenRouter.")
     print("MoodyBot launched and polling for Telegram messages.")
 
-    try:
-        await app.run_polling()
-    except KeyboardInterrupt:
-        logger.warning("MoodyBot manually interrupted. Shutting down.")
-    finally:
-        # Clean up lock file
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-        except Exception as e:
-            logger.error(f"Could not remove lock file: {e}")
-
-    print("moodybot.py loaded as standalone script.")
-    print("Entered main_async()")
+    # drop_pending_updates: clear stale queue after redeploy.
+    # stop_signals: let PTB stop the updater cleanly on Render SIGTERM.
+    app.run_polling(
+        drop_pending_updates=True,
+        stop_signals=(signal.SIGINT, signal.SIGTERM, signal.SIGABRT),
+    )
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main_async())
+        main()
     except Exception as e:
         print(f"MoodyBot crashed: {e}")
 
-        

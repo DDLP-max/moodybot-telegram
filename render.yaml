@@ -4,7 +4,8 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt && python build_system_prompt.py
-    startCommand: python moodybot.py
+    # Brief delay so the previous worker can release Telegram getUpdates on deploy.
+    startCommand: sleep 8 && python moodybot.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
