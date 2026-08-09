@@ -15,6 +15,8 @@ Same lens, repeated prompts, same rhetorical skeleton every time:
 
 Logs look perfect. The writing feels predictable.
 
+Related craft failure: **low discovery density** — competent explanation, no line worth stealing tomorrow. See `unforgettable-lines.md`.
+
 ## What to freeze
 
 - Mechanism may repeat when the prompt family repeats.

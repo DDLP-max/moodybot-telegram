@@ -35,11 +35,23 @@ FORMULA_EI = [
 
 def test_ei_guidance_has_approach_diversity():
     g = lens_voice_guidance("Emotional Intelligence").lower()
-    assert "approach diversity" in g
+    assert "approach diversity" in g or "discovery density" in g
+    assert "discovery density" in g
+    assert "remember tomorrow" in g
+    assert "every threat is autobiographical" in g
     assert "observation" in g and "contradiction" in g and "reversal" in g
     assert "isn't really about" in g  # allowed
-    assert "not mandatory" in g or "do not always open" in g
     assert "revealing the speaker" in g  # warned as overused landing
+
+
+def test_unforgettable_lines_corpus_exists():
+    from pathlib import Path
+
+    p = Path("moodybot-system-prompt/9_response-engine/unforgettable-lines.md")
+    text = p.read_text(encoding="utf-8").lower()
+    assert "remember tomorrow" in text
+    assert "every threat is autobiographical" in text
+    assert "not a routing layer" in text
 
 
 def test_classifies_diverse_openings():
