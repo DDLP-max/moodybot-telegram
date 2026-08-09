@@ -20,6 +20,20 @@ def test_engine_is_protect_only():
     assert CREATIVE_ENDING_TOOLS_ENABLED is False
 
 
+def test_protect_only_contract_documented():
+    """Architectural lock: finalizer contract must stay explicit."""
+    from pathlib import Path
+
+    contract = Path("docs/PROTECT_ONLY_FINALIZER.md").read_text(encoding="utf-8")
+    assert "prevent a defect" in contract.lower()
+    assert "change the writing" in contract.lower()
+    assert "infrastructure" in contract.lower()
+    import response_finalization as rf
+
+    assert "protect-only-v1" in (rf.__doc__ or "").lower()
+    assert "change the writing" in (rf.__doc__ or "").lower()
+
+
 def test_default_landing_is_body_not_signature():
     d = select_landing("Why did Game of Thrones season 8 fail?", body="Anything.")
     assert d.landing == "BODY_ENDS_RESPONSE"
@@ -132,8 +146,9 @@ def test_core_write_directive_is_for_generator():
         "intent": "explore",
     })())
     lower = text.lower()
-    assert "interesting true thing" in lower
     assert "proof" in lower
+    assert "concrete before abstract" in lower
+    assert "translate" in lower
     assert CORE_WRITE_DIRECTIVE
 
 
@@ -147,6 +162,7 @@ def test_grief_still_silence():
 
 if __name__ == "__main__":
     test_engine_is_protect_only()
+    test_protect_only_contract_documented()
     test_default_landing_is_body_not_signature()
     test_callback_not_forced_on_default_path()
     test_coherent_draft_ships_untouched()
