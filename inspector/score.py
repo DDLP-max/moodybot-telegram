@@ -23,12 +23,15 @@ _SYSTEMS = re.compile(
 _DISCOVERYISH = re.compile(
     r"^(every |people don'?t |threats |peace |consistency |the mirror |"
     r"the fastest |a threat |funny how |nobody wants |the fantasy |"
-    r"everyone says |the line about )\b|"
+    r"everyone says |the line about |most people don'?t |the cleanest )\b|"
     r"\bis autobiographical\b|\bexport (them|fear)\b|"
     r"\bonly become immoral\b|\bwhen you'?re the one being measured\b|"
     r"\bcomes with a warranty\b|\bisn'?t perfection\.? it'?s certainty\b|"
     r"\buncertainty that comes with building\b|"
-    r"\bis the giveaway\b",
+    r"\bis the giveaway\b|"
+    r"\bedit the (relationship|ending)\b|"
+    r"\bmessiest rewrites\b|"
+    r"\bprison cell is just a room\b",
     re.I,
 )
 # Competent analysis that summarizes the mechanism instead of landing a discovery
@@ -42,13 +45,15 @@ _MECHANISM_SUMMARY = re.compile(
     r"\bit'?s about protecting\b",
     re.I,
 )
-# Labels that sound like discoveries but aren't ("insurance policy", "real engine")
+# Mode-1 labels / explanations that sound finished but aren't stealable
 _GENERIC_MECHANISM = re.compile(
     r"\b(that|this|the) (fear|anxiety|insecurity|need|desire) is the real engine\b|"
     r"\bjust two versions of the same\b|"
     r"\bsame insurance policy\b|"
     r"\binsurance policy\b|"
-    r"\bthe real engine\b",
+    r"\bthe real engine\b|"
+    r"\bis just the language people use\b|"
+    r"\bthe language people use when\b",
     re.I,
 )
 _CONCRETE_SHARP = re.compile(

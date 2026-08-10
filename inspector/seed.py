@@ -235,6 +235,39 @@ SAMPLES.append(
         "source": "seed-paraphrase-collapse",
     }
 )
+SAMPLES.append(
+    {
+        "prompt": (
+            '"We want different things now."\n\nSure.\n\n'
+            "You wanted forever. She wanted an exit that didn't make her the bad guy. "
+            "Let her have the softer story."
+        ),
+        "output": (
+            "She didn't wake up wanting different things. She woke up not wanting you "
+            "and needed a version of the story where no one was the villain. "
+            '"Different things" is just the language people use when they want out '
+            "without having to be the bad guy. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "emotional",
+            "lens": "Emotional Intelligence",
+            "interpretive_lens": "Emotional Intelligence",
+            "response_budget": "medium",
+            "preferred_structure": "KNIFE",
+            "routing_structure": "KNIFE",
+            "selected_structure": "KNIFE",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "none",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "spear_detected": "true",
+        },
+        "source": "seed-ei-mode1-analysis",
+    }
+)
 
 
 def main() -> None:

@@ -13,13 +13,14 @@ from .score import inspect_event
 EXAMPLE_BANK: Dict[str, List[str]] = {
     "discovery": [
         "Every threat is autobiographical.",
-        "Funny how preferences only become immoral when you're the one being measured.",
-        "Peace feels suspicious when chaos is how you learned to belong.",
+        "Most people don't edit the relationship. They edit the ending.",
+        "The cleanest exits usually require the messiest rewrites.",
+        "That's like saying a prison cell is just a room.",
     ],
     "mechanism_summary": [
         "Funny how preferences only become immoral when you're the one being measured.",
         "Every threat is autobiographical.",
-        "Standards only become shallow when they point back at you.",
+        "Most people don't edit the relationship. They edit the ending.",
     ],
     "strong": [
         "Men get to grade your body like it's on display.",
@@ -33,9 +34,9 @@ EXAMPLE_BANK: Dict[str, List[str]] = {
         "Keep bridges short — they carry, they don't lecture.",
     ],
     "generic": [
+        "Most people don't edit the relationship. They edit the ending.",
+        "The cleanest exits usually require the messiest rewrites.",
         "Nobody wants a partner who's already finished. They want a future that already comes with a warranty.",
-        "The fantasy isn't perfection. It's certainty.",
-        "Everyone says they want love. Very few people want the uncertainty that comes with building it.",
     ],
     "ok": [],
 }

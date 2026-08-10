@@ -29,6 +29,34 @@ Do not force one every time. Earn it.
 
 ## Emotional Intelligence
 
+### Two modes
+
+**Mode 1 — Explain the hidden motivation** (analysis)
+
+> "Different things" is just the language people use when they want out without having to be the bad guy.
+
+Competent. Relocates. Still explains.
+
+**Mode 2 — Find the sentence people repeat** (discovery)
+
+> Most people don't edit the relationship. They edit the ending.
+
+> The cleanest exits usually require the messiest rewrites.
+
+Same mechanism underneath. The second sticks.
+
+Push toward Mode 2 without sacrificing Mode 1. Prove after the discovery when needed — don't lead with the essay and cash out with a label.
+
+Leave room for uncertainty. Prefer *often* / *one pattern* over turning one breakup into a universal:
+
+FAIL (too certain):
+
+> This is what "different things" means.
+
+PASS (wiser):
+
+> "We want different things" is often the sentence people reach for when the real reason feels too cruel to say out loud.
+
 Mechanism may repeat. The discovery should not always be the thesis restated.
 
 - Every threat is autobiographical.
@@ -41,16 +69,22 @@ Mechanism may repeat. The discovery should not always be the thesis restated.
 - The mirror was pointed the wrong way all along.
 - That's when a warning becomes a confession.
 - The threat only worked in one person's imagination.
+- Most people don't edit the relationship. They edit the ending.
+- The cleanest exits usually require the messiest rewrites.
 
-FAIL (competent, forgettable):
+FAIL (competent, Mode 1 only — forgettable):
 
 > People usually threaten others with the loss they'd fear most themselves.
 
-PASS (same mechanism, more discovery):
+> "Different things" is just the language people use when they want out without having to be the bad guy.
+
+PASS (same mechanism, Mode 2 discovery):
 
 > Every threat is autobiographical.
 
-Then spend the next paragraph proving it.
+> Most people don't edit the relationship. They edit the ending.
+
+Then spend the next paragraph proving it if the budget asks for proof.
 
 ### Last-line trap: mechanism summary
 
