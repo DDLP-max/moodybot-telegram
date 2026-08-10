@@ -1,36 +1,49 @@
 # Moody Inspector
 
-Debugger for live MoodyBot replies. Not another routing layer.
+Writer telemetry for MoodyBot. **Debugger, not another brain.**
 
-Raw logs feed the tool — your eyes read cards.
+Unit of work: improving sentences — not scrolling logs.
 
-## What it shows
+## Philosophy
 
-- Prompt / Output
-- Pipeline (claim → lens → budget → structure → Gold)
-- Editor metrics (paragraphs, mechanisms, spear)
-- Clickable craft checks (discovery, spokenness, over-confirming)
-- Scores: Architecture / Lens fidelity / Writing / Memorability
-- Diff vs a prior reply
-- Hall of Fame (starred stealable lines)
+Great editors don't start with trends. They start with today's pages, mark the unforgettable lines, circle the weak ones, and move on.
 
-## Run locally
+## Two ingestion paths
+
+| Source | Role |
+|--------|------|
+| `moodybot.log` / `moodybot_log.txt` | Historical corpus (production truth) |
+| `data/inspector/events.jsonl` | Clean live telemetry from finalize |
+
+Same normalized event schema. Deduped by fingerprint (`prompt + output + prompt_hash + git_commit`).
+
+Provenance labels in the UI:
+
+- `moodybot.log`
+- `live telemetry`
+- `seeded regression example`
+
+## Commands
 
 ```bash
-python -m inspector seed          # sample cat-lady iterations
-python -m inspector serve 5055    # http://127.0.0.1:5055/inspector
+python -m inspector seed
+python -m inspector import-log moodybot_log.txt
+python -m inspector import-log moodybot.log --since 2026-08-01
+python -m inspector rebuild              # wipe index; keep Hall of Fame stars
+python -m inspector rebuild --keep-seeds
+python -m inspector watch moodybot_log.txt
+python -m inspector serve 5055           # http://127.0.0.1:5055/inspector
 ```
 
-Or start the Flask app (`main.py`) and open `/inspector`.
+## What you see
 
-## Live capture
+1. **Today's board** — totals, discoveries, last-line traps, mechanism summaries, drifting/improved lens
+2. **Visual response list** — green / yellow / red cards with stealability
+3. **Response page** — click a sentence → teach panel (verdict, why, examples)
+4. **Killer filter** — e.g. every Emotional Intelligence reply that failed Last-line trap
+5. **Hall of Fame notebook** — discoveries / spears / by lens
+6. **Hit-rate graph** — % of replies that accidentally create something worth stealing
 
-Telegram `finalize_response` appends each reply to `data/inspector/events.jsonl`
-(override with `MOODYBOT_INSPECTOR_DIR`).
+## Metric
 
-On Render, mount a disk at that path if you want events to survive deploys.
-
-## Hall of Fame
-
-Star a discovery from any card. Lines land in `hall_of_fame.jsonl` —
-better training signal than whole outputs for discovery density.
+**Stealability** (not “memorability”): would someone steal this sentence?

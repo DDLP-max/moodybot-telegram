@@ -1332,6 +1332,9 @@ That discovery may open, sit mid-reply, or close — it need not always be the t
 Prefer a stealable line over a clean explanation of the same point (see unforgettable-lines).
 Last line FAIL (mechanism summary): "The rule isn't about dignity. It's about protecting whichever side…"
 Last line PASS (discovery): "Funny how preferences only become immoral when you're the one being measured."
+Last third FAIL (label): "That fear is the real engine… same insurance policy."
+Last third PASS (discovery): "Nobody wants a partner who's already finished. They want a future that already comes with a warranty."
+Last third PASS (discovery): "The fantasy isn't perfection. It's certainty."
 Do not sharpen the premise and then summarize the analysis. Land the discovery — then stop.
 Once the spear lands — stop padding / over-confirming. No second mechanism, summary, moral, CTA, invitation, "the real lesson is…", or "and that's why…".
 On REFLECTION / high-depth, the spear may close a developed multi-paragraph piece — do not delete necessary deepening; do delete re-proof.
@@ -2075,6 +2078,16 @@ def finalize_response(
         post_reasons.append("format_fix")
 
     text, surface_cleaned = final_surface_render(text)
+    # Surface QA — typography integrity (not Gold). Heals ". and" splits etc.
+    from surface_qa import run_surface_qa
+
+    qa = run_surface_qa(text, auto_repair=True)
+    surface_qa_fixed = qa.fixed
+    surface_qa_failures = qa.failure_names
+    if qa.fixed:
+        text = qa.text
+        post_reasons.append("surface_qa_repair")
+        surface_cleaned = True
     gold_report.whiskey_tail_present = "🥃" in text
     post_finalizer_paragraph_count = paragraph_count(text)
     after_surface_last = _last_sentence(text)
@@ -2163,6 +2176,8 @@ def finalize_response(
         "finalization_rewrite": str(finalization_rewrite).lower(),
         "closer_replaced": str(closer_replaced).lower(),
         "surface_cleaned": str(surface_cleaned).lower(),
+        "surface_qa_fixed": str(surface_qa_fixed).lower(),
+        "surface_qa_failures": ",".join(surface_qa_failures) if surface_qa_failures else "none",
         "duration_ms": str(duration_ms),
         "draft_last_sentence": draft_last[:240],
         "after_epistemic_last_sentence": after_epistemic_last[:240],

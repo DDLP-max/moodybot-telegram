@@ -3,23 +3,90 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hall of Fame — Moody Inspector</title>
+  <title>Hall of Fame — Writer's Notebook</title>
   <style>
     :root {
-      --bg: #121212; --panel: #1a1a1a; --line: #2e2e2e; --text: #e8e4df;
-      --muted: #9a948c; --accent: #d4c4a8;
+      --bg: #0f0f0f;
+      --panel: #161613;
+      --line: #2c2b27;
+      --text: #ebe6dc;
+      --muted: #9a9488;
+      --accent: #d4c4a8;
+      --ok: #6f9b64;
       --mono: "IBM Plex Mono", Consolas, monospace;
       --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
     }
+    * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
-    header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
-    header h1 { margin: 0; font-size: 1.1rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
-    a { color: var(--accent); }
-    main { max-width: 720px; padding: 1.5rem; }
-    li { margin-bottom: 1rem; list-style: none; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem; }
-    ul { padding: 0; }
-    .line { font-family: var(--mono); font-size: 1.05rem; }
-    .meta { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+    header {
+      padding: 1.5rem 1.75rem 1rem;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      color: var(--accent);
+    }
+    header a { color: var(--muted); text-decoration: none; font-size: 0.85rem; }
+    .wrap { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 72px); }
+    .buckets {
+      border-right: 1px solid var(--line);
+      padding: 1.25rem 0;
+    }
+    .buckets a {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.55rem 1.25rem;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .buckets a:hover, .buckets a.active { color: var(--accent); background: var(--panel); }
+    .buckets .n { font-family: var(--mono); font-size: 0.85rem; }
+    main { padding: 1.5rem 1.75rem 3rem; max-width: 760px; }
+    .intro { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+    .line-card {
+      border-bottom: 1px solid var(--line);
+      padding: 1.1rem 0;
+    }
+    .line {
+      font-family: var(--mono);
+      font-size: 1.1rem;
+      line-height: 1.4;
+    }
+    .stars { color: var(--accent); margin-top: 0.45rem; letter-spacing: 0.08em; }
+    .meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.35rem; }
+    .row-actions { margin-top: 0.55rem; }
+    button, .btn {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 0.3rem 0.6rem;
+      font: inherit;
+      cursor: pointer;
+      font-size: 0.8rem;
+      text-decoration: none;
+    }
+    button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .pill {
+      display: inline-block;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ok);
+      border: 1px solid var(--line);
+      padding: 0.1rem 0.4rem;
+      margin-right: 0.35rem;
+    }
+    @media (max-width: 800px) {
+      .wrap { grid-template-columns: 1fr; }
+      .buckets { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
   </style>
 </head>
 <body>
@@ -27,19 +94,59 @@
     <h1>Hall of Fame</h1>
     <a href="{{ url_for('inspector_home') }}">← Inspector</a>
   </header>
-  <main>
-    <p style="color:var(--muted)">Stealable sentences. Training signal for discovery density — not whole replies.</p>
-    <ul class="hall">
-      {% for h in hall %}
-      <li>
-        <div class="line">{{ h.line }}</div>
-        <div class="meta">{{ h.lens or '—' }} · {{ h.ts[:16].replace('T',' ') }}{% if h.note %} · {{ h.note }}{% endif %}</div>
-      </li>
+  <div class="wrap">
+    <aside class="buckets">
+      <a href="{{ url_for('inspector_hall', bucket='candidates') }}" class="{% if bucket == 'candidates' %}active{% endif %}">
+        <span>⚡ Candidates</span><span class="n">{{ counts.candidates or 0 }}</span>
+      </a>
+      <a href="{{ url_for('inspector_hall', bucket='starred') }}" class="{% if bucket == 'starred' %}active{% endif %}">
+        <span>★ Starred</span><span class="n">{{ counts.starred or 0 }}</span>
+      </a>
+      <a href="{{ url_for('inspector_hall', bucket='spears') }}" class="{% if bucket == 'spears' %}active{% endif %}">
+        <span>🎯 Spears</span><span class="n">{{ counts.spears or 0 }}</span>
+      </a>
+      {% for lens, rows in notebook.by_lens.items() %}
+      <a href="{{ url_for('inspector_hall', lens=lens) }}" class="{% if bucket == lens %}active{% endif %}">
+        <span>{{ lens }}</span><span class="n">{{ rows|length }}</span>
+      </a>
       {% endfor %}
-    </ul>
-    {% if not hall %}
-    <p style="color:var(--muted)">Nothing starred yet. Open a response and hit ★ Star discovery.</p>
-    {% endif %}
-  </main>
+    </aside>
+    <main>
+      {% if bucket == 'candidates' %}
+      <p class="intro">Auto-mined stealable lines from the full corpus — not starred yet. This is the {{ counts.candidates }} you saw on the dashboard. Star the ones worth keeping.</p>
+      {% elif bucket == 'starred' %}
+      <p class="intro">Manually starred lines — your locked writer's notebook ({{ counts.starred }}).</p>
+      {% else %}
+      <p class="intro">Writer's notebook — stealable sentences, not whole replies.</p>
+      {% endif %}
+
+      {% for h in hall %}
+      <div class="line-card">
+        {% if h.candidate %}<span class="pill">Candidate</span>{% endif %}
+        <div class="line">{{ h.line }}</div>
+        <div class="stars">{{ '⭐' * (h.stars or 5) }}{% if h.stealability %} · {{ h.stealability }}{% endif %}</div>
+        <div class="meta">{{ h.lens or '—' }} · {{ (h.ts or '')[:16].replace('T',' ') }}{% if h.note %} · {{ h.note }}{% endif %}</div>
+        <div class="row-actions">
+          {% if h.candidate %}
+          <form method="post" action="{{ url_for('inspector_star') }}" style="display:inline">
+            <input type="hidden" name="event_id" value="{{ h.event_id }}" />
+            <input type="hidden" name="lens" value="{{ h.lens or '' }}" />
+            <input type="hidden" name="line" value="{{ h.line }}" />
+            <input type="hidden" name="stars" value="{{ h.stars or 5 }}" />
+            <input type="hidden" name="note" value="promoted from candidates" />
+            <button type="submit">★ Star into notebook</button>
+          </form>
+          {% endif %}
+          {% if h.event_id %}
+          <a class="btn" href="{{ url_for('inspector_home', id=h.event_id) }}">Open response</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% if not hall %}
+      <p class="intro">Nothing in this bucket yet.</p>
+      {% endif %}
+    </main>
+  </div>
 </body>
 </html>

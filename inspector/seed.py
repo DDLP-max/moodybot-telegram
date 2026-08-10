@@ -168,6 +168,46 @@ SAMPLES.append(
 )
 
 
+SAMPLES.append(
+    {
+        "prompt": (
+            "dating in 2026 is completely broken because everyone wants a finished product. "
+            "nobody wants to build together anymore. guys want a 10 who acts like a 1950s "
+            "housewife. and women want a CEO who sponsors their lifestyle. if you aren't "
+            "willing to struggle with someone, you deserve to end up alone."
+        ),
+        "output": (
+            "The line about deserving to be alone is the giveaway. It turns the same "
+            "transactional logic you're mourning into a moral test you get to administer. "
+            "Everyone's chasing the finished product because nobody wants to carry the risk "
+            "of building with someone who might still choose to leave. That fear is the real "
+            "engine. The 1950s housewife fantasy and the CEO sponsor fantasy are just two "
+            "versions of the same insurance policy. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "emotional",
+            "lens": "Emotional Intelligence",
+            "interpretive_lens": "Emotional Intelligence",
+            "lens_question": "What feeling or boundary is driving this?",
+            "primary_capability": "Emotional State Recognition",
+            "response_budget": "medium",
+            "preferred_structure": "KNIFE",
+            "routing_structure": "KNIFE",
+            "selected_structure": "KNIFE",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "none",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "spear_detected": "true",
+        },
+        "source": "seed-dating-warranty-miss",
+    }
+)
+
+
 def main() -> None:
     last = None
     for s in SAMPLES:
@@ -178,7 +218,14 @@ def main() -> None:
             channel="seed",
             source=s["source"],
         )
-        print("seeded", last["id"], s["source"], "memorability=", last["inspection"]["scores"]["memorability"])
+        sc = last["inspection"]["scores"]
+        print(
+            "seeded",
+            last["id"],
+            s["source"],
+            "stealability=",
+            sc.get("stealability", sc.get("memorability")),
+        )
     if last:
         star_discovery(
             "Every threat is autobiographical.",

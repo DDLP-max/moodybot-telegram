@@ -8356,6 +8356,29 @@ PASS (discovery close):
 - Funny how preferences only become immoral when you're the one being measured.
 - Standards only become shallow when they point back at you.
 
+### Last-third trap: label instead of discovery
+
+Strong relocation + solid mechanism, then a generic cash-out.
+
+FAIL:
+
+> That fear is the real engine. The 1950s housewife fantasy and the CEO sponsor fantasy are just two versions of the same insurance policy.
+
+PASS:
+
+> Nobody wants a partner who's already finished. They want a future that already comes with a warranty.
+
+Or:
+
+> The fantasy isn't perfection. It's certainty.
+
+Or:
+
+> Everyone says they want love. Very few people want the uncertainty that comes with building it.
+
+- Nobody wants a partner who's already finished. They want a future that already comes with a warranty.
+- The fantasy isn't perfection. It's certainty.
+
 ---
 
 ## Pattern Recognition / social mechanism

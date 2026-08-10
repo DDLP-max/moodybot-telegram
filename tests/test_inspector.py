@@ -40,7 +40,7 @@ def test_sentence_level_flags_mechanism_summary_close():
             ),
         }
     )
-    assert better["scores"]["memorability"] > insp["scores"]["memorability"]
+    assert better["scores"]["stealability"] > insp["scores"]["stealability"]
     assert better["editor"]["last_is_mechanism_summary"] is False
 
 
@@ -78,7 +78,8 @@ def test_inspect_scores_discovery_higher_than_formula():
     }
     a = inspect_event(formula)
     b = inspect_event(discovery)
-    assert b["scores"]["memorability"] > a["scores"]["memorability"]
+    assert b["scores"]["stealability"] > a["scores"]["stealability"]
+    assert b["scores"]["stealability"] == b["scores"]["memorability"]
     assert a["editor"]["opening_move"] == "relocation"
     assert any(c["name"] == "Discovery" and c["status"] == "weak" for c in a["checks"])
     assert any(c["name"] == "Discovery" and c["status"] == "pass" for c in b["checks"])
@@ -114,8 +115,41 @@ def test_record_and_star(tmp_path, monkeypatch):
     assert hall and hall[0]["line"].startswith("Every threat")
 
 
+def test_killer_filter_last_line_trap():
+    from inspector.telemetry import filter_events
+
+    events = [
+        {
+            "id": "a",
+            "prompt": "gold",
+            "output": (
+                "Men get to grade your body like it's on display. You grade his bank account and "
+                "suddenly you're shallow. The rule isn't about dignity. It's about protecting "
+                "whichever side feels exposed by the other's standards. 🥃"
+            ),
+            "diagnostics": {"lens": "Emotional Intelligence"},
+            "source": "live",
+        },
+        {
+            "id": "b",
+            "prompt": "gold2",
+            "output": (
+                "Men get to grade your body like it's on display. Funny how preferences only become "
+                "immoral when you're the one being measured. 🥃"
+            ),
+            "diagnostics": {"lens": "Emotional Intelligence"},
+            "source": "live",
+        },
+    ]
+    trapped = filter_events(events, lens="Emotional Intelligence", fail="Last line")
+    assert len(trapped) == 1
+    assert trapped[0]["id"] == "a"
+
+
 if __name__ == "__main__":
     test_sentence_level_flags_mechanism_summary_close()
     print("ok sentences")
     test_inspect_scores_discovery_higher_than_formula()
     print("ok scores")
+    test_killer_filter_last_line_trap()
+    print("ok filter")

@@ -22,9 +22,13 @@ _SYSTEMS = re.compile(
 )
 _DISCOVERYISH = re.compile(
     r"^(every |people don'?t |threats |peace |consistency |the mirror |"
-    r"the fastest |a threat |funny how )\b|"
+    r"the fastest |a threat |funny how |nobody wants |the fantasy |"
+    r"everyone says |the line about )\b|"
     r"\bis autobiographical\b|\bexport (them|fear)\b|"
-    r"\bonly become immoral\b|\bwhen you'?re the one being measured\b",
+    r"\bonly become immoral\b|\bwhen you'?re the one being measured\b|"
+    r"\bcomes with a warranty\b|\bisn'?t perfection\.? it'?s certainty\b|"
+    r"\buncertainty that comes with building\b|"
+    r"\bis the giveaway\b",
     re.I,
 )
 # Competent analysis that summarizes the mechanism instead of landing a discovery
@@ -36,6 +40,15 @@ _MECHANISM_SUMMARY = re.compile(
     r"\bfeel(?:s|ing)? exposed by\b|"
     r"\bthe other'?s standards\b|"
     r"\bit'?s about protecting\b",
+    re.I,
+)
+# Labels that sound like discoveries but aren't ("insurance policy", "real engine")
+_GENERIC_MECHANISM = re.compile(
+    r"\b(that|this|the) (fear|anxiety|insecurity|need|desire) is the real engine\b|"
+    r"\bjust two versions of the same\b|"
+    r"\bsame insurance policy\b|"
+    r"\binsurance policy\b|"
+    r"\bthe real engine\b",
     re.I,
 )
 _CONCRETE_SHARP = re.compile(
@@ -53,18 +66,36 @@ def _sentences(text: str) -> List[str]:
     return [s.strip() for s in parts if s and s.strip()]
 
 
-def _verdict_sentence(s: str, *, is_last: bool) -> Dict[str, str]:
+def _verdict_sentence(
+    s: str,
+    *,
+    is_last: bool,
+    is_first: bool = False,
+    spear_line: str = "",
+) -> Dict[str, str]:
+    if spear_line and spear_line.lower()[:40] in s.lower():
+        return {
+            "text": s,
+            "verdict": "spear",
+            "note": "the cut — spear line",
+        }
     if _MECHANISM_SUMMARY.search(s):
         return {
             "text": s,
             "verdict": "mechanism_summary",
-            "note": "explains the analysis — generic cash-out, not a discovery",
+            "note": "restates the mechanism — doesn't deepen it",
+        }
+    if _GENERIC_MECHANISM.search(s):
+        return {
+            "text": s,
+            "verdict": "generic",
+            "note": "labels the mechanism — not an of-course discovery",
         }
     if _DISCOVERYISH.search(s) or (is_last and re.search(r"^funny how\b", s, re.I)):
         return {
             "text": s,
             "verdict": "discovery",
-            "note": "stealable / memorable",
+            "note": "stealable — would someone steal this sentence?",
         }
     if _CONCRETE_SHARP.search(s) and len(s.split()) <= 28:
         return {
@@ -72,11 +103,11 @@ def _verdict_sentence(s: str, *, is_last: bool) -> Dict[str, str]:
             "verdict": "strong",
             "note": "concrete, spoken, sharpens the premise",
         }
-    if is_last and _MECHANISM_SUMMARY.search(s):
+    if not is_first and not is_last and len(s.split()) <= 22:
         return {
             "text": s,
-            "verdict": "mechanism_summary",
-            "note": "last line summarizes instead of discovering",
+            "verdict": "bridge",
+            "note": "carries between beats — keep it short",
         }
     return {"text": s, "verdict": "ok", "note": ""}
 
@@ -104,16 +135,25 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     opening = first_sentence(out)
     opening_move = classify_opening_move(out)
     ending = last_substantive_sentence(out)
+    spear_line = str(d.get("spear_line") or "")
+    sents = _sentences(out)
     sent_rows = [
-        _verdict_sentence(s, is_last=(i == len(_sentences(out)) - 1))
-        for i, s in enumerate(_sentences(out))
+        _verdict_sentence(
+            s,
+            is_last=(i == len(sents) - 1),
+            is_first=(i == 0),
+            spear_line=spear_line,
+        )
+        for i, s in enumerate(sents)
     ]
     discovery_line = next(
         (r["text"] for r in sent_rows if r["verdict"] == "discovery"),
         opening if _DISCOVERYISH.search(opening) else "",
     )
     last_is_summary = bool(sent_rows) and sent_rows[-1]["verdict"] == "mechanism_summary"
+    last_is_generic = bool(sent_rows) and sent_rows[-1]["verdict"] == "generic"
     strong_n = sum(1 for r in sent_rows if r["verdict"] in {"strong", "discovery"})
+    generic_n = sum(1 for r in sent_rows if r["verdict"] == "generic")
 
     checks: List[Dict[str, Any]] = []
 
@@ -206,13 +246,42 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     else:
         add("Spokenness", "pass", "would someone say this aloud? — no systems leaks caught")
 
-    if last_is_summary:
+    # Surface QA — typography integrity (post-Gold)
+    from surface_qa import detect_surface_issues
+
+    surface_issues = detect_surface_issues(out)
+    qa_diag = [
+        f
+        for f in str(d.get("surface_qa_failures") or "none").split(",")
+        if f and f != "none"
+    ]
+    if surface_issues or qa_diag:
+        examples = []
+        for iss in surface_issues[:3]:
+            examples.append(f"✗ {iss.span}")
+            if iss.suggested:
+                examples.append(f"✓ {iss.suggested}")
+        if not examples and qa_diag:
+            examples = [f"flagged: {x}" for x in qa_diag]
+        add(
+            "Surface QA",
+            "fail",
+            "sentence boundary / typography damage — not a writing problem",
+            examples=examples,
+        )
+    elif _truthy(d.get("surface_qa_fixed")):
+        add("Surface QA", "pass", "repaired before send")
+    else:
+        add("Surface QA", "pass", "clean typography")
+
+    if last_is_summary or last_is_generic:
         add(
             "Last line",
             "fail",
             "mechanism summary / generic cash-out — routing can be right while distinctiveness fails",
             examples=[
-                "✓ Funny how preferences only become immoral when you're the one being measured.",
+                "✓ Nobody wants a partner who's already finished. They want a future that already comes with a warranty.",
+                "✓ The fantasy isn't perfection. It's certainty.",
                 f"✗ {ending[:160]}",
             ],
         )
@@ -222,6 +291,14 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
         add("Last line", "pass", "discovery elsewhere in the reply", examples=[discovery_line[:160]])
     else:
         add("Last line", "weak", "no discovery line — competent but forgettable", examples=[ending[:160]])
+
+    if generic_n and not last_is_generic:
+        add(
+            "Discovery density",
+            "weak",
+            "generic mechanism label mid-reply (insurance policy / real engine)",
+            examples=[r["text"][:140] for r in sent_rows if r["verdict"] == "generic"][:2],
+        )
 
     if opening_move == "relocation" and not discovery_line:
         add(
@@ -280,20 +357,24 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
         writing -= 1
     writing = max(0, min(10, writing))
 
-    memorability = 6
+    # Stealability = would someone steal a sentence from this?
+    stealability = 6
     if discovery_line:
-        memorability = 9
+        stealability = 9
     elif strong_n >= 2 and not last_is_summary:
-        memorability = 8
+        stealability = 8
     elif opening_move in {"contradiction", "irony", "reversal", "image"}:
-        memorability = 7
+        stealability = 7
     elif opening_move == "relocation":
-        memorability = 5
+        stealability = 5
     if last_is_summary:
-        memorability -= 2
+        stealability -= 2
+    if last_is_generic:
+        stealability -= 1
     if ending_is_reveal_speaker(out) and opening_move == "relocation":
-        memorability -= 1
-    memorability = max(0, min(10, memorability))
+        stealability -= 1
+    stealability = max(0, min(10, stealability))
+    memorability = stealability  # back-compat alias
 
     pipeline = [
         {"label": "Claim Type", "value": d.get("claim_domain") or "—", "ok": bool(d.get("claim_domain"))},
@@ -323,6 +404,8 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             "spear_line": d.get("spear_line") or "",
             "quality_failures": failures,
             "last_is_mechanism_summary": last_is_summary,
+            "last_is_generic": last_is_generic,
+            "generic_n": generic_n,
         },
         "sentences": sent_rows,
         "checks": checks,
@@ -330,6 +413,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             "architecture": architecture,
             "lens_fidelity": lens_fidelity,
             "writing": writing,
+            "stealability": stealability,
             "memorability": memorability,
         },
     }
@@ -350,6 +434,10 @@ def diff_events(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
         "structure_b": (b.get("diagnostics") or {}).get("routing_structure"),
         "structure_changed": (a.get("diagnostics") or {}).get("routing_structure")
         != (b.get("diagnostics") or {}).get("routing_structure"),
+        "stealability_a": (ia.get("scores") or {}).get("stealability")
+        or (ia.get("scores") or {}).get("memorability"),
+        "stealability_b": (ib.get("scores") or {}).get("stealability")
+        or (ib.get("scores") or {}).get("memorability"),
         "memorability_a": (ia.get("scores") or {}).get("memorability"),
         "memorability_b": (ib.get("scores") or {}).get("memorability"),
         "gold_a": (a.get("diagnostics") or {}).get("quality_rewrite_triggered"),
@@ -358,18 +446,20 @@ def diff_events(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def aggregate_lens_stats(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Per-lens bars for the dashboard."""
+    """Per-lens bars (secondary — dashboard leads with today's pages)."""
     buckets: Dict[str, Dict[str, Any]] = {}
     for e in events:
         d = e.get("diagnostics") or {}
-        lens = d.get("lens") or "Unknown"
+        lens = d.get("lens") or d.get("interpretive_lens") or "Unknown"
         insp = e.get("inspection") or inspect_event(e)
         scores = insp.get("scores") or {}
+        steal = float(scores.get("stealability") if scores.get("stealability") is not None else scores.get("memorability") or 0)
         b = buckets.setdefault(
             lens,
             {
                 "lens": lens,
                 "n": 0,
+                "stealability": 0.0,
                 "memorability": 0.0,
                 "writing": 0.0,
                 "architecture": 0.0,
@@ -377,7 +467,8 @@ def aggregate_lens_stats(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             },
         )
         b["n"] += 1
-        b["memorability"] += float(scores.get("memorability") or 0)
+        b["stealability"] += steal
+        b["memorability"] += steal
         b["writing"] += float(scores.get("writing") or 0)
         b["architecture"] += float(scores.get("architecture") or 0)
         if (insp.get("editor") or {}).get("opening_move") == "relocation":
@@ -389,6 +480,7 @@ def aggregate_lens_stats(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             {
                 "lens": b["lens"],
                 "n": b["n"],
+                "stealability": round(b["stealability"] / n, 1),
                 "memorability": round(b["memorability"] / n, 1),
                 "writing": round(b["writing"] / n, 1),
                 "architecture": round(b["architecture"] / n, 1),

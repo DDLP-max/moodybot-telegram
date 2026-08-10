@@ -179,7 +179,11 @@ def restore_whitelisted_tokens(text: str, tokens_to_preserve: Dict[str, str]) ->
     return restored_text
 
 def polish_sentences(text: str) -> str:
-    """Light clause polish. Preserve semantic paragraph breaks (\\n\\n)."""
+    """Light clause polish. Preserve semantic paragraph breaks (\\n\\n).
+
+    Never insert '. and' / '. but' mid-clause — that created Telegram glitches
+    like 'side. and watch'. Length is not a license to invent sentence breaks.
+    """
     body = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not body:
         return body
@@ -194,8 +198,6 @@ def polish_sentences(text: str) -> str:
                     left, right = parts[0].strip(), parts[1].strip()
                     if re.match(r"^[A-Z][^,]+$", left) and re.match(r"^[A-Z][^,]+$", right):
                         sentence = f"{left}; {right}"
-            if len(sentence.split()) > 25 and "," not in sentence and ";" not in sentence:
-                sentence = re.sub(r"\b(and|but)\b", r". \1", sentence, count=1)
             polished.append(sentence)
         return " ".join(polished)
 

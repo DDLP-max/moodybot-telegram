@@ -91,63 +91,162 @@ def health_check():
 
 @app.route("/inspector", strict_slashes=False)
 def inspector_home():
-    """Moody Inspector — response debugger (logs → cards, not more routing)."""
-    from inspector.score import aggregate_lens_stats, diff_events, inspect_event
-    from inspector.store import get_event, load_events, load_hall_of_fame
+    """Moody Inspector — writer telemetry. Debugger, not another brain."""
+    from inspector.score import aggregate_lens_stats, diff_events
+    from inspector.store import get_event, load_all_events, load_events, load_hall_of_fame
+    from inspector.telemetry import (
+        card_summary,
+        dashboard_stats,
+        ensure_inspection,
+        filter_events,
+        hit_rate_by_month,
+        sentence_teach,
+        source_label,
+    )
 
-    events = load_events(limit=300)
-    # Re-score on read so older JSONL rows get new fields (e.g. sentences)
-    for e in events:
-        try:
-            e["inspection"] = inspect_event(e)
-        except Exception:
-            e.setdefault("inspection", {})
+    lens_f = (request.args.get("lens") or "").strip()
+    fail_f = (request.args.get("fail") or "").strip()
+    tag_f = (request.args.get("tag") or "").strip()
+    source_f = (request.args.get("source") or "").strip()
+    since_f = (request.args.get("since") or "").strip()
+    q_f = (request.args.get("q") or "").strip()
+    day_f = (request.args.get("day") or "").strip() or None
+
+    # Full corpus for dashboard / hit-rate; sidebar uses filtered recent window
+    corpus = load_all_events()
+    if not corpus:
+        corpus = load_events(limit=500)
+
+    hall = load_hall_of_fame(limit=2000)
+    stats = dashboard_stats(corpus, hall, day=day_f)
+    production = [e for e in corpus if not str(e.get("source") or "").startswith("seed")]
+    hit_rate = hit_rate_by_month(production or corpus)
+
+    filtered = filter_events(
+        corpus,
+        lens=lens_f,
+        fail=fail_f,
+        tag=tag_f,
+        source=source_f,
+        since=since_f,
+        q=q_f,
+    )
+    # Default feed: highest stealability first (not "stuck on today / competent 6.0")
+    sort_f = (request.args.get("sort") or "steal").strip().lower()
+    if sort_f in {"steal", "stealability"}:
+        filtered = sorted(
+            filtered,
+            key=lambda e: float(
+                ((e.get("inspection") or {}).get("scores") or {}).get("stealability")
+                or ((e.get("inspection") or {}).get("scores") or {}).get("memorability")
+                or 0
+            ),
+            reverse=True,
+        )
+    # Sidebar: scannable window over the filtered corpus (filters still scan ALL)
+    try:
+        sidebar_limit = max(50, min(500, int(request.args.get("limit") or 200)))
+    except ValueError:
+        sidebar_limit = 200
+    sidebar_events = filtered[:sidebar_limit]
+    cards = [card_summary(e) for e in sidebar_events]
+
     selected_id = request.args.get("id")
     selected = None
     if selected_id:
-        selected = next((e for e in events if e.get("id") == selected_id), None)
+        selected = next((e for e in sidebar_events if e.get("id") == selected_id), None)
         if selected is None:
             selected = get_event(selected_id)
-            if selected is not None:
-                try:
-                    selected["inspection"] = inspect_event(selected)
-                except Exception:
-                    selected.setdefault("inspection", {})
     prev = None
     diff = None
+    teach = None
     if selected:
-        # previous in time = next in newest-first list
-        for i, e in enumerate(events):
-            if e.get("id") == selected.get("id") and i + 1 < len(events):
-                prev = events[i + 1]
+        ensure_inspection(selected)
+        for i, e in enumerate(sidebar_events):
+            if e.get("id") == selected.get("id") and i + 1 < len(sidebar_events):
+                prev = sidebar_events[i + 1]
                 break
-        diff_id = request.args.get("diff")
-        if diff_id:
-            other = get_event(diff_id)
-            if other:
-                try:
-                    other["inspection"] = inspect_event(other)
-                except Exception:
-                    other.setdefault("inspection", {})
-                diff = diff_events(other, selected)
-        elif prev:
-            diff = None  # only when explicitly requested
+        if request.args.get("diff") and prev:
+            diff = diff_events(prev, selected)
+        sents = (selected.get("inspection") or {}).get("sentences") or []
+        sent_i = request.args.get("sent")
+        if sent_i is not None and str(sent_i).isdigit():
+            idx = int(sent_i)
+            if 0 <= idx < len(sents):
+                s = sents[idx]
+                teach = sentence_teach(s.get("verdict") or "ok", s.get("text") or "", s.get("note") or "")
+                teach["index"] = idx
+        elif sents:
+            # Open on the weakest sentence so the page teaches immediately
+            priority = {"mechanism_summary": 0, "ok": 1, "bridge": 2, "strong": 3, "spear": 4, "discovery": 5}
+            idx = min(
+                range(len(sents)),
+                key=lambda i: priority.get(sents[i].get("verdict") or "ok", 9),
+            )
+            s = sents[idx]
+            if s.get("verdict") in {"mechanism_summary", "discovery", "spear", "strong"}:
+                teach = sentence_teach(s.get("verdict") or "ok", s.get("text") or "", s.get("note") or "")
+                teach["index"] = idx
+
+    filters = {
+        "lens": lens_f,
+        "fail": fail_f,
+        "tag": tag_f,
+        "source": source_f,
+        "since": since_f,
+        "q": q_f,
+        "day": day_f or stats.get("day") or "",
+    }
+
     return render_template(
         "inspector.html",
-        events=events,
+        events=sidebar_events,
+        cards=cards,
         selected=selected,
         prev=prev,
         diff=diff,
-        hall=load_hall_of_fame(limit=50),
-        lens_stats=aggregate_lens_stats(events),
+        teach=teach,
+        hall=hall,
+        stats=stats,
+        hit_rate=hit_rate,
+        filters=filters,
+        filter_count=len(filtered),
+        lens_stats=aggregate_lens_stats(corpus[:400]),
+        source_label=source_label,
     )
 
 
 @app.route("/inspector/hall", strict_slashes=False)
 def inspector_hall():
-    from inspector.store import load_hall_of_fame
+    from inspector.store import load_all_events, load_hall_of_fame
+    from inspector.telemetry import hall_notebook
 
-    return render_template("inspector_hall.html", hall=load_hall_of_fame(limit=500))
+    hall = load_hall_of_fame(limit=5000)
+    events = load_all_events()
+    notebook = hall_notebook(hall, events)
+    # Default to candidates — that's the 257, not the 3 manual stars
+    bucket = (request.args.get("bucket") or "candidates").strip().lower()
+    if bucket in {"discoveries", "starred"}:
+        bucket = "starred"
+    lens = (request.args.get("lens") or "").strip()
+    lines = notebook["candidates"]
+    if bucket == "starred":
+        lines = notebook["starred"]
+    elif bucket == "spears":
+        lines = notebook["spears"]
+    elif lens:
+        lines = notebook["by_lens"].get(lens, [])
+        bucket = lens
+    elif bucket in notebook["by_lens"]:
+        lines = notebook["by_lens"][bucket]
+
+    return render_template(
+        "inspector_hall.html",
+        hall=lines,
+        notebook=notebook,
+        bucket=bucket,
+        counts=notebook["counts"],
+    )
 
 
 @app.route("/inspector/star", methods=["POST"], strict_slashes=False)
@@ -156,13 +255,19 @@ def inspector_star():
 
     line = (request.form.get("line") or "").strip()
     if line:
+        stars = request.form.get("stars") or "5"
+        try:
+            stars_i = int(stars)
+        except ValueError:
+            stars_i = 5
         star_discovery(
             line,
             event_id=request.form.get("event_id") or "",
             lens=request.form.get("lens") or "",
             note=request.form.get("note") or "",
+            stars=stars_i,
         )
-    return redirect(url_for("inspector_hall"))
+    return redirect(url_for("inspector_hall", bucket="starred"))
 
 @app.route('/start-bot', methods=['POST'])
 def start_bot():

@@ -6,16 +6,19 @@
   <title>Moody Inspector</title>
   <style>
     :root {
-      --bg: #121212;
-      --panel: #1a1a1a;
-      --line: #2e2e2e;
-      --text: #e8e4df;
-      --muted: #9a948c;
-      --ok: #7d9a6f;
-      --fail: #c47a6a;
+      --bg: #101010;
+      --panel: #171717;
+      --line: #2a2a2a;
+      --text: #e7e2da;
+      --muted: #8f897f;
+      --ok: #6f9b64;
+      --fail: #c47868;
       --weak: #c4a36a;
-      --accent: #d4c4a8;
-      --mono: "IBM Plex Mono", "Consolas", monospace;
+      --accent: #d2c3a6;
+      --green: #6f9b64;
+      --yellow: #c4a36a;
+      --red: #c47868;
+      --mono: "IBM Plex Mono", Consolas, monospace;
       --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
@@ -24,99 +27,209 @@
       background: var(--bg);
       color: var(--text);
       font-family: var(--sans);
-      font-size: 15px;
+      font-size: 14px;
       line-height: 1.45;
     }
     header {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      padding: 1.25rem 1.5rem;
+      padding: 1rem 1.25rem;
       border-bottom: 1px solid var(--line);
     }
     header h1 {
       margin: 0;
-      font-size: 1.1rem;
+      font-size: 0.95rem;
       font-weight: 600;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--accent);
     }
-    header p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+    header p { margin: 0; color: var(--muted); font-size: 0.8rem; }
+    header a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
     .layout {
       display: grid;
-      grid-template-columns: 280px 1fr;
-      min-height: calc(100vh - 64px);
+      grid-template-columns: 300px 1fr;
+      min-height: calc(100vh - 56px);
     }
     nav {
       border-right: 1px solid var(--line);
-      padding: 0.75rem 0;
       overflow-y: auto;
-      max-height: calc(100vh - 64px);
+      max-height: calc(100vh - 56px);
+      background: #121212;
     }
-    nav a {
-      display: block;
-      padding: 0.65rem 1rem;
+    nav .nav-top {
+      padding: 0.75rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      background: #121212;
+      z-index: 2;
+    }
+    nav .nav-top a {
       color: var(--muted);
       text-decoration: none;
-      border-left: 3px solid transparent;
-      font-size: 0.85rem;
+      font-size: 0.78rem;
+      margin-right: 0.75rem;
     }
-    nav a:hover { color: var(--text); background: var(--panel); }
-    nav a.active {
+    nav .nav-top a.active { color: var(--accent); }
+    .card {
+      display: block;
+      padding: 0.75rem 0.9rem;
       color: var(--text);
-      border-left-color: var(--accent);
-      background: var(--panel);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+      border-left: 3px solid transparent;
     }
-    nav .meta { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 0.15rem; }
-    main { padding: 1.25rem 1.5rem 3rem; max-width: 820px; }
+    .card:hover { background: var(--panel); }
+    .card.active { background: var(--panel); border-left-color: var(--accent); }
+    .card.green { border-left-color: var(--green); }
+    .card.yellow { border-left-color: var(--yellow); }
+    .card.red { border-left-color: var(--red); }
+    .card .lens {
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .card .tagrow {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin: 0.2rem 0;
+      font-size: 0.82rem;
+    }
+    .card .tag { color: var(--accent); }
+    .card .score { font-family: var(--mono); color: var(--text); }
+    .card .teaser {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr;
+      padding: 1.1rem 1.25rem 3rem;
+      max-width: 1100px;
+    }
+    main.with-teach { grid-template-columns: 1fr 300px; gap: 1rem; max-width: 1280px; }
+    .stage { min-width: 0; }
     .section {
       border: 1px solid var(--line);
-      margin-bottom: 1rem;
+      margin-bottom: 0.85rem;
       background: var(--panel);
     }
     .section h2 {
       margin: 0;
-      padding: 0.55rem 0.9rem;
+      padding: 0.5rem 0.85rem;
       font-size: 0.72rem;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--muted);
       border-bottom: 1px solid var(--line);
-      font-weight: 600;
     }
-    .section .body {
-      padding: 0.9rem 1rem;
+    .body {
+      padding: 0.85rem;
       white-space: pre-wrap;
       font-family: var(--mono);
       font-size: 0.9rem;
     }
-    .row {
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.65rem;
+      padding: 0.85rem;
+    }
+    .stat {
+      border: 1px solid var(--line);
+      padding: 0.7rem 0.75rem;
+      background: #141414;
+    }
+    .stat .n {
+      font-family: var(--mono);
+      font-size: 1.55rem;
+      color: var(--accent);
+      line-height: 1.1;
+    }
+    .stat .l { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+    .hit {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+      gap: 0.4rem;
+      padding: 0.85rem;
+    }
+    .hit .m {
+      text-align: center;
+      border: 1px solid var(--line);
+      padding: 0.55rem 0.25rem;
+      background: #141414;
+    }
+    .hit .m .r { font-family: var(--mono); font-size: 1.05rem; color: var(--accent); }
+    .hit .m .d { color: var(--muted); font-size: 0.7rem; margin-top: 0.15rem; }
+    .filters {
       display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      padding: 0.45rem 1rem;
-      border-bottom: 1px solid var(--line);
-      font-size: 0.9rem;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      padding: 0.75rem 0.85rem;
+      align-items: center;
     }
-    .row:last-child { border-bottom: 0; }
-    .row .k { color: var(--muted); }
-    .row .v { text-align: right; max-width: 70%; }
-    .ok::before { content: "✓ "; color: var(--ok); }
-    .bad::before { content: "✗ "; color: var(--fail); }
-    .check {
-      padding: 0.7rem 1rem;
-      border-bottom: 1px solid var(--line);
+    .filters input, .filters select {
+      background: #141414;
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 0.35rem 0.5rem;
+      font: inherit;
     }
-    .check:last-child { border-bottom: 0; }
-    .check .name { font-weight: 600; }
-    .check.pass .name { color: var(--ok); }
-    .check.fail .name { color: var(--fail); }
-    .check.weak .name { color: var(--weak); }
-    .check .why { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
-    .check ul { margin: 0.35rem 0 0; padding-left: 1.1rem; color: var(--text); font-size: 0.85rem; }
-    .sent { padding: 0.65rem 1rem; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.88rem; }
-    .sent:last-child { border-bottom: 0; }
+    .filters button, .btn, button {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 0.35rem 0.65rem;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 0.82rem;
+    }
+    .filters button:hover, .btn:hover, button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .chip {
+      display: inline-block;
+      border: 1px solid var(--line);
+      padding: 0.25rem 0.5rem;
+      margin: 0.2rem 0.25rem 0.2rem 0;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.78rem;
+    }
+    .chip:hover { color: var(--accent); border-color: var(--accent); }
+    .prov {
+      display: inline-block;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      padding: 0.15rem 0.4rem;
+    }
+    .sent {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 0.7rem 0.85rem;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+    .sent:hover, .sent.active { background: #1e1e1e; }
     .sent .tag {
       display: inline-block;
       font-family: var(--sans);
@@ -126,58 +239,56 @@
       margin-right: 0.5rem;
       color: var(--muted);
     }
-    .sent.strong .tag, .sent.discovery .tag { color: var(--ok); }
-    .sent.mechanism_summary .tag { color: var(--fail); }
-    .sent .note { display: block; margin-top: 0.2rem; color: var(--muted); font-family: var(--sans); font-size: 0.8rem; }
+    .sent.discovery .tag, .sent.strong .tag, .sent.spear .tag { color: var(--ok); }
+    .sent.mechanism_summary .tag, .sent.generic .tag { color: var(--fail); }
+    .sent.bridge .tag { color: var(--weak); }
+    .teach {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+    }
+    .teach .pad { padding: 0.85rem; }
+    .teach .v {
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      margin: 0.4rem 0 0.8rem;
+    }
+    .teach .why { color: var(--muted); margin-bottom: 0.8rem; }
+    .teach ul { margin: 0; padding-left: 1rem; color: var(--ok); }
+    .teach li { margin-bottom: 0.4rem; }
     .scores {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 0;
+      gap: 0.5rem;
+      padding: 0.85rem;
     }
-    .scores div {
-      padding: 0.9rem 1rem;
-      border-right: 1px solid var(--line);
-      text-align: center;
-    }
-    .scores div:last-child { border-right: 0; }
-    .scores .n {
-      font-size: 1.6rem;
-      font-family: var(--mono);
-      color: var(--accent);
-    }
-    .scores .l { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-    .bars { padding: 1rem; }
-    .bar-row { margin-bottom: 0.75rem; }
-    .bar-row label {
+    .scores .n { font-family: var(--mono); font-size: 1.4rem; color: var(--accent); }
+    .scores .l { color: var(--muted); font-size: 0.72rem; }
+    .row {
       display: flex;
       justify-content: space-between;
-      font-size: 0.8rem;
-      color: var(--muted);
-      margin-bottom: 0.25rem;
-    }
-    .track { height: 8px; background: #262626; }
-    .fill { height: 8px; background: var(--accent); }
-    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0 1.25rem; }
-    button, .btn {
-      background: transparent;
-      border: 1px solid var(--line);
-      color: var(--text);
-      padding: 0.4rem 0.75rem;
-      font: inherit;
-      cursor: pointer;
-      text-decoration: none;
+      gap: 1rem;
+      padding: 0.45rem 0.85rem;
+      border-bottom: 1px solid var(--line);
       font-size: 0.85rem;
     }
-    button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
-    .diff { font-family: var(--mono); font-size: 0.85rem; padding: 0.9rem 1rem; }
-    .diff .was { color: var(--fail); }
-    .diff .now { color: var(--ok); }
-    .hall li { margin-bottom: 0.6rem; }
-    .hall .line { font-family: var(--mono); }
-    .hall .meta { color: var(--muted); font-size: 0.75rem; }
-    @media (max-width: 820px) {
+    .row .k { color: var(--muted); min-width: 7rem; }
+    .row .k.ok { color: var(--ok); }
+    .row .k.bad { color: var(--fail); }
+    .check { padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--line); }
+    .check .name { font-size: 0.82rem; }
+    .check.pass .name { color: var(--ok); }
+    .check.fail .name { color: var(--fail); }
+    .check.weak .name { color: var(--weak); }
+    .check .why { color: var(--muted); font-size: 0.8rem; margin-top: 0.2rem; }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.85rem; }
+    .muted { color: var(--muted); }
+    @media (max-width: 960px) {
       .layout { grid-template-columns: 1fr; }
-      nav { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--line); }
+      nav { max-height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
+      main.with-teach { grid-template-columns: 1fr; }
       .scores { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
@@ -185,35 +296,58 @@
 <body>
   <header>
     <h1>Moody Inspector</h1>
-    <p>{{ events|length }} events · debugger, not another brain</p>
+    <p>Debugger, not another brain · {{ stats.corpus_total }} in corpus</p>
+    <a href="{{ url_for('inspector_hall', bucket='candidates') }}">Hall of Fame →</a>
   </header>
   <div class="layout">
     <nav>
-      <a href="{{ url_for('inspector_home') }}" class="{% if not selected %}active{% endif %}">Dashboard</a>
-      <a href="{{ url_for('inspector_hall') }}">Hall of Fame ({{ hall|length }})</a>
-      {% for e in events %}
-      <a href="{{ url_for('inspector_home', id=e.id) }}" class="{% if selected and selected.id == e.id %}active{% endif %}">
-        {{ (e.diagnostics.lens or e.diagnostics.interpretive_lens or '—')[:28] }}
-        <span class="meta">{{ e.ts[:16].replace('T',' ') }} · {{ (e.inspection.editor.opening_move if e.inspection else '') }}</span>
+      <div class="nav-top">
+        <a href="{{ url_for('inspector_home', sort='steal') }}" class="{% if not selected and not filters.fail and not filters.lens and not filters.tag %}active{% endif %}">Corpus</a>
+        <a href="{{ url_for('inspector_home', tag='Discovery', sort='steal') }}">Discoveries</a>
+        <a href="{{ url_for('inspector_hall', bucket='candidates') }}">Notebook</a>
+        <span class="muted" style="font-size:0.72rem">{{ cards|length }} of {{ filter_count }} · corpus {{ stats.corpus_total }}</span>
+      </div>
+      {% for c in cards %}
+      <a class="card {{ c.tone }} {% if selected and selected.id == c.id %}active{% endif %}"
+         href="{{ url_for('inspector_home', id=c.id, lens=filters.lens, fail=filters.fail, tag=filters.tag, source=filters.source, since=filters.since, q=filters.q) }}">
+        <div class="lens">{{ c.lens }}</div>
+        <div class="tagrow">
+          <span class="tag">{% if c.stars %}{{ c.stars }} {% endif %}{{ c.tag }}</span>
+          <span class="score">{{ c.stealability }}</span>
+        </div>
+        <div class="teaser">{{ c.teaser }}</div>
       </a>
       {% endfor %}
+      {% if not cards %}
+      <p class="muted" style="padding:1rem;font-size:0.85rem">No responses yet. Run <code>python -m inspector import-log</code> or <code>seed</code>.</p>
+      {% endif %}
     </nav>
-    <main>
+
+    <main class="{% if selected and teach %}with-teach{% endif %}">
+      <div class="stage">
       {% if selected %}
         {% set insp = selected.inspection or {} %}
         {% set d = selected.diagnostics or {} %}
         {% set ed = insp.editor or {} %}
         {% set sc = insp.scores or {} %}
+        {% set steal = sc.get('stealability', sc.get('memorability', 0)) %}
 
         <div class="actions">
+          <span class="prov">Source: {{ source_label(selected.source) }}</span>
           <form method="post" action="{{ url_for('inspector_star') }}" style="display:inline">
             <input type="hidden" name="event_id" value="{{ selected.id }}" />
-            <input type="hidden" name="lens" value="{{ d.lens or '' }}" />
+            <input type="hidden" name="lens" value="{{ d.lens or d.interpretive_lens or '' }}" />
             <input type="hidden" name="line" value="{{ ed.discovery_line or ed.opening }}" />
+            <input type="hidden" name="stars" value="5" />
             <button type="submit">★ Star discovery</button>
           </form>
           {% if prev %}
-          <a class="btn" href="{{ url_for('inspector_home', id=selected.id, diff=prev.id) }}">Diff vs previous</a>
+          <a class="btn" href="{{ url_for('inspector_home', id=selected.id, diff='1', lens=filters.lens, fail=filters.fail) }}">Diff vs previous</a>
+          {% endif %}
+          {% if d.lens or d.interpretive_lens %}
+          <a class="chip" href="{{ url_for('inspector_home', lens=d.lens or d.interpretive_lens, fail='Last line') }}">
+            All {{ d.lens or d.interpretive_lens }} × Last-line trap
+          </a>
           {% endif %}
         </div>
 
@@ -223,25 +357,36 @@
         </div>
 
         <div class="section">
-          <h2>Output</h2>
-          <div class="body">{{ selected.output }}</div>
-        </div>
-
-        {% if insp.sentences %}
-        <div class="section">
-          <h2>Sentences</h2>
-          {% for s in insp.sentences %}
-          <div class="sent {{ s.verdict }}">
-            <span class="tag">{{ s.verdict }}</span>{{ s.text }}
-            {% if s.note %}<span class="note">{{ s.note }}</span>{% endif %}
-          </div>
+          <h2>Output — click a sentence</h2>
+          {% for s in insp.sentences or [] %}
+          <a class="sent {{ s.verdict }} {% if teach and teach.index == loop.index0 %}active{% endif %}"
+             href="{{ url_for('inspector_home', id=selected.id, sent=loop.index0, lens=filters.lens, fail=filters.fail, tag=filters.tag, source=filters.source) }}">
+            <span class="tag">
+              {% if s.verdict == 'discovery' %}⭐⭐⭐ Discovery
+              {% elif s.verdict == 'spear' %}⭐ Spear
+              {% elif s.verdict == 'strong' %}✓ Strong
+              {% elif s.verdict == 'bridge' %}✓ Bridge
+              {% elif s.verdict == 'mechanism_summary' %}⚠ Mechanism summary
+              {% elif s.verdict == 'generic' %}⚠ Generic mechanism
+              {% else %}· Ok{% endif %}
+            </span>{{ s.text }}
+          </a>
           {% endfor %}
         </div>
-        {% endif %}
+
+        <div class="section">
+          <h2>Stealability</h2>
+          <div class="scores">
+            <div><div class="n">{{ steal }}</div><div class="l">Stealability</div></div>
+            <div><div class="n">{{ sc.architecture }}</div><div class="l">Architecture</div></div>
+            <div><div class="n">{{ sc.lens_fidelity }}</div><div class="l">Lens fidelity</div></div>
+            <div><div class="n">{{ sc.writing }}</div><div class="l">Writing</div></div>
+          </div>
+        </div>
 
         <div class="section">
           <h2>Pipeline</h2>
-          {% for p in insp.pipeline %}
+          {% for p in insp.pipeline or [] %}
           <div class="row">
             <span class="k {% if p.ok %}ok{% else %}bad{% endif %}">{{ p.label }}</span>
             <span class="v">{{ p.value }}</span>
@@ -250,17 +395,8 @@
         </div>
 
         <div class="section">
-          <h2>Editor</h2>
-          <div class="row"><span class="k">Paragraphs</span><span class="v">{{ ed.paragraphs }}</span></div>
-          <div class="row"><span class="k">Words</span><span class="v">{{ ed.words }}</span></div>
-          <div class="row"><span class="k">Mechanisms</span><span class="v">{{ ed.mechanisms }}</span></div>
-          <div class="row"><span class="k">Opening move</span><span class="v">{{ ed.opening_move }}</span></div>
-          <div class="row"><span class="k">Spear</span><span class="v">{{ ed.spear_line or '—' }}</span></div>
-        </div>
-
-        <div class="section">
           <h2>Checks</h2>
-          {% for c in insp.checks %}
+          {% for c in insp.checks or [] %}
           <div class="check {{ c.status }}">
             <div class="name">{{ c.name }} — {{ c.status|upper }}</div>
             {% if c.why %}<div class="why">{{ c.why }}</div>{% endif %}
@@ -271,60 +407,126 @@
           {% endfor %}
         </div>
 
-        <div class="section">
-          <h2>Final score</h2>
-          <div class="scores">
-            <div><div class="n">{{ sc.architecture }}</div><div class="l">Architecture</div></div>
-            <div><div class="n">{{ sc.lens_fidelity }}</div><div class="l">Lens fidelity</div></div>
-            <div><div class="n">{{ sc.writing }}</div><div class="l">Writing</div></div>
-            <div><div class="n">{{ sc.memorability }}</div><div class="l">Memorability</div></div>
-          </div>
-        </div>
-
         {% if diff %}
         <div class="section">
           <h2>Diff</h2>
-          <div class="diff">
-            <div>Opening changed: <strong>{{ 'YES' if diff.opening_changed else 'NO' }}</strong></div>
-            <div class="was">Was ({{ diff.opening_move_a }}): {{ diff.opening_a }}</div>
-            <div class="now">Now ({{ diff.opening_move_b }}): {{ diff.opening_b }}</div>
-            <div style="margin-top:0.6rem">Structure changed: <strong>{{ 'YES' if diff.structure_changed else 'NO' }}</strong>
-              ({{ diff.structure_a }} → {{ diff.structure_b }})</div>
-            <div>Memorability: {{ diff.memorability_a }} → {{ diff.memorability_b }}</div>
+          <div class="body" style="white-space:normal">
+            <div>Opening: <span class="muted">{{ diff.opening_move_a }}</span> → <strong>{{ diff.opening_move_b }}</strong></div>
+            <div style="margin-top:0.5rem;color:var(--fail)">{{ diff.opening_a }}</div>
+            <div style="color:var(--ok)">{{ diff.opening_b }}</div>
+            <div style="margin-top:0.6rem">Stealability: {{ diff.stealability_a }} → {{ diff.stealability_b }}</div>
           </div>
         </div>
         {% endif %}
 
       {% else %}
         <div class="section">
-          <h2>Lens trends</h2>
-          <div class="bars">
-            {% for b in lens_stats %}
-            <div class="bar-row">
-              <label><span>{{ b.lens }} (n={{ b.n }})</span><span>memorability {{ b.memorability }}/10</span></label>
-              <div class="track"><div class="fill" style="width: {{ (b.memorability * 10)|int }}%"></div></div>
-            </div>
-            <div class="bar-row">
-              <label><span>{{ b.lens }} writing</span><span>{{ b.writing }}/10</span></label>
-              <div class="track"><div class="fill" style="width: {{ (b.writing * 10)|int }}%"></div></div>
-            </div>
-            <div class="bar-row">
-              <label><span>{{ b.lens }} relocation share</span><span>{{ (b.relocation_share * 100)|int }}%</span></label>
-              <div class="track"><div class="fill" style="width: {{ (b.relocation_share * 100)|int }}%"></div></div>
+          <h2>Corpus · {{ stats.date_from }} → {{ stats.date_to }} · {{ stats.corpus_total }} responses</h2>
+          <div class="stats">
+            <div class="stat"><div class="n">{{ stats.total }}</div><div class="l">Total analyzed</div></div>
+            <div class="stat"><a href="{{ url_for('inspector_home', tag='Discovery', sort='steal') }}" style="color:inherit;text-decoration:none"><div class="n">{{ stats.discoveries }}</div><div class="l">⭐ Discoveries ({{ stats.hit_rate_pct }}%)</div></a></div>
+            <div class="stat"><a href="{{ url_for('inspector_home', fail='Last line') }}" style="color:inherit;text-decoration:none"><div class="n">{{ stats.last_line_traps }}</div><div class="l">⚠ Last-line traps</div></a></div>
+            <div class="stat"><a href="{{ url_for('inspector_home', fail='mechanism summary') }}" style="color:inherit;text-decoration:none"><div class="n">{{ stats.mechanism_summaries }}</div><div class="l">⚠ Mechanism summaries</div></a></div>
+            <div class="stat"><a href="{{ url_for('inspector_hall', bucket='candidates') }}" style="color:inherit;text-decoration:none"><div class="n">{{ stats.hof_candidates }}</div><div class="l">⭐ Hall candidates →</div></a></div>
+            <div class="stat"><div class="n">{{ stats.steal_mean }}</div><div class="l">Mean stealability</div></div>
+            <div class="stat"><div class="n" style="font-size:1rem;padding-top:0.35rem">{{ stats.drifting_lens }}</div><div class="l">Most drifting lens</div></div>
+            <div class="stat"><div class="n" style="font-size:1rem;padding-top:0.35rem">{{ stats.improved_lens }}</div><div class="l">Most improved lens</div></div>
+          </div>
+        </div>
+
+        {% if stats.today %}
+        <div class="section">
+          <h2>Latest production day · {{ stats.today.day }}</h2>
+          <div class="stats">
+            <div class="stat"><div class="n">{{ stats.today.total }}</div><div class="l">That day</div></div>
+            <div class="stat"><div class="n">{{ stats.today.discoveries }}</div><div class="l">⭐ Discoveries</div></div>
+            <div class="stat"><div class="n">{{ stats.today.last_line_traps }}</div><div class="l">⚠ Last-line traps</div></div>
+            <div class="stat"><div class="n">{{ stats.today.mechanism_summaries }}</div><div class="l">⚠ Mechanism summaries</div></div>
+            <div class="stat"><div class="n">{{ stats.today.hit_rate_pct }}%</div><div class="l">Hit rate</div></div>
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="section">
+          <h2>Killer filter</h2>
+          <div class="filters">
+            <form method="get" action="{{ url_for('inspector_home') }}" style="display:flex;flex-wrap:wrap;gap:0.45rem;width:100%">
+              <input name="lens" placeholder="Lens (e.g. Emotional Intelligence)" value="{{ filters.lens }}" style="min-width:220px;flex:1" />
+              <select name="fail">
+                <option value="">Any failure</option>
+                <option value="Last line" {% if filters.fail == 'Last line' %}selected{% endif %}>Last-line trap</option>
+                <option value="mechanism summary" {% if filters.fail == 'mechanism summary' %}selected{% endif %}>Mechanism summary</option>
+                <option value="Surface QA" {% if filters.fail == 'Surface QA' %}selected{% endif %}>Surface QA</option>
+                <option value="Spokenness" {% if filters.fail == 'Spokenness' %}selected{% endif %}>Spokenness</option>
+                <option value="Over-confirming" {% if filters.fail == 'Over-confirming' %}selected{% endif %}>Over-confirming</option>
+              </select>
+              <select name="source">
+                <option value="">Any source</option>
+                <option value="moodybot.log" {% if filters.source == 'moodybot.log' %}selected{% endif %}>moodybot.log</option>
+                <option value="live" {% if filters.source == 'live' %}selected{% endif %}>live telemetry</option>
+                <option value="seed" {% if filters.source == 'seed' %}selected{% endif %}>seeded</option>
+              </select>
+              <input name="q" placeholder="Search text" value="{{ filters.q }}" />
+              <button type="submit">Show examples</button>
+            </form>
+          </div>
+          <div style="padding:0 0.85rem 0.85rem">
+            <a class="chip" href="{{ url_for('inspector_home', lens='Emotional Intelligence', fail='Last line') }}">EI × Last-line trap</a>
+            <a class="chip" href="{{ url_for('inspector_home', fail='mechanism summary') }}">All mechanism summaries</a>
+            <a class="chip" href="{{ url_for('inspector_home', tag='Discovery') }}">Discoveries only</a>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Hall of Fame hit rate</h2>
+          <div class="hit">
+            {% for h in hit_rate %}
+            <div class="m">
+              <div class="r">{{ h.rate }}%</div>
+              <div class="d">{{ h.month[5:] if h.month|length >= 7 else h.month }} · n={{ h.n }}</div>
             </div>
             {% endfor %}
-            {% if not lens_stats %}
-            <p style="color:var(--muted);padding:0.5rem 0">No events yet. Live Telegram replies will appear here after the next deploy, or run <code>python -m inspector seed</code>.</p>
+            {% if not hit_rate %}
+            <p class="muted" style="padding:0.5rem">Import the log to see steal rate over time.</p>
             {% endif %}
           </div>
-        </div>
-        <div class="section">
-          <h2>How to use</h2>
-          <div class="body" style="white-space:normal;color:var(--muted)">
-            Open a response from the left. Pipeline and Editor are the logs you used to scroll for.
-            Checks are clickable failures with examples. Star a discovery to grow the Hall of Fame corpus.
+          <div class="body muted" style="white-space:normal;border-top:1px solid var(--line)">
+            Not word count. How often does Moody accidentally create something worth stealing?
           </div>
         </div>
+
+        <div class="section">
+          <h2>How to use</h2>
+          <div class="body muted" style="white-space:normal">
+            Start with today's pages. Mark unforgettable lines. Circle weak closes.
+            <br /><br />
+            <code>python -m inspector import-log moodybot_log.txt</code><br />
+            <code>python -m inspector rebuild</code><br />
+            Corpus: moodybot.log · Telemetry: events.jsonl
+          </div>
+        </div>
+      {% endif %}
+      </div>
+
+      {% if selected and teach %}
+      <aside class="teach">
+        <h2 style="margin:0;padding:0.5rem 0.85rem;font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)">Sentence</h2>
+        <div class="pad">
+          <div class="v">{{ teach.text }}</div>
+          <div class="l muted" style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.06em">Verdict</div>
+          <div style="margin:0.25rem 0 0.75rem;color:var(--accent)">{{ teach.verdict }}</div>
+          <div class="l muted" style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.06em">Why</div>
+          <div class="why">{{ teach.why }}</div>
+          {% if teach.examples %}
+          <div class="l muted" style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.06em">Examples</div>
+          <ul>
+            {% for ex in teach.examples %}
+            <li>✓ {{ ex }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </aside>
       {% endif %}
     </main>
   </div>
