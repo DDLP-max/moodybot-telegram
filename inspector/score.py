@@ -274,6 +274,56 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     else:
         add("Surface QA", "pass", "clean typography")
 
+    # Paraphrase collapse — prompt already had the insight; response added none
+    try:
+        from discovery_craft import (
+            paraphrase_collapse,
+            prompt_has_discovery,
+            response_adds_discovery,
+            discovery_sentences,
+        )
+
+        prompt_disc = prompt_has_discovery(prompt)
+        added = response_adds_discovery(prompt, out)
+        collapsed = paraphrase_collapse(prompt, out) or (
+            "paraphrase_collapse" in failures
+        )
+        if collapsed:
+            examples = []
+            for s in discovery_sentences(prompt)[:1]:
+                examples.append(f"prompt discovery: {s[:140]}")
+            examples.append("✓ That's like saying a prison cell is just a room.")
+            examples.append(
+                "✓ Most breakups don't begin when someone wants to leave. "
+                "They begin when someone wants to leave without carrying the guilt."
+            )
+            examples.append(f"✗ {ending[:140]}")
+            add(
+                "Paraphrase collapse",
+                "fail",
+                "preserves the prompt's conclusion instead of contributing a new one — author already did Moody's job; escape the frame",
+                examples=examples,
+            )
+        elif prompt_disc and added:
+            add(
+                "Paraphrase collapse",
+                "pass",
+                "prompt had the insight; response escaped the frame / added another",
+                examples=[
+                    "✓ That's like saying a prison cell is just a room.",
+                ],
+            )
+        elif prompt_disc:
+            add(
+                "Paraphrase collapse",
+                "weak",
+                "author may already have done Moody's job — rotate, deepen, challenge, or reveal adjacent; never summarize",
+            )
+        else:
+            add("Paraphrase collapse", "pass", "prompt did not already contain the insight")
+    except Exception:
+        pass
+
     if last_is_summary or last_is_generic:
         add(
             "Last line",

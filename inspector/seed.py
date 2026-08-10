@@ -208,6 +208,35 @@ SAMPLES.append(
 )
 
 
+SAMPLES.append(
+    {
+        "prompt": (
+            '"We want different things now."\n\nSure.\n\n'
+            "You wanted forever. She wanted an exit that didn't make her the bad guy. "
+            "Let her have the softer story."
+        ),
+        "output": "Sure. You wanted forever. Let her have the softer story. 🥃",
+        "diagnostics": {
+            "claim_domain": "emotional",
+            "lens": "Emotional Intelligence",
+            "interpretive_lens": "Emotional Intelligence",
+            "response_budget": "low",
+            "preferred_structure": "SNAP",
+            "routing_structure": "SNAP",
+            "selected_structure": "SNAP",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "paraphrase_collapse",
+            "premise_relocated": "false",
+            "dominant_mechanism_count": "1",
+        },
+        "source": "seed-paraphrase-collapse",
+    }
+)
+
+
 def main() -> None:
     last = None
     for s in SAMPLES:

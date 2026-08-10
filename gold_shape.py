@@ -445,6 +445,15 @@ def evaluate_gold_shape(
     if detect_mechanism_mismatch(user_message, body):
         failures.append("mechanism_mismatch")
 
+    # Prompt has the insight; response only abridges it — zero new value
+    try:
+        from discovery_craft import paraphrase_collapse
+
+        if paraphrase_collapse(user_message, body):
+            failures.append("paraphrase_collapse")
+    except Exception:
+        pass
+
     # Soft length by shape × depth (not rigid; not "always ~60 words")
     if structure == "SNAP" and wc > caps["SNAP"]:
         failures.append("snap_overlong")
@@ -494,15 +503,54 @@ def _strip_tail_noise(sentence: str) -> str:
     return last
 
 
-def _drop_over_confirming_sentences(ss: List[str]) -> List[str]:
-    """Keep forward motion — delete lines that only restate earlier proof."""
+def _drop_over_confirming_sentences(
+    ss: List[str],
+    *,
+    protect: bool = False,
+) -> List[str]:
+    """Keep forward motion — delete lines that only restate earlier proof.
+
+    Discovery sentences are protected when protect=True.
+    """
     if len(ss) < 3:
         return ss
+    protected: set = set()
+    if protect:
+        try:
+            from discovery_craft import protected_discovery_indices
+
+            protected = protected_discovery_indices(ss)
+        except Exception:
+            protected = set()
     kept: List[str] = [ss[0]]
-    for s in ss[1:]:
+    for i, s in enumerate(ss[1:], start=1):
+        if i in protected:
+            kept.append(s)
+            continue
         if len(words(s)) >= 8 and any(_overlap_ratio(s, k) >= 0.52 for k in kept):
-            # Allow one short spear-like contrast even with overlap
             if SPEAR_MARKERS.search(s) and len(words(s)) <= 18:
+                kept.append(s)
+            continue
+        kept.append(s)
+    return kept if kept else ss
+
+
+def _drop_premise_echoes(ss: List[str], user_message: str) -> List[str]:
+    """Drop user-echo sentences — never delete discovery lines."""
+    try:
+        from discovery_craft import looks_like_discovery
+    except Exception:
+
+        def looks_like_discovery(_s: str) -> bool:
+            return False
+
+    kept: List[str] = []
+    for s in ss:
+        if looks_like_discovery(s):
+            kept.append(s)
+            continue
+        if _overlap_ratio(s, user_message) >= 0.65 and len(words(s)) >= 8:
+            if SPEAR_MARKERS.search(s) and len(words(s)) <= 20:
                 kept.append(s)
             continue
         kept.append(s)
@@ -527,22 +575,24 @@ def _compress_paragraph_units(
             continue
         # Within-paragraph sentence restatement
         compact: List[str] = [ss[0]]
-        for s in ss[1:]:
+        protected = set()
+        try:
+            from discovery_craft import protected_discovery_indices
+
+            protected = protected_discovery_indices(ss)
+        except Exception:
+            protected = set()
+        for i, s in enumerate(ss[1:], start=1):
+            if i in protected:
+                compact.append(s)
+                continue
             if _overlap_ratio(s, compact[-1]) >= 0.68:
                 continue
             compact.append(s)
         if "over_confirming" in failures or "paragraph_restatement" in failures:
-            compact = _drop_over_confirming_sentences(compact)
+            compact = _drop_over_confirming_sentences(compact, protect=True)
         if "premise_restatement" in failures:
-            compact = [
-                s
-                for s in compact
-                if not (
-                    _overlap_ratio(s, user_message) >= 0.65
-                    and len(words(s)) >= 8
-                    and not (SPEAR_MARKERS.search(s) and len(words(s)) <= 20)
-                )
-            ] or compact
+            compact = _drop_premise_echoes(compact, user_message)
         para = " ".join(compact).strip()
         para = re.sub(r"[ \t]{2,}", " ", para)
         if para:
@@ -609,22 +659,23 @@ def _compress_once(
     if not ss:
         return body
 
-    # Drop sentences that mostly restate the user
+    # Drop sentences that mostly restate the user — never delete discoveries
     if "premise_restatement" in failures or "thesis_repetition" in failures:
-        kept: List[str] = []
-        for s in ss:
-            if _overlap_ratio(s, user_message) >= 0.65 and len(words(s)) >= 8:
-                if SPEAR_MARKERS.search(s) and len(words(s)) <= 20:
-                    kept.append(s)
-                continue
-            kept.append(s)
-        if kept:
-            ss = kept
+        ss = _drop_premise_echoes(ss, user_message)
 
     # Drop near-duplicate consecutive sentences (keep stronger/shorter)
     if len(ss) >= 2:
+        try:
+            from discovery_craft import protected_discovery_indices
+
+            protected = protected_discovery_indices(ss)
+        except Exception:
+            protected = set()
         compact: List[str] = [ss[0]]
-        for s in ss[1:]:
+        for i, s in enumerate(ss[1:], start=1):
+            if i in protected:
+                compact.append(s)
+                continue
             prev = compact[-1]
             if _overlap_ratio(s, prev) >= 0.68:
                 if len(words(s)) < len(words(prev)) and SPEAR_MARKERS.search(s):
@@ -634,7 +685,7 @@ def _compress_once(
         ss = compact
 
     if "over_confirming" in failures or (keep_paragraphs and len(ss) >= 5):
-        ss = _drop_over_confirming_sentences(ss)
+        ss = _drop_over_confirming_sentences(ss, protect=True)
 
     # Stacked metaphor: if 2+ like-a, try to drop later metaphor sentences
     if count_like_metaphors(" ".join(ss)) >= 2:
@@ -705,7 +756,13 @@ def _compress_once(
                     keep_idx.add(i)
             ss = [s for i, s in enumerate(ss) if i in keep_idx]
         else:
-            keep_idx = {0}
+            try:
+                from discovery_craft import protected_discovery_indices
+
+                protect_idx = protected_discovery_indices(ss)
+            except Exception:
+                protect_idx = set()
+            keep_idx = {0} | protect_idx
             if spear_i >= 0:
                 keep_idx.add(spear_i)
             if len(ss) > 1:
@@ -811,13 +868,34 @@ def apply_gold_shape_pass(
             user_message, body, structure, failures, response_budget=budget
         )
         if strip_whiskey(compressed) and _token_set(compressed):
-            report.quality_rewrite_triggered = True
-            body = strip_whiskey(compressed)
-            # re-evaluate lightly (no second rewrite)
-            report.quality_failures = evaluate_gold_shape(
-                user_message, body, structure, response_budget=budget
-            )
-            report.mechanism_mismatch = "mechanism_mismatch" in report.quality_failures
+            # Never accept a compression that deletes the discovery / worsens paraphrase collapse
+            try:
+                from discovery_craft import paraphrase_collapse
+
+                before = paraphrase_collapse(user_message, body)
+                after = paraphrase_collapse(user_message, compressed)
+                if after and not before:
+                    compressed = body
+                elif after and before:
+                    # Prefer the version that still contains a discovery-shaped line
+                    from discovery_craft import discovery_sentences
+
+                    if discovery_sentences(body) and not discovery_sentences(compressed):
+                        compressed = body
+            except Exception:
+                pass
+            if strip_whiskey(compressed) != strip_whiskey(body):
+                report.quality_rewrite_triggered = True
+                body = strip_whiskey(compressed)
+                report.quality_failures = evaluate_gold_shape(
+                    user_message, body, structure, response_budget=budget
+                )
+                report.mechanism_mismatch = "mechanism_mismatch" in report.quality_failures
+            else:
+                report.quality_failures = evaluate_gold_shape(
+                    user_message, body, structure, response_budget=budget
+                )
+                report.mechanism_mismatch = "mechanism_mismatch" in report.quality_failures
 
     spear_ok, spear, _ = detect_spear(sentences(body))
     report.spear_detected = spear_ok
