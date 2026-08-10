@@ -447,10 +447,12 @@ def evaluate_gold_shape(
 
     # Prompt has the insight; response only abridges it — zero new value
     try:
-        from discovery_craft import paraphrase_collapse
+        from discovery_craft import paraphrase_collapse, mechanism_drift
 
         if paraphrase_collapse(user_message, body):
             failures.append("paraphrase_collapse")
+        if mechanism_drift(user_message, body):
+            failures.append("mechanism_drift")
     except Exception:
         pass
 

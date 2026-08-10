@@ -155,6 +155,28 @@ PASS (one level deeper on the same breakup):
 
 Editor may protect discoveries during compression — but generation must still *contribute*. Summarizing the author's insight is not Moody.
 
+### Mechanism drift: favorite drawer, not prompt spine
+
+**Definition:** The response introduces a plausible emotional mechanism that isn't the strongest explanation of the prompt.
+
+Not wrong. Just not the best fit. Lens refinement — not architecture.
+
+FAIL (effort → rejection fear):
+
+> Effort is attractive because it removes the escape hatch… what they actually want is the feeling of being chosen without ever having to watch someone risk being refused.
+
+PASS:
+
+> Effort isn't attractive because it's romantic. It's attractive because it's evidence.
+
+> Effort is attractive because it answers a question words never can. "Are you willing to inconvenience yourself for me?" Everything else is marketing.
+
+Suspicious when automatic:
+
+- what they actually want…
+- the real problem is…
+- it isn't about…
+
 ---
 
 ## Pattern Recognition / social mechanism

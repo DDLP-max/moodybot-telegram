@@ -134,6 +134,90 @@ def paraphrase_collapse(user_message: str, response: str) -> bool:
     return False
 
 
+# Drawer shortcuts — sometimes brilliant, often favorite-mechanism inserts
+_DRAWER_SHORTCUT = re.compile(
+    r"\bwhat they actually want\b|"
+    r"\bwhat (he|she|people) actually (want|wanted|need|needed)\b|"
+    r"\bthe real (problem|reason|issue|engine|question|fear) is\b|"
+    r"\bit isn'?t (really )?about\b|"
+    r"\bthat'?s not (really )?about\b|"
+    r"\bthe (real )?problem isn'?t\b",
+    re.I,
+)
+
+# EI favorite drawers that steal the topic
+_REJECTION_FEAR_DRAWER = re.compile(
+    r"\bescape hatch\b|\bbeing refused\b|\bturned down\b|"
+    r"\bfear of rejection\b|\brisk being refused\b|"
+    r"\bvisibility means\b|\bcan be (turned down|laughed at|ignored)\b",
+    re.I,
+)
+
+_EFFORT_TOPIC = re.compile(
+    r"\beffort\b|\bmake a plan\b|\bfollow through\b|\bexecut|"
+    r"\bthoughtful\b|\battractive quality\b",
+    re.I,
+)
+
+_INVENTED_SOCIOLOGY = re.compile(
+    r"\bsame people (complaining|who complain)\b|"
+    r"\balso the ones who never\b|"
+    r"\beveryone (is|who'?s) (single|childless)\b",  # only if response invents blame not in prompt
+    re.I,
+)
+
+
+def drawer_shortcut_present(response: str) -> bool:
+    return bool(_DRAWER_SHORTCUT.search(response or ""))
+
+
+def mechanism_drift(user_message: str, response: str) -> bool:
+    """
+    True when the response introduces a plausible emotional mechanism that
+    isn't the strongest fit for THIS prompt (favorite-drawer insert).
+
+    Not architecture — lens refinement. Not always wrong — often just not best.
+    """
+    user = user_message or ""
+    resp = response or ""
+    if not resp.strip():
+        return False
+
+    # Effort / evidence prompt → rejection-fear pivot
+    if _EFFORT_TOPIC.search(user) and _REJECTION_FEAR_DRAWER.search(resp):
+        # Drift if effort is no longer the spine, or drawer shortcut opens the pivot
+        effort_in_resp = bool(re.search(r"\beffort\b", resp, re.I))
+        if _DRAWER_SHORTCUT.search(resp) or not effort_in_resp:
+            return True
+        # "what they actually want" under an effort prompt = classic EI steal
+        if re.search(r"\bwhat they actually want\b", resp, re.I):
+            return True
+
+    # Invented sociology not grounded in the prompt
+    if _INVENTED_SOCIOLOGY.search(resp) and not _INVENTED_SOCIOLOGY.search(user):
+        # Only count as drift when paired with a drawer shortcut or topic steal
+        if _DRAWER_SHORTCUT.search(resp) or _REJECTION_FEAR_DRAWER.search(resp):
+            return True
+
+    return False
+
+
+def mechanism_drift_examples(user_message: str) -> List[str]:
+    """PASS lines grounded in common drifted prompts."""
+    if _EFFORT_TOPIC.search(user_message or ""):
+        return [
+            "✓ Effort isn't attractive because it's romantic. It's attractive because it's evidence.",
+            "✓ Effort is attractive because it answers a question words never can: "
+            "are you willing to inconvenience yourself for me?",
+            "✓ Attention is cheap. Effort isn't. That's why people trust one more than the other.",
+        ]
+    return [
+        "✓ Stay on the prompt's strongest mechanism — not EI's favorite drawer.",
+        "✓ That's like saying a prison cell is just a room.",
+    ]
+
+
 def protected_discovery_indices(draft_sentences: List[str]) -> Set[int]:
     """Indices Editor must not delete to satisfy brevity."""
     return {i for i, s in enumerate(draft_sentences) if looks_like_discovery(s)}
+

@@ -1,8 +1,8 @@
 {
   "section_count": 218,
-  "char_count": 246094,
-  "prompt_hash": "e0c2efe25935acfa",
-  "prompt_hash_sha256": "e0c2efe25935acfa9c8bd1f96762af16d73674cc8ddb86123869dedea197bcd3",
+  "char_count": 247853,
+  "prompt_hash": "0e8921b138808f0f",
+  "prompt_hash_sha256": "0e8921b138808f0fb2d4140c7394ca41a9e3d9232566da70ef1aaaf2532a3b5e",
   "final_20_sections": [
     "9_response-engine/thesis-discipline.md",
     "9_response-engine/thinking-vs-writing.md",

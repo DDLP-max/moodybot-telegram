@@ -329,6 +329,34 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Mechanism drift — plausible EI drawer that isn't the prompt's strongest fit
+    try:
+        from discovery_craft import (
+            mechanism_drift,
+            mechanism_drift_examples,
+            drawer_shortcut_present,
+        )
+
+        drifted = mechanism_drift(prompt, out) or ("mechanism_drift" in failures)
+        if drifted:
+            add(
+                "Mechanism drift",
+                "fail",
+                "plausible emotional mechanism that isn't the strongest fit for THIS prompt — favorite drawer, not prompt spine",
+                examples=mechanism_drift_examples(prompt)
+                + [f"✗ {ending[:140]}"],
+            )
+        elif drawer_shortcut_present(out):
+            add(
+                "Mechanism drift",
+                "weak",
+                "drawer shortcut present ('what they actually want' / 'the real problem is' / 'it isn't about') — sometimes brilliant, often a steal",
+            )
+        else:
+            add("Mechanism drift", "pass", "no favorite-drawer pivot detected")
+    except Exception:
+        pass
+
     if last_is_summary or last_is_generic:
         add(
             "Last line",

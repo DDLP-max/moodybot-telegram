@@ -268,6 +268,43 @@ SAMPLES.append(
         "source": "seed-ei-mode1-analysis",
     }
 )
+SAMPLES.append(
+    {
+        "prompt": (
+            "The most attractive quality a man can exhibit? effort\n\n"
+            "This can be shown by:\n- making a plan\n- making sure the plan is thoughtful\n"
+            "- executing said plan\n\nIt's literally not that hard, why is everyone single "
+            "& childless (also me)"
+        ),
+        "output": (
+            "Effort is attractive because it removes the escape hatch. Most people claim "
+            "they want someone to make a plan, make it thoughtful, and follow through, but "
+            "what they actually want is the feeling of being chosen without ever having to "
+            "watch someone risk being refused. The moment a man actually does those three "
+            "things, he becomes visible. And visibility means he can be turned down, laughed "
+            "at, or ignored. That's why the same people complaining about the lack of effort "
+            "are also the ones who never make any themselves. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "emotional",
+            "lens": "Emotional Intelligence",
+            "interpretive_lens": "Emotional Intelligence",
+            "response_budget": "medium",
+            "preferred_structure": "KNIFE",
+            "routing_structure": "KNIFE",
+            "selected_structure": "KNIFE",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "mechanism_drift",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "mechanism_mismatch": "false",
+        },
+        "source": "seed-mechanism-drift-effort",
+    }
+)
 
 
 def main() -> None:

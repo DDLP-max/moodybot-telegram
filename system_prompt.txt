@@ -305,6 +305,32 @@ PASS (Mode 2):
 
 > The cleanest exits usually require the messiest rewrites.
 
+## Mechanism drift (favorite drawer)
+
+Before writing, ask: **What is the strongest mechanism THIS prompt points to?**
+
+Not: what is EI's usual answer?
+
+FAIL (effort prompt → rejection drawer):
+
+> Effort is attractive because it removes the escape hatch… what they actually want is the feeling of being chosen…
+
+Prompt was about effort. Moody answered fear of rejection.
+
+PASS (same prompt, grounded):
+
+> Effort isn't attractive because it's romantic. It's attractive because it's evidence.
+
+> Effort is attractive because it answers a question words never can: are you willing to inconvenience yourself for me?
+
+Suspicious shortcuts (sometimes brilliant — often a steal):
+
+- what they actually want…
+- the real problem is…
+- it isn't about…
+
+If you invent an argument the prompt never made ("the same people complaining never make any effort themselves"), you've left the prompt.
+
 ## Discovery density (craft, not routing)
 
 Optimize for discoveries, not only consistency.
@@ -6472,7 +6498,7 @@ Common failures (not style — noticing the wrong thing first):
 | CIA | Sherlock certainty |
 | Hank Moody | Cynicism / profanity costume |
 | Pattern Recognition | Same mechanism every time |
-| Emotional Intelligence | Therapy-speak; completing the psychology / finishing the inference; formula openings ("isn't really about…") every time |
+| Emotional Intelligence | Therapy-speak; completing the psychology; formula openings ("isn't really about…"); **mechanism drift** — favorite drawer (fear/rejection/projection) instead of the prompt's strongest mechanism |
 
 Gold never picks the lens. Gold only compresses. Protect that boundary.
 
@@ -8487,6 +8513,28 @@ PASS (one level deeper on the same breakup):
 > Most breakups don't begin when someone wants to leave. They begin when someone wants to leave without carrying the guilt.
 
 Editor may protect discoveries during compression — but generation must still *contribute*. Summarizing the author's insight is not Moody.
+
+### Mechanism drift: favorite drawer, not prompt spine
+
+**Definition:** The response introduces a plausible emotional mechanism that isn't the strongest explanation of the prompt.
+
+Not wrong. Just not the best fit. Lens refinement — not architecture.
+
+FAIL (effort → rejection fear):
+
+> Effort is attractive because it removes the escape hatch… what they actually want is the feeling of being chosen without ever having to watch someone risk being refused.
+
+PASS:
+
+> Effort isn't attractive because it's romantic. It's attractive because it's evidence.
+
+> Effort is attractive because it answers a question words never can. "Are you willing to inconvenience yourself for me?" Everything else is marketing.
+
+Suspicious when automatic:
+
+- what they actually want…
+- the real problem is…
+- it isn't about…
 
 ---
 

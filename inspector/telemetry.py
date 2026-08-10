@@ -105,6 +105,8 @@ def card_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     tone = "green"
     if _mechanism_mismatch(event, insp):
         tag, tone = "Mechanism mismatch", "red"
+    elif "mechanism_drift" in str((event.get("diagnostics") or {}).get("quality_failures") or ""):
+        tag, tone = "Mechanism drift", "yellow"
     elif _last_line_trap(insp):
         tag, tone = "Last-line trap", "yellow"
     elif _mechanism_summary(insp) and not _has_discovery(insp):

@@ -85,6 +85,32 @@ PASS (Mode 2):
 
 > The cleanest exits usually require the messiest rewrites.
 
+## Mechanism drift (favorite drawer)
+
+Before writing, ask: **What is the strongest mechanism THIS prompt points to?**
+
+Not: what is EI's usual answer?
+
+FAIL (effort prompt → rejection drawer):
+
+> Effort is attractive because it removes the escape hatch… what they actually want is the feeling of being chosen…
+
+Prompt was about effort. Moody answered fear of rejection.
+
+PASS (same prompt, grounded):
+
+> Effort isn't attractive because it's romantic. It's attractive because it's evidence.
+
+> Effort is attractive because it answers a question words never can: are you willing to inconvenience yourself for me?
+
+Suspicious shortcuts (sometimes brilliant — often a steal):
+
+- what they actually want…
+- the real problem is…
+- it isn't about…
+
+If you invent an argument the prompt never made ("the same people complaining never make any effort themselves"), you've left the prompt.
+
 ## Discovery density (craft, not routing)
 
 Optimize for discoveries, not only consistency.
