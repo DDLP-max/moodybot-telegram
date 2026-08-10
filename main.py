@@ -89,15 +89,30 @@ def health_check():
     })
 
 
-@app.route("/inspector")
+@app.route("/inspector", strict_slashes=False)
 def inspector_home():
     """Moody Inspector — response debugger (logs → cards, not more routing)."""
-    from inspector.score import aggregate_lens_stats, diff_events
+    from inspector.score import aggregate_lens_stats, diff_events, inspect_event
     from inspector.store import get_event, load_events, load_hall_of_fame
 
     events = load_events(limit=300)
+    # Re-score on read so older JSONL rows get new fields (e.g. sentences)
+    for e in events:
+        try:
+            e["inspection"] = inspect_event(e)
+        except Exception:
+            e.setdefault("inspection", {})
     selected_id = request.args.get("id")
-    selected = get_event(selected_id) if selected_id else None
+    selected = None
+    if selected_id:
+        selected = next((e for e in events if e.get("id") == selected_id), None)
+        if selected is None:
+            selected = get_event(selected_id)
+            if selected is not None:
+                try:
+                    selected["inspection"] = inspect_event(selected)
+                except Exception:
+                    selected.setdefault("inspection", {})
     prev = None
     diff = None
     if selected:
@@ -110,6 +125,10 @@ def inspector_home():
         if diff_id:
             other = get_event(diff_id)
             if other:
+                try:
+                    other["inspection"] = inspect_event(other)
+                except Exception:
+                    other.setdefault("inspection", {})
                 diff = diff_events(other, selected)
         elif prev:
             diff = None  # only when explicitly requested
@@ -124,14 +143,14 @@ def inspector_home():
     )
 
 
-@app.route("/inspector/hall")
+@app.route("/inspector/hall", strict_slashes=False)
 def inspector_hall():
     from inspector.store import load_hall_of_fame
 
     return render_template("inspector_hall.html", hall=load_hall_of_fame(limit=500))
 
 
-@app.route("/inspector/star", methods=["POST"])
+@app.route("/inspector/star", methods=["POST"], strict_slashes=False)
 def inspector_star():
     from inspector.store import star_discovery
 

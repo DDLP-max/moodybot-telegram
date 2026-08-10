@@ -22,10 +22,63 @@ _SYSTEMS = re.compile(
 )
 _DISCOVERYISH = re.compile(
     r"^(every |people don'?t |threats |peace |consistency |the mirror |"
-    r"the fastest |a threat )\b|"
-    r"\bis autobiographical\b|\bexport (them|fear)\b",
+    r"the fastest |a threat |funny how )\b|"
+    r"\bis autobiographical\b|\bexport (them|fear)\b|"
+    r"\bonly become immoral\b|\bwhen you'?re the one being measured\b",
     re.I,
 )
+# Competent analysis that summarizes the mechanism instead of landing a discovery
+_MECHANISM_SUMMARY = re.compile(
+    r"\bisn'?t (really )?about\b.+\bit'?s about\b|"
+    r"\bthe (rule|point|issue|problem|move) isn'?t about\b|"
+    r"\bwhichever side\b|"
+    r"\bprotecting whichever\b|"
+    r"\bfeel(?:s|ing)? exposed by\b|"
+    r"\bthe other'?s standards\b|"
+    r"\bit'?s about protecting\b",
+    re.I,
+)
+_CONCRETE_SHARP = re.compile(
+    r"\b(breasts?|butt|legs?|waist|wallet|bank account|gold digger|"
+    r"on display|shallow|grade|measured|immoral)\b",
+    re.I,
+)
+
+
+def _sentences(text: str) -> List[str]:
+    body = re.sub(r"\s*🥃\s*", " ", text or "").strip()
+    if not body:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", body.replace("\n\n", " ").replace("\n", " "))
+    return [s.strip() for s in parts if s and s.strip()]
+
+
+def _verdict_sentence(s: str, *, is_last: bool) -> Dict[str, str]:
+    if _MECHANISM_SUMMARY.search(s):
+        return {
+            "text": s,
+            "verdict": "mechanism_summary",
+            "note": "explains the analysis — generic cash-out, not a discovery",
+        }
+    if _DISCOVERYISH.search(s) or (is_last and re.search(r"^funny how\b", s, re.I)):
+        return {
+            "text": s,
+            "verdict": "discovery",
+            "note": "stealable / memorable",
+        }
+    if _CONCRETE_SHARP.search(s) and len(s.split()) <= 28:
+        return {
+            "text": s,
+            "verdict": "strong",
+            "note": "concrete, spoken, sharpens the premise",
+        }
+    if is_last and _MECHANISM_SUMMARY.search(s):
+        return {
+            "text": s,
+            "verdict": "mechanism_summary",
+            "note": "last line summarizes instead of discovering",
+        }
+    return {"text": s, "verdict": "ok", "note": ""}
 
 
 def _truthy(v: Any) -> bool:
@@ -51,7 +104,16 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     opening = first_sentence(out)
     opening_move = classify_opening_move(out)
     ending = last_substantive_sentence(out)
-    discovery_line = opening if _DISCOVERYISH.search(opening) else ""
+    sent_rows = [
+        _verdict_sentence(s, is_last=(i == len(_sentences(out)) - 1))
+        for i, s in enumerate(_sentences(out))
+    ]
+    discovery_line = next(
+        (r["text"] for r in sent_rows if r["verdict"] == "discovery"),
+        opening if _DISCOVERYISH.search(opening) else "",
+    )
+    last_is_summary = bool(sent_rows) and sent_rows[-1]["verdict"] == "mechanism_summary"
+    strong_n = sum(1 for r in sent_rows if r["verdict"] in {"strong", "discovery"})
 
     checks: List[Dict[str, Any]] = []
 
@@ -144,6 +206,23 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     else:
         add("Spokenness", "pass", "would someone say this aloud? — no systems leaks caught")
 
+    if last_is_summary:
+        add(
+            "Last line",
+            "fail",
+            "mechanism summary / generic cash-out — routing can be right while distinctiveness fails",
+            examples=[
+                "✓ Funny how preferences only become immoral when you're the one being measured.",
+                f"✗ {ending[:160]}",
+            ],
+        )
+    elif discovery_line and ending == discovery_line:
+        add("Last line", "pass", "closes on a discovery", examples=[ending[:160]])
+    elif discovery_line:
+        add("Last line", "pass", "discovery elsewhere in the reply", examples=[discovery_line[:160]])
+    else:
+        add("Last line", "weak", "no discovery line — competent but forgettable", examples=[ending[:160]])
+
     if opening_move == "relocation" and not discovery_line:
         add(
             "Discovery",
@@ -155,9 +234,9 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             ],
         )
     elif discovery_line:
-        add("Discovery", "pass", "opening carries a stealable line", examples=[discovery_line])
-    elif opening_move in {"observation", "contradiction", "irony", "reversal", "image"}:
-        add("Discovery", "pass", f"opening move: {opening_move}", examples=[opening[:160]])
+        add("Discovery", "pass", "stealable line present", examples=[discovery_line])
+    elif strong_n >= 1 and not last_is_summary:
+        add("Discovery", "weak", "strong concrete lines, but no discovery close")
     else:
         add("Discovery", "weak", "no clear discovery line detected", examples=[opening[:160]])
 
@@ -168,7 +247,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             "lands on 'revealing the speaker' — allowed, becoming formula",
             examples=[ending[:160]],
         )
-    else:
+    elif not last_is_summary:
         add("Ending variety", "pass", ending[:120])
 
     # Scores 0–10
@@ -193,6 +272,10 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
         writing -= 2
     if "over_confirming" in failures:
         writing -= 2
+    if last_is_summary:
+        writing -= 1
+    if strong_n >= 1:
+        writing += 1
     if words > 0 and words < 25 and structure == "Extended KNIFE":
         writing -= 1
     writing = max(0, min(10, writing))
@@ -200,10 +283,14 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     memorability = 6
     if discovery_line:
         memorability = 9
-    elif opening_move in {"contradiction", "irony", "reversal", "image"}:
+    elif strong_n >= 2 and not last_is_summary:
         memorability = 8
+    elif opening_move in {"contradiction", "irony", "reversal", "image"}:
+        memorability = 7
     elif opening_move == "relocation":
         memorability = 5
+    if last_is_summary:
+        memorability -= 2
     if ending_is_reveal_speaker(out) and opening_move == "relocation":
         memorability -= 1
     memorability = max(0, min(10, memorability))
@@ -235,7 +322,9 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             "discovery_line": discovery_line,
             "spear_line": d.get("spear_line") or "",
             "quality_failures": failures,
+            "last_is_mechanism_summary": last_is_summary,
         },
+        "sentences": sent_rows,
         "checks": checks,
         "scores": {
             "architecture": architecture,

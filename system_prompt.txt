@@ -8341,6 +8341,21 @@ PASS (same mechanism, more discovery):
 
 Then spend the next paragraph proving it.
 
+### Last-line trap: mechanism summary
+
+Strong open + system close is a common failure. Routing can be perfect; distinctiveness still fails.
+
+FAIL (analysis cash-out):
+
+> Men get to grade your body like it's on display. You grade his bank account and suddenly you're shallow. The rule isn't about dignity. It's about protecting whichever side feels exposed by the other's standards.
+
+PASS (discovery close):
+
+> Men get to grade your body like it's on display. You look at his bank account and suddenly standards are offensive. Funny how preferences only become immoral when you're the one being measured.
+
+- Funny how preferences only become immoral when you're the one being measured.
+- Standards only become shallow when they point back at you.
+
 ---
 
 ## Pattern Recognition / social mechanism

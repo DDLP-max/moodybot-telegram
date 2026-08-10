@@ -3,6 +3,47 @@ from inspector.score import inspect_event
 from inspector.store import load_events, record_event, star_discovery
 
 
+def test_sentence_level_flags_mechanism_summary_close():
+    event = {
+        "prompt": "gold digger wallet",
+        "output": (
+            "Men get to grade your body like it's on display. You grade his bank account and "
+            "suddenly you're shallow. The rule isn't about dignity. It's about protecting "
+            "whichever side feels exposed by the other's standards. 🥃"
+        ),
+        "diagnostics": {
+            "lens": "Pattern Recognition",
+            "routing_structure": "SNAP",
+            "response_budget": "low",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_failures": "none",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "spear_detected": "true",
+            "claim_domain": "social_power",
+        },
+    }
+    insp = inspect_event(event)
+    verdicts = [s["verdict"] for s in insp["sentences"]]
+    assert "strong" in verdicts
+    assert "mechanism_summary" in verdicts
+    assert insp["editor"]["last_is_mechanism_summary"] is True
+    assert any(c["name"] == "Last line" and c["status"] == "fail" for c in insp["checks"])
+    better = inspect_event(
+        {
+            **event,
+            "output": (
+                "Men get to grade your body like it's on display. You look at his bank account "
+                "and suddenly standards are offensive. Funny how preferences only become immoral "
+                "when you're the one being measured. 🥃"
+            ),
+        }
+    )
+    assert better["scores"]["memorability"] > insp["scores"]["memorability"]
+    assert better["editor"]["last_is_mechanism_summary"] is False
+
+
 def test_inspect_scores_discovery_higher_than_formula():
     formula = {
         "prompt": "cat lady",
@@ -74,5 +115,7 @@ def test_record_and_star(tmp_path, monkeypatch):
 
 
 if __name__ == "__main__":
+    test_sentence_level_flags_mechanism_summary_close()
+    print("ok sentences")
     test_inspect_scores_discovery_higher_than_formula()
     print("ok scores")

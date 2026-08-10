@@ -115,6 +115,20 @@
     .check.weak .name { color: var(--weak); }
     .check .why { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
     .check ul { margin: 0.35rem 0 0; padding-left: 1.1rem; color: var(--text); font-size: 0.85rem; }
+    .sent { padding: 0.65rem 1rem; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.88rem; }
+    .sent:last-child { border-bottom: 0; }
+    .sent .tag {
+      display: inline-block;
+      font-family: var(--sans);
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-right: 0.5rem;
+      color: var(--muted);
+    }
+    .sent.strong .tag, .sent.discovery .tag { color: var(--ok); }
+    .sent.mechanism_summary .tag { color: var(--fail); }
+    .sent .note { display: block; margin-top: 0.2rem; color: var(--muted); font-family: var(--sans); font-size: 0.8rem; }
     .scores {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -186,10 +200,10 @@
     </nav>
     <main>
       {% if selected %}
-        {% set insp = selected.inspection %}
-        {% set d = selected.diagnostics %}
-        {% set ed = insp.editor %}
-        {% set sc = insp.scores %}
+        {% set insp = selected.inspection or {} %}
+        {% set d = selected.diagnostics or {} %}
+        {% set ed = insp.editor or {} %}
+        {% set sc = insp.scores or {} %}
 
         <div class="actions">
           <form method="post" action="{{ url_for('inspector_star') }}" style="display:inline">
@@ -212,6 +226,18 @@
           <h2>Output</h2>
           <div class="body">{{ selected.output }}</div>
         </div>
+
+        {% if insp.sentences %}
+        <div class="section">
+          <h2>Sentences</h2>
+          {% for s in insp.sentences %}
+          <div class="sent {{ s.verdict }}">
+            <span class="tag">{{ s.verdict }}</span>{{ s.text }}
+            {% if s.note %}<span class="note">{{ s.note }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
 
         <div class="section">
           <h2>Pipeline</h2>
@@ -288,7 +314,7 @@
             </div>
             {% endfor %}
             {% if not lens_stats %}
-            <p style="color:var(--muted);padding:0.5rem 0">No events yet. Live Telegram replies will appear here after the next deploy, or run <code>python -m inspector.seed</code>.</p>
+            <p style="color:var(--muted);padding:0.5rem 0">No events yet. Live Telegram replies will appear here after the next deploy, or run <code>python -m inspector seed</code>.</p>
             {% endif %}
           </div>
         </div>

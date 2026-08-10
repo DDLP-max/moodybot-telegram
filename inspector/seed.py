@@ -129,6 +129,45 @@ SAMPLES = [
 ]
 
 
+SAMPLES.append(
+    {
+        "prompt": (
+            "Men will look at your breasts, butt, legs, waist, height even your skin colour. "
+            "But BE CAREFUL: don't look at his wallet, otherwise you're a gold digger"
+        ),
+        "output": (
+            "Men get to grade your body like it's on display. You grade his bank account and "
+            "suddenly you're shallow. The rule isn't about dignity. It's about protecting "
+            "whichever side feels exposed by the other's standards. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "social_power",
+            "lens": "Pattern Recognition",
+            "interpretive_lens": "Pattern Recognition",
+            "lens_question": "What pattern repeats here?",
+            "primary_capability": "Power / Incentive Analysis",
+            "mechanism_hint": "asymmetric_standard",
+            "response_budget": "low",
+            "preferred_structure": "SNAP",
+            "routing_structure": "SNAP",
+            "selected_structure": "SNAP",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "lens_persistence": "routing_only",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "none",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "spear_detected": "true",
+            "draft_paragraph_count": "1",
+            "post_finalizer_paragraph_count": "1",
+        },
+        "source": "seed-gold-digger-summary-close",
+    }
+)
+
+
 def main() -> None:
     last = None
     for s in SAMPLES:
