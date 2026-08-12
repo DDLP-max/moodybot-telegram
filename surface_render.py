@@ -33,6 +33,14 @@ def response_text_after_surface_semantically_equals(
     b = _norm(after_surface)
     if re.search(r"seen it named|what about .+ looks different", after_surface or "", re.I):
         return False
+    # Name-boundary repair inserts a period — still typography, not a new closer.
+    try:
+        from surface_qa import repair_name_sentence_boundary
+
+        a = _norm(repair_name_sentence_boundary(after_landing))
+        b = _norm(repair_name_sentence_boundary(after_surface))
+    except Exception:
+        pass
     a_sents = [s for s in re.split(r"(?<=[.!?])\s+", a) if s.strip()]
     b_sents = [s for s in re.split(r"(?<=[.!?])\s+", b) if s.strip()]
     if len(b_sents) > len(a_sents):

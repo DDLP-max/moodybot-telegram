@@ -2112,6 +2112,13 @@ def finalize_response(
         text = qa.text
         post_reasons.append("surface_qa_repair")
         surface_cleaned = True
+        if "name_sentence_boundary" in (qa.repaired_kinds or []):
+            logger.info(
+                "SURFACE_BOUNDARY_TRACE name_sentence_boundary repaired "
+                "draft=%r final=%r",
+                (body_generated or "")[:160],
+                (text or "")[:160],
+            )
     gold_report.whiskey_tail_present = "🥃" in text
     post_finalizer_paragraph_count = paragraph_count(text)
     after_surface_last = _last_sentence(text)
@@ -2202,6 +2209,7 @@ def finalize_response(
         "surface_cleaned": str(surface_cleaned).lower(),
         "surface_qa_fixed": str(surface_qa_fixed).lower(),
         "surface_qa_failures": ",".join(surface_qa_failures) if surface_qa_failures else "none",
+        "surface_qa_repaired": ",".join(qa.repaired_kinds) if qa.repaired_kinds else "none",
         "duration_ms": str(duration_ms),
         "draft_last_sentence": draft_last[:240],
         "after_epistemic_last_sentence": after_epistemic_last[:240],

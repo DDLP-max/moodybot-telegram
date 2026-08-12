@@ -17,10 +17,22 @@ _BAD_BOUNDARY = re.compile(
     r"\.\s+(and|or|but|because|while|which|who|that)\b"
 )
 
+# Leading identification stuck to a new independent sentence:
+# "Hugh Laurie He crossed..." → missing period. Not "Hugh Laurie crossed..."
+_NAME_TOKEN = r"[A-Z][a-z]+(?:['’][A-Z]?[a-z]+)?(?:-[A-Z][a-z]+)?"
+_NAME_PARTICLE = r"(?:van|von|de|da|del|di|la|le|du|st\.?)"
+_PROPER_NAME = rf"{_NAME_TOKEN}(?:\s+(?:{_NAME_PARTICLE}\s+)?{_NAME_TOKEN}){{0,3}}"
+_INDEPENDENT_START = (
+    r"(?:He|She|They|It|This|That|These|Those|His|Her|Their|Him)"
+)
+_STUCK_NAME_SENTENCE = re.compile(
+    rf"(?m)^[ \t]*({_PROPER_NAME})[ \t]+({_INDEPENDENT_START}[ \t]+[a-z])"
+)
+
 
 @dataclass
 class SurfaceIssue:
-    kind: str  # sentence_boundary | lowercase_start | orphan_conjunction
+    kind: str  # sentence_boundary | name_sentence_boundary | lowercase_start
     span: str
     suggested: str = ""
 
@@ -30,6 +42,7 @@ class SurfaceQAResult:
     text: str
     fixed: bool = False
     issues: List[SurfaceIssue] = field(default_factory=list)
+    repaired_kinds: List[str] = field(default_factory=list)
 
     @property
     def failure_names(self) -> List[str]:
@@ -53,6 +66,15 @@ def detect_surface_issues(text: str) -> List[SurfaceIssue]:
                 kind="sentence_boundary",
                 span=span,
                 suggested=suggested,
+            )
+        )
+
+    for m in _STUCK_NAME_SENTENCE.finditer(body):
+        issues.append(
+            SurfaceIssue(
+                kind="name_sentence_boundary",
+                span=m.group(0),
+                suggested=f"{m.group(1)}. {m.group(2)}",
             )
         )
 
@@ -85,15 +107,25 @@ def detect_surface_issues(text: str) -> List[SurfaceIssue]:
     return issues
 
 
+def repair_name_sentence_boundary(text: str) -> str:
+    """Insert period only for [standalone name] [new independent sentence].
+
+    Does not touch 'Hugh Laurie crossed…' / 'Hugh Laurie was…' / possessives / commas.
+    """
+    return _STUCK_NAME_SENTENCE.sub(r"\1. \2", text or "")
+
+
 def repair_surface_boundaries(text: str) -> Tuple[str, bool]:
     """
     Heal accidental splits: 'side. and watch' → 'side and watch'.
+    Heal stuck name IDs: 'Hugh Laurie He crossed' → 'Hugh Laurie. He crossed'.
     Typography only — does not invent prose.
     """
     original = text or ""
     whiskey = " 🥃" if "🥃" in original else ""
     body = re.sub(r"\s*🥃\s*", " ", original).strip()
     fixed = _BAD_BOUNDARY.sub(lambda m: f" {m.group(1)}", body)
+    fixed = repair_name_sentence_boundary(fixed)
     fixed = re.sub(r"[ \t]{2,}", " ", fixed)
     fixed = re.sub(r"\n{3,}", "\n\n", fixed).strip()
     if whiskey:
@@ -107,7 +139,12 @@ def run_surface_qa(text: str, *, auto_repair: bool = True) -> SurfaceQAResult:
     issues_before = detect_surface_issues(text)
     out = text or ""
     fixed = False
-    if auto_repair and any(i.kind == "sentence_boundary" for i in issues_before):
+    repaired_kinds: List[str] = []
+    repairable = {"sentence_boundary", "name_sentence_boundary"}
+    if auto_repair and any(i.kind in repairable for i in issues_before):
+        repaired_kinds = sorted({i.kind for i in issues_before if i.kind in repairable})
         out, fixed = repair_surface_boundaries(out)
     issues = detect_surface_issues(out)
-    return SurfaceQAResult(text=out, fixed=fixed, issues=issues)
+    return SurfaceQAResult(
+        text=out, fixed=fixed, issues=issues, repaired_kinds=repaired_kinds
+    )
