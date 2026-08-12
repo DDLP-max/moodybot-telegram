@@ -1,14 +1,21 @@
+# MoodyBot Telegram worker — ONE process, long-polling (not webhook).
+# Do not add replicas / a second worker for this token. Telegram permits
+# only one getUpdates consumer. Overlapping deploys are handled in
+# telegram_lifecycle.py (backoff + graceful SIGTERM), not by sleeping here.
 services:
   - type: worker
     name: moodybot-telegram
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt && python build_system_prompt.py
-    # Brief delay so the previous worker can release Telegram getUpdates on deploy.
-    startCommand: sleep 8 && python moodybot.py
+    startCommand: python moodybot.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
+      - key: TELEGRAM_MODE
+        value: polling
+      - key: TELEGRAM_POLLER_SINGLETON
+        value: "true"
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: OPENROUTER_API_KEY

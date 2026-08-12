@@ -68,6 +68,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🧠 MoodyBot says:\n{reply}")
 
 def main():
+    # Not the production poller. Render starts moodybot.py only (see render.yaml).
+    # Never share TELEGRAM_BOT_TOKEN with the production worker.
     try:
         if not TOKEN:
             raise RuntimeError(

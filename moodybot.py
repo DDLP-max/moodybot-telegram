@@ -6,7 +6,6 @@ import random
 import re
 import asyncio
 import nest_asyncio
-import signal
 import sys
 
 # Set console to UTF-8 mode for Windows
@@ -35,6 +34,13 @@ from response_finalization import (
     prompt_content_hash,
 )
 from gold_shape import paragraph_count
+from telegram_lifecycle import (
+    DUPLICATE_ERROR,
+    PollerRuntime,
+    get_runtime,
+    guard_handler,
+    is_poller_conflict,
+)
 
 # Initialize logging first
 logging.basicConfig(
@@ -81,13 +87,15 @@ if not TELEGRAM_BOT_TOKEN or not OPENROUTER_API_KEY:
     except Exception as e:
         logger.warning(f"Could not load config from database: {e}")
 
-# LanguageTool needs Java; keep it optional so Render can boot without it.
+# LanguageTool needs Java. Optional — production does not require it.
 tool = None
 try:
     import language_tool_python
     tool = language_tool_python.LanguageTool('en-US')
 except Exception as e:
-    logger.warning(f"LanguageTool unavailable, skipping grammar polish: {e}")
+    logger.info(
+        "LanguageTool not available; continuing without optional grammar polish."
+    )
 
 def generate_moody_reply(user_input: str) -> str:
     import asyncio
@@ -985,10 +993,9 @@ def load_system_prompt():
 def main():
     """Run the Telegram worker.
 
-    Render restarts spawn a new process before the old one fully dies. Telegram
-    allows only one getUpdates long-poll per token, so overlapping deploys
-    briefly log 409 Conflict. PTB must own SIGTERM so it can release the poll;
-    do not sys.exit() from a custom signal handler.
+    Single production poller. Render zero-downtime overlaps are handled by
+    telegram_lifecycle: acquire with backoff, SIGTERM releases getUpdates
+    immediately. Do not sys.exit() from a signal handler.
     """
     if not TELEGRAM_BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set!")
@@ -1005,22 +1012,31 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("validate", validate_command))
-    app.add_handler(CommandHandler("jukebox", jukebox_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.TEXT, handle_message))
-    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CommandHandler("start", guard_handler(start)))
+    app.add_handler(CommandHandler("validate", guard_handler(validate_command)))
+    app.add_handler(CommandHandler("jukebox", guard_handler(jukebox_command)))
+    app.add_handler(CommandHandler("help", guard_handler(help_command)))
+    app.add_handler(MessageHandler(filters.TEXT, guard_handler(handle_message)))
+    app.add_handler(CallbackQueryHandler(guard_handler(button_handler)))
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         err = context.error
-        # Deploy overlap: expected for a few seconds; don't treat as a user-facing crash.
-        if err is not None and "Conflict" in str(err) and "getUpdates" in str(err):
-            logger.warning(
-                "Telegram getUpdates conflict (usually a Render deploy overlap). "
-                "Waiting for the old instance to release the poll: %s",
-                err,
-            )
+        if err is not None and is_poller_conflict(err):
+            runtime = get_runtime()
+            if runtime is not None:
+                kind = runtime.record_conflict()
+                if kind == "duplicate":
+                    logger.error(DUPLICATE_ERROR)
+                else:
+                    logger.warning(
+                        "Telegram poller already active (deploy overlap): %s",
+                        err,
+                    )
+            else:
+                logger.warning(
+                    "Telegram poller already active (deploy overlap): %s",
+                    err,
+                )
             return
         logger.error(f"Exception while handling an update: {err}")
         if update and hasattr(update, "message") and update.message:
@@ -1028,15 +1044,15 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    logger.info("MoodyBot running with OpenRouter.")
-    print("MoodyBot launched and polling for Telegram messages.")
-
-    # drop_pending_updates: clear stale queue after redeploy.
-    # stop_signals: let PTB stop the updater cleanly on Render SIGTERM.
-    app.run_polling(
-        drop_pending_updates=True,
-        stop_signals=(signal.SIGINT, signal.SIGTERM, signal.SIGABRT),
-    )
+    runtime = PollerRuntime()
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(runtime.run(app))
 
 
 if __name__ == "__main__":
