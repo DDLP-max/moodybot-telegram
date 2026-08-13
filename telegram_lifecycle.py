@@ -1,25 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Telegram application lifecycle — one Application, one Updater, one getUpdates loop.
+"""Telegram transport lifecycle for MoodyBot.
 
-No manual Bot.get_updates probes. No synthetic lease acquisition.
-python-telegram-bot's Updater owns the only getUpdates consumer.
+Production (Render): TELEGRAM_MODE=webhook
+  initialize → start → setWebhook once → aiohttp POST /telegram/webhook → READY
+  Updates feed Application.process_update (same handlers as polling).
 
-Startup (unchanged for diagnosis):
-  initialize → start → updater polling start → READY
+Local optional: TELEGRAM_MODE=polling
+  initialize → start → updater.start_polling (no lease / no 409 classifiers)
 
-Shutdown (polling first):
-  SIGTERM → updater.stop() → app.stop() → app.shutdown()
-
-Production entry: moodybot.py main() → PollerRuntime.run(app)
-TELEGRAM_MODE=polling
-TELEGRAM_POLLER_SINGLETON=true  (documentation / one Render worker)
+Never log bot tokens or API keys. HTTP URLs to api.telegram.org are redacted.
 """
 from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -28,6 +26,9 @@ import time
 import uuid
 from typing import Any, Callable, Optional
 
+from aiohttp import web
+from telegram import Update
+
 logger = logging.getLogger("moodybot")
 
 STARTING = "STARTING"
@@ -35,9 +36,49 @@ READY = "READY"
 SHUTTING_DOWN = "SHUTTING_DOWN"
 
 HANDLER_DRAIN_SECONDS = 8.0
-DEPLOY_OVERLAP_SECONDS = 60.0
+WEBHOOK_PATH = "/telegram/webhook"
+SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
-_RUNTIME: Optional["PollerRuntime"] = None
+# Redact Telegram Bot API URLs that embed the token after /bot
+_TELEGRAM_BOT_URL = re.compile(
+    r"(https?://api\.telegram\.org/bot)[^/\s\"']+",
+    re.IGNORECASE,
+)
+_BEARER = re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE)
+
+_RUNTIME: Optional["BotRuntime"] = None
+_REDACTION_INSTALLED = False
+
+
+class SecretRedactFilter(logging.Filter):
+    """Strip credentials from every log record (httpx dumps full bot URLs)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        redacted = _TELEGRAM_BOT_URL.sub(r"\1[REDACTED]", msg)
+        redacted = _BEARER.sub(r"\1[REDACTED]", redacted)
+        if redacted != msg:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+def install_log_redaction() -> None:
+    """Install once on root + common HTTP loggers."""
+    global _REDACTION_INSTALLED
+    if _REDACTION_INSTALLED:
+        return
+    filt = SecretRedactFilter()
+    root = logging.getLogger()
+    root.addFilter(filt)
+    for name in ("httpx", "httpcore", "telegram", "aiohttp", "moodybot"):
+        logging.getLogger(name).addFilter(filt)
+    for handler in root.handlers:
+        handler.addFilter(filt)
+    _REDACTION_INSTALLED = True
 
 
 def make_instance_id() -> str:
@@ -72,48 +113,63 @@ def render_env_snapshot() -> dict:
         "pid": os.getpid(),
         "hostname": socket.gethostname(),
         "render_service_id": os.environ.get("RENDER_SERVICE_ID") or "",
-        "render_instance_id": (
-            os.environ.get("RENDER_INSTANCE_ID")
-            or os.environ.get("RENDER_INSTANCE_ID".lower())
-            or ""
-        ),
+        "render_instance_id": os.environ.get("RENDER_INSTANCE_ID") or "",
         "render_service_name": os.environ.get("RENDER_SERVICE_NAME") or "",
         "render": os.environ.get("RENDER") or "",
         "git_commit": resolve_git_commit(),
     }
 
 
-def get_runtime() -> Optional["PollerRuntime"]:
+def telegram_mode() -> str:
+    """webhook (production) or polling (local only). Default: webhook on Render."""
+    raw = (os.environ.get("TELEGRAM_MODE") or "").strip().lower()
+    if raw in {"webhook", "polling"}:
+        return raw
+    if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
+        return "webhook"
+    return "polling"
+
+
+def webhook_base_url() -> str:
+    base = (
+        os.environ.get("TELEGRAM_WEBHOOK_BASE_URL")
+        or os.environ.get("RENDER_EXTERNAL_URL")
+        or ""
+    ).strip().rstrip("/")
+    return base
+
+
+def webhook_secret() -> str:
+    return (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+
+
+def webhook_listen_port() -> int:
+    try:
+        return int(os.environ.get("PORT") or "8080")
+    except ValueError:
+        return 8080
+
+
+def get_runtime() -> Optional["BotRuntime"]:
     return _RUNTIME
 
 
-def bind_runtime(runtime: Optional["PollerRuntime"]) -> None:
+def bind_runtime(runtime: Optional["BotRuntime"]) -> None:
     global _RUNTIME
     _RUNTIME = runtime
 
 
-def reset_poller_guard() -> None:
-    """Tests only — clear bound runtime."""
+def reset_runtime() -> None:
+    """Tests only."""
     global _RUNTIME
     _RUNTIME = None
 
 
-def is_poller_conflict(exc: BaseException) -> bool:
-    """True for Telegram 409 getUpdates conflicts (deploy overlap / duplicate)."""
-    name = type(exc).__name__
-    text = str(exc)
-    if name == "Conflict":
-        return True
-    if "Conflict" in name or "409" in text:
-        if "getUpdates" in text or "get_updates" in text or "terminated by other" in text:
-            return True
-    if "terminated by other getUpdates" in text:
-        return True
-    return False
+# Back-compat alias for older imports / tests
+reset_poller_guard = reset_runtime
 
 
 def flush_logs() -> None:
-    """Force handlers to flush so Render captures SIGTERM lines before exit."""
     for log in (logger, logging.getLogger()):
         for handler in getattr(log, "handlers", []):
             try:
@@ -134,8 +190,7 @@ def guard_handler(fn: Callable) -> Callable:
     async def wrapped(update: Any, context: Any) -> Any:
         runtime = get_runtime()
         if runtime is not None and not runtime.accepting_updates:
-            runtime.log.info("[%s] Dropping update — shutdown in progress", runtime.instance_id)
-            flush_logs()
+            runtime._info("Dropping update — shutdown in progress")
             return None
         if runtime is not None:
             runtime.handler_entered()
@@ -148,25 +203,39 @@ def guard_handler(fn: Callable) -> Callable:
     return wrapped
 
 
-class PollerRuntime:
-    """One process → one Application → one Updater → one getUpdates loop."""
+class BotRuntime:
+    """Owns Application lifecycle + transport (webhook or local polling)."""
 
     def __init__(
         self,
         *,
+        mode: Optional[str] = None,
         log: Any = None,
         handler_drain_seconds: float = HANDLER_DRAIN_SECONDS,
         install_signals: bool = True,
         instance_id: Optional[str] = None,
         clock: Callable[[], float] = time.monotonic,
-        deploy_overlap_seconds: float = DEPLOY_OVERLAP_SECONDS,
+        webhook_base: Optional[str] = None,
+        webhook_secret_token: Optional[str] = None,
+        listen_host: str = "0.0.0.0",
+        listen_port: Optional[int] = None,
     ) -> None:
+        install_log_redaction()
         self.log = log if log is not None else logger
         self.handler_drain_seconds = handler_drain_seconds
         self.install_signals_enabled = install_signals
         self.instance_id = instance_id or make_instance_id()
         self.clock = clock
-        self.deploy_overlap_seconds = deploy_overlap_seconds
+        self.mode = (mode or telegram_mode()).strip().lower()
+        if self.mode not in {"webhook", "polling"}:
+            raise ValueError(f"Unsupported TELEGRAM_MODE={self.mode!r}")
+
+        self.webhook_base = (webhook_base if webhook_base is not None else webhook_base_url()).rstrip("/")
+        self.webhook_secret_token = (
+            webhook_secret_token if webhook_secret_token is not None else webhook_secret()
+        )
+        self.listen_host = listen_host
+        self.listen_port = webhook_listen_port() if listen_port is None else listen_port
 
         self.state = STARTING
         self.accepting_updates = True
@@ -174,22 +243,18 @@ class PollerRuntime:
         self._shutdown_event = asyncio.Event()
         self._signals_installed = False
         self._app_started = False
-        self._polling_started = False
 
         self.process_started_at = clock()
-        self.polling_started_at: Optional[float] = None
         self.sigterm_at: Optional[float] = None
-        self.updater_stop_completed_at: Optional[float] = None
-        self.updater_stop_ms: Optional[float] = None
         self.env = render_env_snapshot()
-        self.first_409_at: Optional[float] = None
-        self.conflict_count = 0
-        self.last_409_classification: Optional[str] = None
 
-    @property
-    def shutting_down(self) -> bool:
-        return self.state == SHUTTING_DOWN or self._shutdown_event.is_set()
+        self._http_runner: Optional[web.AppRunner] = None
+        self._http_site: Optional[web.TCPSite] = None
+        self.set_webhook_calls = 0
+        self.start_polling_calls = 0
+        self._ptb_app: Any = None
 
+    # --- logging ---
     def _fmt(self, msg: str) -> str:
         return f"[{self.instance_id}] {msg}"
 
@@ -205,15 +270,13 @@ class PollerRuntime:
         self.log.error(self._fmt(msg), *args)
         flush_logs()
 
-    def uptime_seconds(self, now: Optional[float] = None) -> float:
-        now = self.clock() if now is None else now
-        return max(0.0, now - self.process_started_at)
+    @property
+    def shutting_down(self) -> bool:
+        return self.state == SHUTTING_DOWN or self._shutdown_event.is_set()
 
-    def seconds_since_polling_started(self, now: Optional[float] = None) -> Optional[float]:
-        if self.polling_started_at is None:
-            return None
-        now = self.clock() if now is None else now
-        return max(0.0, now - self.polling_started_at)
+    @property
+    def webhook_url(self) -> str:
+        return f"{self.webhook_base}{WEBHOOK_PATH}"
 
     def handler_entered(self) -> None:
         self.in_flight += 1
@@ -250,7 +313,6 @@ class PollerRuntime:
         if self._signals_installed:
             return
         loop = loop or asyncio.get_running_loop()
-
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 loop.add_signal_handler(sig, lambda s=sig: self._on_shutdown_signal(s))
@@ -261,69 +323,138 @@ class PollerRuntime:
                     pass
         self._signals_installed = True
 
-    def classify_conflict(self, now: Optional[float] = None) -> str:
-        """Classify 409 as deploy overlap vs persistent competing poller."""
-        now = self.clock() if now is None else now
-        since_poll = self.seconds_since_polling_started(now)
-        uptime = self.uptime_seconds(now)
-        age = since_poll if since_poll is not None else uptime
-        if age < self.deploy_overlap_seconds:
-            return "probable_render_deploy_overlap"
-        return "likely_another_live_worker_or_environment"
+    def validate_webhook_secret(self, header_value: Optional[str]) -> bool:
+        expected = self.webhook_secret_token or ""
+        if not expected:
+            return False
+        return (header_value or "") == expected
 
-    def _polling_error_callback(self, exc: BaseException) -> None:
-        if is_poller_conflict(exc):
-            now = self.clock()
-            self.conflict_count += 1
-            if self.first_409_at is None:
-                self.first_409_at = now
-            kind = self.classify_conflict(now)
-            self.last_409_classification = kind
-            since_poll = self.seconds_since_polling_started(now)
-            since_poll_s = f"{since_poll:.1f}" if since_poll is not None else "n/a"
-            self._warning(
-                "Telegram getUpdates 409 Conflict "
-                "classification=%s instance_id=%s pid=%s uptime_s=%.1f "
-                "seconds_since_updater_start_polling=%s "
-                "RENDER_SERVICE_ID=%s RENDER_INSTANCE_ID=%s "
-                "RENDER_SERVICE_NAME=%s git_commit=%s conflict_count=%s err=%s",
-                kind,
-                self.instance_id,
-                self.env.get("pid"),
-                self.uptime_seconds(now),
-                since_poll_s,
-                self.env.get("render_service_id") or "unset",
-                self.env.get("render_instance_id") or "unset",
-                self.env.get("render_service_name") or "unset",
-                self.env.get("git_commit") or "unknown",
-                self.conflict_count,
-                exc,
+    async def handle_telegram_webhook(self, request: web.Request) -> web.Response:
+        """POST /telegram/webhook — validate secret, process Update, 200 ASAP."""
+        if self.shutting_down or not self.accepting_updates:
+            return web.Response(status=503, text="shutting down")
+
+        header = request.headers.get(SECRET_HEADER) or request.headers.get(
+            SECRET_HEADER.lower()
+        )
+        if not self.validate_webhook_secret(header):
+            self._warning("Rejected webhook: invalid or missing secret token")
+            return web.Response(status=403, text="forbidden")
+
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="invalid json")
+
+        app = self._ptb_app
+        if app is None:
+            return web.Response(status=503, text="not ready")
+
+        try:
+            update = Update.de_json(data, app.bot)
+        except Exception as exc:
+            self._warning("Failed to deserialize Telegram update: %s", exc)
+            return web.Response(status=400, text="bad update")
+
+        if update is None:
+            return web.Response(status=400, text="empty update")
+
+        # Process in background so Telegram gets 200 promptly.
+        asyncio.create_task(self._process_update_safe(app, update))
+        return web.Response(status=200, text="ok")
+
+    async def _process_update_safe(self, app: Any, update: Update) -> None:
+        try:
+            await app.process_update(update)
+        except Exception as exc:
+            self._error("process_update failed: %s", exc)
+
+    async def handle_health(self, request: web.Request) -> web.Response:
+        body = {
+            "status": "ok" if self.state == READY else self.state.lower(),
+            "mode": self.mode,
+            "instance_id": self.instance_id,
+        }
+        return web.json_response(body)
+
+    def build_http_app(self) -> web.Application:
+        http_app = web.Application()
+        http_app.router.add_post(WEBHOOK_PATH, self.handle_telegram_webhook)
+        http_app.router.add_get("/health", self.handle_health)
+        http_app.router.add_get("/", self.handle_health)
+        return http_app
+
+    async def _start_http_server(self) -> None:
+        http_app = self.build_http_app()
+        runner = web.AppRunner(http_app)
+        await runner.setup()
+        site = web.TCPSite(runner, self.listen_host, self.listen_port)
+        await site.start()
+        self._http_runner = runner
+        self._http_site = site
+        self._info("HTTP server listening on %s:%s", self.listen_host, self.listen_port)
+
+    async def _stop_http_server(self) -> None:
+        if self._http_site is not None:
+            try:
+                await self._http_site.stop()
+            except Exception as exc:
+                self._warning("HTTP site stop raised: %s", exc)
+            self._http_site = None
+        if self._http_runner is not None:
+            try:
+                await self._http_runner.cleanup()
+            except Exception as exc:
+                self._warning("HTTP runner cleanup raised: %s", exc)
+            self._http_runner = None
+
+    async def configure_telegram_webhook(self, app: Any) -> None:
+        if not self.webhook_base:
+            raise RuntimeError(
+                "TELEGRAM_WEBHOOK_BASE_URL (or RENDER_EXTERNAL_URL) is required in webhook mode"
             )
-            return
-        self._error("Telegram polling error: %s", exc)
+        if not self.webhook_secret_token:
+            raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in webhook mode")
+        url = self.webhook_url
+        await app.bot.set_webhook(
+            url=url,
+            secret_token=self.webhook_secret_token,
+            drop_pending_updates=False,
+        )
+        self.set_webhook_calls += 1
+        self._info("Telegram webhook configured")
 
-    async def _stop_updater(self, app: Any) -> None:
+    async def _start_polling_local(self, app: Any) -> None:
+        """Local-dev only. Production must never enter this path."""
+        updater = app.updater
+        await updater.start_polling(drop_pending_updates=False)
+        self.start_polling_calls += 1
+        self._info("Telegram updater polling started (local TELEGRAM_MODE=polling)")
+
+    async def _stop_polling_if_needed(self, app: Any) -> None:
+        if self.mode != "polling":
+            return
         updater = getattr(app, "updater", None)
         if updater is None:
             return
-        self._info("stopping Telegram updater")
-        t0 = self.clock()
         try:
-            if getattr(updater, "running", True):
+            if getattr(updater, "running", False):
+                self._info("stopping Telegram updater")
                 await updater.stop()
+                self._info("Telegram updater stopped")
         except Exception as exc:
             self._warning("Updater stop raised: %s", exc)
-        self.updater_stop_completed_at = self.clock()
-        if self.sigterm_at is not None:
-            self.updater_stop_ms = (self.updater_stop_completed_at - self.sigterm_at) * 1000.0
-        else:
-            self.updater_stop_ms = (self.updater_stop_completed_at - t0) * 1000.0
-        self._info(
-            "Telegram updater stopped (updater.stop completed in %.0f ms since SIGTERM)",
-            self.updater_stop_ms,
-        )
 
-    async def _drain_and_close(self, app: Any) -> None:
+    async def shutdown_app(self, app: Any) -> None:
+        if not self._shutdown_event.is_set():
+            self.request_shutdown(signal_name="SIGTERM")
+        else:
+            self.state = SHUTTING_DOWN
+            self.accepting_updates = False
+
+        await self._stop_http_server()
+        await self._stop_polling_if_needed(app)
+
         if self._app_started:
             self._info("stopping application")
             stop = getattr(app, "stop", None)
@@ -346,31 +477,17 @@ class PollerRuntime:
             except Exception as exc:
                 self._warning("Application shutdown raised: %s", exc)
         self._info("application shutdown complete")
-
-    async def shutdown_app(self, app: Any) -> None:
-        """Stop polling FIRST, then drain handlers, then close the Telegram client."""
-        if not self._shutdown_event.is_set():
-            self.request_shutdown(signal_name="SIGTERM")
-        else:
-            self.state = SHUTTING_DOWN
-            self.accepting_updates = False
-
-        # Critical: cancel getUpdates before any other cleanup.
-        await self._stop_updater(app)
-        await self._drain_and_close(app)
         self._info(
-            "MoodyBot shutdown complete instance_id=%s pid=%s "
-            "RENDER_SERVICE_ID=%s git_commit=%s updater_stop_ms=%s",
+            "MoodyBot shutdown complete instance_id=%s pid=%s git_commit=%s",
             self.instance_id,
             self.env.get("pid"),
-            self.env.get("render_service_id") or "unset",
             self.env.get("git_commit") or "unknown",
-            f"{self.updater_stop_ms:.0f}" if self.updater_stop_ms is not None else "n/a",
         )
 
     async def run(self, app: Any) -> None:
-        """Manual PTB lifecycle only — never Application.run_polling, never a bot get_updates probe."""
+        install_log_redaction()
         bind_runtime(self)
+        self._ptb_app = app
         self.state = STARTING
         self.accepting_updates = True
         self.env = render_env_snapshot()
@@ -379,17 +496,13 @@ class PollerRuntime:
         self._info("MoodyBot starting")
         self._info(
             "instance lifetime instance_id=%s pid=%s hostname=%s "
-            "RENDER_SERVICE_ID=%s RENDER_INSTANCE_ID=%s RENDER_SERVICE_NAME=%s "
-            "git_commit=%s TELEGRAM_MODE=%s TELEGRAM_POLLER_SINGLETON=%s",
+            "RENDER_SERVICE_ID=%s git_commit=%s TELEGRAM_MODE=%s",
             self.instance_id,
             self.env.get("pid"),
             self.env.get("hostname"),
             self.env.get("render_service_id") or "unset",
-            self.env.get("render_instance_id") or "unset",
-            self.env.get("render_service_name") or "unset",
             self.env.get("git_commit") or "unknown",
-            telegram_mode(),
-            str(poller_singleton_enabled()).lower(),
+            self.mode,
         )
         initialized = False
         try:
@@ -400,20 +513,15 @@ class PollerRuntime:
             initialized = True
             self._info("application initialized")
 
-            # Do NOT call bot.delete_webhook here.
-            # Updater polling bootstrap deletes the webhook exactly once.
-
             await app.start()
             self._app_started = True
             self._info("application started")
 
-            await app.updater.start_polling(
-                drop_pending_updates=False,
-                error_callback=self._polling_error_callback,
-            )
-            self._polling_started = True
-            self.polling_started_at = self.clock()
-            self._info("Telegram updater polling started")
+            if self.mode == "webhook":
+                await self._start_http_server()
+                await self.configure_telegram_webhook(app)
+            else:
+                await self._start_polling_local(app)
 
             self.state = READY
             self._info("MoodyBot ready")
@@ -422,12 +530,8 @@ class PollerRuntime:
             if initialized:
                 await self.shutdown_app(app)
             bind_runtime(None)
+            self._ptb_app = None
 
 
-def telegram_mode() -> str:
-    return (os.environ.get("TELEGRAM_MODE") or "polling").strip().lower()
-
-
-def poller_singleton_enabled() -> bool:
-    raw = (os.environ.get("TELEGRAM_POLLER_SINGLETON") or "true").strip().lower()
-    return raw not in {"0", "false", "no"}
+# Back-compat name used by older moodybot imports
+PollerRuntime = BotRuntime

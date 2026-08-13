@@ -35,10 +35,10 @@ from response_finalization import (
 )
 from gold_shape import paragraph_count
 from telegram_lifecycle import (
-    PollerRuntime,
-    get_runtime,
+    BotRuntime,
     guard_handler,
-    is_poller_conflict,
+    install_log_redaction,
+    telegram_mode,
 )
 
 # Initialize logging first
@@ -47,6 +47,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
+install_log_redaction()
 
 logger = logging.getLogger("moodybot")
 
@@ -990,12 +991,14 @@ def load_system_prompt():
         return f.read().strip()
 
 def main():
-    """Run the Telegram worker.
+    """Run MoodyBot Telegram transport.
 
-    One Application, one Updater, one getUpdates loop (telegram_lifecycle).
-    Do not start a second poller from this process or probe updates manually.
-    SIGTERM stops the updater immediately; do not sys.exit() from a signal handler.
+    Production (Render): TELEGRAM_MODE=webhook — HTTPS POST /telegram/webhook.
+    Local optional: TELEGRAM_MODE=polling.
+    Never log bot tokens or API keys.
     """
+    install_log_redaction()
+
     if not TELEGRAM_BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set!")
         print("Run 'python quick_setup.py' to configure your API keys.")
@@ -1006,8 +1009,8 @@ def main():
         print("Run 'python quick_setup.py' to configure your API keys.")
         return
 
-    print(f"Using Telegram Token: {TELEGRAM_BOT_TOKEN[:20]}...")
-    print(f"Using OpenRouter Key: {OPENROUTER_API_KEY[:20]}...")
+    mode = telegram_mode()
+    logger.info("MoodyBot transport mode=%s (credentials not logged)", mode)
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -1020,24 +1023,13 @@ def main():
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         err = context.error
-        if err is not None and is_poller_conflict(err):
-            runtime = get_runtime()
-            if runtime is not None:
-                # Same classifier / fields as updater error_callback
-                runtime._polling_error_callback(err)
-            else:
-                logger.warning(
-                    "Telegram getUpdates 409 Conflict (no runtime bound): %s",
-                    err,
-                )
-            return
-        logger.error(f"Exception while handling an update: {err}")
+        logger.error("Exception while handling an update: %s", err)
         if update and hasattr(update, "message") and update.message:
             await send_simple_message(update, "Something went wrong. Try again later.")
 
     app.add_error_handler(error_handler)
 
-    runtime = PollerRuntime()
+    runtime = BotRuntime(mode=mode)
     try:
         loop = asyncio.get_event_loop()
         if loop.is_closed():

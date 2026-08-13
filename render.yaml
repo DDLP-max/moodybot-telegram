@@ -1,22 +1,24 @@
-# MoodyBot Telegram worker — ONE process, long-polling (not webhook).
-# Do not add replicas / a second worker for this token. Telegram permits
-# only one getUpdates consumer. Lifecycle: telegram_lifecycle.py
-# (one Application / one Updater / SIGTERM stops updater immediately).
+# MoodyBot Telegram on Render — webhook transport (no getUpdates).
+# type: web so Render exposes HTTPS for Telegram callbacks.
+# TELEGRAM_MODE=webhook is required in production.
 services:
-  - type: worker
+  - type: web
     name: moodybot-telegram
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt && python build_system_prompt.py
     startCommand: python moodybot.py
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
       - key: TELEGRAM_MODE
-        value: polling
-      - key: TELEGRAM_POLLER_SINGLETON
-        value: "true"
+        value: webhook
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: OPENROUTER_API_KEY
+        sync: false
+      - key: TELEGRAM_WEBHOOK_BASE_URL
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
