@@ -48,6 +48,9 @@ class RecordingLog:
     def error(self, msg, *a, **k):
         self.errors.append(self._fmt(msg, a))
 
+    def exception(self, msg, *a, **k):
+        self.errors.append(self._fmt(msg, a))
+
 
 class FakeBot:
     def __init__(self):
@@ -162,6 +165,11 @@ async def _test_valid_webhook_reaches_handler():
     await asyncio.sleep(0.05)
     assert app.bot.get_updates_calls == 0
     assert app.process_update.await_count == 1
+    joined = "\n".join(log.infos)
+    assert "[update 1] webhook received" in joined
+    assert "[update 1] parsed update type=message" in joined
+    assert "[update 1] dispatching application.process_update" in joined
+    assert "[update 1] process_update complete" in joined
 
 
 def test_valid_webhook_reaches_handler():
@@ -301,6 +309,17 @@ def test_log_redaction_filters_bot_urls():
     assert "8101181461" not in record.getMessage()
 
 
+def test_webhook_secret_format():
+    from telegram_lifecycle import validate_webhook_secret_format
+
+    validate_webhook_secret_format("abcDEF012_-")
+    try:
+        validate_webhook_secret_format("bad+secret/with=chars")
+        raise AssertionError("expected ValueError")
+    except ValueError as e:
+        assert "rejects" in str(e).lower() or "Allowed" in str(e)
+
+
 def test_webhook_path_constant():
     assert WEBHOOK_PATH == "/telegram/webhook"
 
@@ -316,5 +335,6 @@ if __name__ == "__main__":
     print("ok sigterm")
     test_production_source_never_polls()
     test_log_redaction_filters_bot_urls()
+    test_webhook_secret_format()
     test_webhook_path_constant()
     print("ok")

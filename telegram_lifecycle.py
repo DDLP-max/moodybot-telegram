@@ -38,6 +38,8 @@ SHUTTING_DOWN = "SHUTTING_DOWN"
 HANDLER_DRAIN_SECONDS = 8.0
 WEBHOOK_PATH = "/telegram/webhook"
 SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
+# Telegram setWebhook secret_token: 1–256 chars, only A-Z a-z 0-9 _ -
+_WEBHOOK_SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 # Redact Telegram Bot API URLs that embed the token after /bot
 _TELEGRAM_BOT_URL = re.compile(
@@ -141,6 +143,22 @@ def webhook_base_url() -> str:
 
 def webhook_secret() -> str:
     return (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+
+
+def validate_webhook_secret_format(secret: str) -> None:
+    """Raise ValueError if secret is not valid for Telegram setWebhook."""
+    if not secret:
+        raise ValueError(
+            "TELEGRAM_WEBHOOK_SECRET is required in webhook mode. "
+            "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    if not _WEBHOOK_SECRET_RE.fullmatch(secret):
+        raise ValueError(
+            "TELEGRAM_WEBHOOK_SECRET contains characters Telegram rejects. "
+            "Allowed only: A-Z a-z 0-9 _ - (1–256 chars). "
+            "Do not use secrets.token_urlsafe() (+ / =). "
+            "Use: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
 
 
 def webhook_listen_port() -> int:
@@ -350,24 +368,48 @@ class BotRuntime:
         if app is None:
             return web.Response(status=503, text="not ready")
 
+        update_id = data.get("update_id", "?")
+        self._info("[update %s] webhook received", update_id)
+
         try:
             update = Update.de_json(data, app.bot)
-        except Exception as exc:
-            self._warning("Failed to deserialize Telegram update: %s", exc)
+        except Exception:
+            self.log.exception(
+                self._fmt("[update %s] Update.de_json failed"), update_id
+            )
+            flush_logs()
             return web.Response(status=400, text="bad update")
 
         if update is None:
+            self._warning("[update %s] empty update after de_json", update_id)
             return web.Response(status=400, text="empty update")
 
-        # Process in background so Telegram gets 200 promptly.
-        asyncio.create_task(self._process_update_safe(app, update))
+        update_type = "unknown"
+        if update.message:
+            update_type = "message"
+        elif update.callback_query:
+            update_type = "callback_query"
+        elif update.edited_message:
+            update_type = "edited_message"
+        self._info("[update %s] parsed update type=%s", update_id, update_type)
+        self._info("[update %s] dispatching application.process_update", update_id)
+
+        # Await process_update on the SAME Application; schedule so Telegram gets 200 fast.
+        asyncio.create_task(self._process_update_safe(app, update, update_id))
         return web.Response(status=200, text="ok")
 
-    async def _process_update_safe(self, app: Any, update: Update) -> None:
+    async def _process_update_safe(
+        self, app: Any, update: Update, update_id: Any = None
+    ) -> None:
+        uid = update_id if update_id is not None else getattr(update, "update_id", "?")
         try:
             await app.process_update(update)
-        except Exception as exc:
-            self._error("process_update failed: %s", exc)
+            self._info("[update %s] process_update complete", uid)
+        except Exception:
+            self.log.exception(
+                self._fmt("[update %s] application.process_update failed"), uid
+            )
+            flush_logs()
 
     async def handle_health(self, request: web.Request) -> web.Response:
         body = {
@@ -413,8 +455,7 @@ class BotRuntime:
             raise RuntimeError(
                 "TELEGRAM_WEBHOOK_BASE_URL (or RENDER_EXTERNAL_URL) is required in webhook mode"
             )
-        if not self.webhook_secret_token:
-            raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in webhook mode")
+        validate_webhook_secret_format(self.webhook_secret_token or "")
         url = self.webhook_url
         await app.bot.set_webhook(
             url=url,

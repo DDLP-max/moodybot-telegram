@@ -7,6 +7,7 @@ import re
 import asyncio
 import nest_asyncio
 import sys
+import time
 
 # Set console to UTF-8 mode for Windows
 if sys.platform == "win32":
@@ -668,15 +669,82 @@ def get_curated_song(text: str) -> dict:
             return random.choice(songs)
     return None
 
+def _openrouter_error_fields(payload: object) -> dict:
+    """Extract log-safe OpenRouter error fields only (no full body / credentials)."""
+    if not isinstance(payload, dict):
+        return {"error_code": None, "error_message": None, "request_id": None}
+    err = payload.get("error")
+    code = msg = None
+    if isinstance(err, dict):
+        code = err.get("code") or err.get("status")
+        msg = err.get("message") or err.get("type")
+        if isinstance(msg, str) and len(msg) > 300:
+            msg = msg[:300] + "…"
+    elif isinstance(err, str):
+        msg = err[:300]
+    req_id = (
+        payload.get("id")
+        or payload.get("request_id")
+        or (err.get("request_id") if isinstance(err, dict) else None)
+    )
+    return {
+        "error_code": code,
+        "error_message": msg,
+        "request_id": req_id,
+    }
+
+
+def _sanitize_openrouter_payload(payload: object) -> object:
+    """Back-compat for tests — slim success choices / strip error metadata."""
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    if "choices" in out and isinstance(out["choices"], list):
+        slim = []
+        for ch in out["choices"][:2]:
+            if not isinstance(ch, dict):
+                slim.append(ch)
+                continue
+            ch2 = dict(ch)
+            msg = ch2.get("message")
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, str) and len(content) > 200:
+                    ch2["message"] = {
+                        **msg,
+                        "content": content[:200] + f"...<{len(content)} chars>",
+                    }
+            slim.append(ch2)
+        out["choices"] = slim
+    fields = _openrouter_error_fields(out)
+    if out.get("error") is not None:
+        out["error"] = {
+            "code": fields["error_code"],
+            "message": fields["error_message"],
+        }
+    return out
+
+
+OPENROUTER_MODEL = "x-ai/grok-4.3"
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    update_id = getattr(update, "update_id", "?")
     message = update.message
     if not message:
-        logger.info("No message received.")
+        logger.info("[update %s] No message received.", update_id)
         return
 
     chat = update.effective_chat
     user = update.effective_user
-    logger.info(f"From: {user.username} | Chat ID: {chat.id} | Type: {chat.type} | Message: {message.text}")
+    chat_id = getattr(chat, "id", None)
+    logger.info(
+        "[update %s] handler entered chat_id=%s user=%s type=%s",
+        update_id,
+        chat_id,
+        getattr(user, "username", None),
+        getattr(chat, "type", None),
+    )
 
     # Allow private chats and premium group
     if chat.type == "private" or chat.id == PREMIUM_GROUP_ID:
@@ -690,8 +758,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_input = message.text
-    logger.info(f"Message received: {user_input}")
-    
+    logger.info("[update %s] Message received (len=%s)", update_id, len(user_input or ""))
+
     # Process user input with soft spellcheck
     processed_user_input = process_user_input(user_input)
 
@@ -701,7 +769,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_command = select_best_command(user_input)
 
     source = "auto-route" if selected_command.startswith("/") else "classifier"
-    logger.info(f"Selected tone: {selected_command} (via {source})")
+    logger.info(
+        "[update %s] Selected tone: %s (via %s)",
+        update_id,
+        selected_command,
+        source,
+    )
 
     system_prompt = load_system_prompt()
     p_hash = prompt_content_hash(system_prompt)
@@ -712,7 +785,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mode="validation" if selected_command == "/validate" else "dynamic",
     )
     logger.info(
-        "Response plan: strategy=%s intent=%s capability=%s prompt_hash=%s",
+        "[update %s] Response plan: strategy=%s intent=%s capability=%s prompt_hash=%s",
+        update_id,
         response_plan.closing_strategy,
         response_plan.intent,
         response_plan.primary_capability,
@@ -736,7 +810,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"role": "system", "content": plan_closer_instruction(response_plan)},
     )
 
+    stage = "before_openrouter"
     try:
+        stage = "openrouter_request"
+        t0 = time.monotonic()
+        logger.info(
+            "[update %s] OpenRouter request started model=%s",
+            update_id,
+            OPENROUTER_MODEL,
+        )
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -746,27 +828,78 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "X-Title": "MoodyBot"
                 },
                 json={
-                    "model": "x-ai/grok-4.3",
+                    "model": OPENROUTER_MODEL,
                     "messages": messages,
                     "max_tokens": 1000
                 },
                 timeout=20
             )
 
-            result = response.json()
-            logger.info("OpenRouter raw response: %s", result)
+            latency_ms = (time.monotonic() - t0) * 1000.0
+            stage = "openrouter_parse"
+            try:
+                result = response.json()
+            except Exception:
+                logger.exception(
+                    "[update %s] OpenRouter JSON parse failed status=%s latency_ms=%.0f "
+                    "model=%s body_chars=%s",
+                    update_id,
+                    response.status_code,
+                    latency_ms,
+                    OPENROUTER_MODEL,
+                    len(response.text or ""),
+                )
+                await send_simple_message(
+                    update, "MoodyBot's signal got scrambled. Try again in a bit."
+                )
+                return
 
-            if "choices" not in result or not result["choices"]:
-                logger.error(f"MoodyBot error: Invalid OpenRouter response: {result}")
-                await send_simple_message(update, "MoodyBot's signal got scrambled. Try again in a bit.")
+            fields = _openrouter_error_fields(result)
+            has_choices = (
+                isinstance(result, dict)
+                and isinstance(result.get("choices"), list)
+                and bool(result["choices"])
+            )
+            if response.status_code < 400 and has_choices:
+                logger.info(
+                    "[update %s] OpenRouter response received status=%s latency_ms=%.0f "
+                    "model=%s choices=%s",
+                    update_id,
+                    response.status_code,
+                    latency_ms,
+                    OPENROUTER_MODEL,
+                    len(result["choices"]),
+                )
+            else:
+                logger.error(
+                    "[update %s] OpenRouter failed stage=openrouter_parse "
+                    "status=%s model=%s error_code=%s error_message=%s request_id=%s "
+                    "latency_ms=%.0f",
+                    update_id,
+                    response.status_code,
+                    OPENROUTER_MODEL,
+                    fields["error_code"],
+                    fields["error_message"],
+                    fields["request_id"],
+                    latency_ms,
+                )
+                await send_simple_message(
+                    update, "MoodyBot's signal got scrambled. Try again in a bit."
+                )
                 return
 
             # Process response
+            stage = "response_content"
             raw_content = result["choices"][0]["message"]["content"]
-            logger.info(f"Raw content from API: {raw_content[:200]}...")
+            logger.info(
+                "[update %s] OpenRouter content ok chars=%s",
+                update_id,
+                len(raw_content or ""),
+            )
             draft_paragraph_count = paragraph_count(raw_content)
 
             # Apply new post-processing pipeline
+            stage = "finalization"
             content = process_bot_output(raw_content)
             post_prefab_paragraph_count = paragraph_count(content)
 
@@ -793,7 +926,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if "\n\n" not in content and content.count("\n") > 6:
                 content = auto_paragraph(content)
             logger.info(
-                "PARA_TRACE draft=%s post_prefab=%s post_polish=%s structure=%s budget=%s",
+                "[update %s] PARA_TRACE draft=%s post_prefab=%s post_polish=%s structure=%s budget=%s",
+                update_id,
                 draft_paragraph_count,
                 post_prefab_paragraph_count,
                 post_polish_paragraph_count,
@@ -825,9 +959,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             # Immutable after final_surface_render inside finalize_response.
             content = finalized.text
-            logger.info("Finalization diagnostics: %s", finalized.diagnostics)
             logger.info(
-                "PARA_TRACE_FINAL structure=%s budget=%s draft=%s post_editor=%s post_finalizer=%s",
+                "[update %s] Finalization diagnostics: %s",
+                update_id,
+                finalized.diagnostics,
+            )
+            logger.info(
+                "[update %s] PARA_TRACE_FINAL structure=%s budget=%s draft=%s post_editor=%s post_finalizer=%s",
+                update_id,
                 finalized.diagnostics.get("preferred_structure")
                 or finalized.diagnostics.get("selected_structure"),
                 finalized.diagnostics.get("response_budget"),
@@ -849,23 +988,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     source="live",
                 )
             except Exception as insp_err:
-                logger.warning("Inspector record failed: %s", insp_err)
+                logger.warning(
+                    "[update %s] Inspector record failed: %s", update_id, insp_err
+                )
 
             # Encoding safety only — do not alter closer/typography after surface render.
             content = safe_emoji(content)
 
             # Send response using new message utilities
             if not content or len(content.strip()) < 10:
-                logger.error("Response too short or empty")
+                logger.error("[update %s] Response too short or empty", update_id)
                 await send_simple_message(update, "MoodyBot couldn't generate a proper response. Try again.")
                 return
-            
-            # Engagement CTAs off by default — recognition/silence/action closers win.
-            mode = resolve_mode(update)
-            await send_message(update, content, mode, allow_cta=False)
 
-    except Exception as e:
-        logger.error(f"MoodyBot error: {e}")
+            # Engagement CTAs off by default — recognition/silence/action closers win.
+            stage = "telegram_send"
+            mode = resolve_mode(update)
+            logger.info("[update %s] Telegram reply send started", update_id)
+            await send_message(update, content, mode, allow_cta=False)
+            logger.info("[update %s] Telegram reply sent complete", update_id)
+
+    except Exception:
+        logger.exception(
+            "MoodyBot handler failed update_id=%s chat_id=%s stage=%s",
+            update_id,
+            chat_id,
+            stage,
+        )
         await send_simple_message(update, "MoodyBot is sulking. Try again later.")
         return
 
@@ -1023,7 +1172,16 @@ def main():
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         err = context.error
-        logger.error("Exception while handling an update: %s", err)
+        update_id = getattr(update, "update_id", "?") if update else "?"
+        chat_id = None
+        if update is not None and hasattr(update, "effective_chat") and update.effective_chat:
+            chat_id = update.effective_chat.id
+        logger.error(
+            "MoodyBot handler failed update_id=%s chat_id=%s",
+            update_id,
+            chat_id,
+            exc_info=err if isinstance(err, BaseException) else True,
+        )
         if update and hasattr(update, "message") and update.message:
             await send_simple_message(update, "Something went wrong. Try again later.")
 
