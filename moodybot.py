@@ -35,7 +35,6 @@ from response_finalization import (
 )
 from gold_shape import paragraph_count
 from telegram_lifecycle import (
-    DUPLICATE_ERROR,
     PollerRuntime,
     get_runtime,
     guard_handler,
@@ -993,9 +992,9 @@ def load_system_prompt():
 def main():
     """Run the Telegram worker.
 
-    Single production poller. Render zero-downtime overlaps are handled by
-    telegram_lifecycle: acquire with backoff, SIGTERM releases getUpdates
-    immediately. Do not sys.exit() from a signal handler.
+    One Application, one Updater, one getUpdates loop (telegram_lifecycle).
+    Do not start a second poller from this process or probe updates manually.
+    SIGTERM stops the updater immediately; do not sys.exit() from a signal handler.
     """
     if not TELEGRAM_BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set!")
@@ -1023,20 +1022,13 @@ def main():
         err = context.error
         if err is not None and is_poller_conflict(err):
             runtime = get_runtime()
-            if runtime is not None:
-                kind = runtime.record_conflict()
-                if kind == "duplicate":
-                    logger.error(DUPLICATE_ERROR)
-                else:
-                    logger.warning(
-                        "Telegram poller already active (deploy overlap): %s",
-                        err,
-                    )
-            else:
-                logger.warning(
-                    "Telegram poller already active (deploy overlap): %s",
-                    err,
-                )
+            tag = f"[{runtime.instance_id}] " if runtime is not None else ""
+            logger.warning(
+                "%sTelegram getUpdates conflict — another process may still be "
+                "polling this bot token: %s",
+                tag,
+                err,
+            )
             return
         logger.error(f"Exception while handling an update: {err}")
         if update and hasattr(update, "message") and update.message:

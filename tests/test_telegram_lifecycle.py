@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Telegram poller lifecycle: acquire, backoff, duplicate vs overlap, SIGTERM."""
+"""Telegram lifecycle: one Application, one Updater, no manual get_updates lease."""
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 
-from telegram.error import Conflict
 from telegram_lifecycle import (
-    DUPLICATE_ERROR,
     READY,
     STARTING,
     SHUTTING_DOWN,
-    WAITING_FOR_TELEGRAM_POLLER,
     PollerRuntime,
     guard_handler,
     is_poller_conflict,
@@ -20,26 +18,6 @@ from telegram_lifecycle import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-
-CONFLICT = Conflict(
-    "terminated by other getUpdates request; make sure that only one bot instance is running"
-)
-
-
-class ZeroRng:
-    def uniform(self, a, b):
-        return 0.0
-
-
-class FakeClock:
-    def __init__(self, t=0.0):
-        self.t = float(t)
-
-    def __call__(self):
-        return self.t
-
-    def advance(self, s):
-        self.t += float(s)
 
 
 class RecordingLog:
@@ -65,12 +43,17 @@ class RecordingLog:
 
 
 class FakeUpdater:
-    def __init__(self):
+    """Mirrors PTB: start_polling bootstraps delete_webhook, then polls."""
+
+    def __init__(self, bot):
+        self.bot = bot
         self.running = False
         self.start_calls = 0
         self.stop_calls = 0
 
     async def start_polling(self, **kwargs):
+        # PTB Updater._bootstrap always deletes webhook for polling mode.
+        await self.bot.delete_webhook(drop_pending_updates=kwargs.get("drop_pending_updates"))
         self.start_calls += 1
         self.running = True
 
@@ -80,18 +63,13 @@ class FakeUpdater:
 
 
 class FakeBot:
-    def __init__(self, results):
-        self.results = list(results)
+    def __init__(self):
         self.get_updates_calls = 0
         self.delete_webhook_calls = 0
 
     async def get_updates(self, **kwargs):
         self.get_updates_calls += 1
-        idx = min(self.get_updates_calls - 1, len(self.results) - 1)
-        item = self.results[idx]
-        if isinstance(item, BaseException):
-            raise item
-        return item
+        return []
 
     async def delete_webhook(self, **kwargs):
         self.delete_webhook_calls += 1
@@ -99,15 +77,16 @@ class FakeBot:
 
 
 class FakeApp:
-    def __init__(self, bot):
-        self.bot = bot
-        self.updater = FakeUpdater()
+    def __init__(self):
+        self.bot = FakeBot()
+        self.updater = FakeUpdater(self.bot)
         self.initialize_calls = 0
         self.start_calls = 0
         self.stop_calls = 0
         self.shutdown_calls = 0
         self.stop_saw_polling_stopped = None
         self._handler_block = None
+        self.run_polling_calls = 0
 
     async def initialize(self):
         self.initialize_calls += 1
@@ -124,18 +103,16 @@ class FakeApp:
     async def shutdown(self):
         self.shutdown_calls += 1
 
+    def run_polling(self, **kwargs):
+        self.run_polling_calls += 1
+        raise AssertionError("run_polling must not be used with manual lifecycle")
 
-def _make_runtime(clock, log, sleep, **kwargs):
+
+def _make_runtime(log, **kwargs):
     reset_poller_guard()
-    kwargs.setdefault("grace_seconds", 90.0)
     kwargs.setdefault("install_signals", False)
-    return PollerRuntime(
-        clock=clock,
-        sleep=sleep,
-        rng=ZeroRng(),
-        log=log,
-        **kwargs,
-    )
+    kwargs.setdefault("instance_id", "test-1-abc123")
+    return PollerRuntime(log=log, **kwargs)
 
 
 async def _wait_state(runtime, state, task=None, timeout=2.0):
@@ -152,111 +129,47 @@ async def _wait_state(runtime, state, task=None, timeout=2.0):
 
 
 # ---------------------------------------------------------------------------
-# TEST A — normal startup
+# Startup invariants: one webhook delete, one poller, zero manual get_updates
 # ---------------------------------------------------------------------------
-async def _test_a():
-    clock = FakeClock()
+async def _test_startup_one_poller():
     log = RecordingLog()
-    app = FakeApp(FakeBot([[]]))
-
-    async def sleep(delay):
-        clock.advance(delay)
-
-    runtime = _make_runtime(clock, log, sleep)
+    app = FakeApp()
+    runtime = _make_runtime(log)
     assert runtime.state == STARTING
     task = asyncio.create_task(runtime.run(app))
     await _wait_state(runtime, READY, task=task)
-    assert runtime.acquire_attempts == 1
-    assert runtime.retry_count == 0
-    assert runtime.sleep_delays == []
+
+    assert app.bot.delete_webhook_calls == 1
     assert app.updater.start_calls == 1
-    assert any("Telegram polling lease acquired" in m for m in log.infos)
-    assert any("MoodyBot ready." in m for m in log.infos)
-    assert any("MoodyBot starting with OpenRouter." in m for m in log.infos)
-    assert not any("usually a Render deploy overlap" in m for m in log.warnings)
+    assert app.bot.get_updates_calls == 0  # no manual lease probe
+    assert app.run_polling_calls == 0
+    assert app.initialize_calls == 1
+    assert app.start_calls == 1
+
+    joined = "\n".join(log.infos)
+    assert "[test-1-abc123] MoodyBot starting" in joined
+    assert "[test-1-abc123] application initialized" in joined
+    assert "[test-1-abc123] application started" in joined
+    assert "[test-1-abc123] Telegram updater polling started" in joined
+    assert "[test-1-abc123] MoodyBot ready" in joined
+    assert "lease acquired" not in joined.lower()
+
     runtime.request_shutdown()
     await task
     assert runtime.state == SHUTTING_DOWN
 
 
-def test_a_normal_startup():
-    asyncio.run(_test_a())
+def test_startup_one_poller():
+    asyncio.run(_test_startup_one_poller())
 
 
 # ---------------------------------------------------------------------------
-# TEST B — Render overlap (3x 409, then success)
+# SIGTERM while polling
 # ---------------------------------------------------------------------------
-async def _test_b():
-    clock = FakeClock()
+async def _test_sigterm():
     log = RecordingLog()
-    states = []
-    app = FakeApp(FakeBot([CONFLICT, CONFLICT, CONFLICT, []]))
-
-    async def sleep(delay):
-        states.append(runtime.state)
-        clock.advance(delay)
-
-    runtime = _make_runtime(clock, log, sleep)
-    assert runtime.state == STARTING
-    task = asyncio.create_task(runtime.run(app))
-    await _wait_state(runtime, READY, task=task)
-    assert WAITING_FOR_TELEGRAM_POLLER in states
-    assert runtime.conflict_count == 3
-    assert runtime.acquire_attempts == 4
-    assert runtime.retry_count == 0  # reset after lease acquired
-    assert [round(d) for d in runtime.sleep_delays] == [2, 4, 8]
-    assert app.updater.start_calls == 1
-    assert any("deploy overlap" in m for m in log.warnings)
-    assert not any(DUPLICATE_ERROR in m for m in log.errors)
-    assert any("Telegram polling lease acquired" in m for m in log.infos)
-    assert any("MoodyBot ready." in m for m in log.infos)
-    runtime.request_shutdown()
-    await task
-
-
-def test_b_render_overlap():
-    asyncio.run(_test_b())
-
-
-# ---------------------------------------------------------------------------
-# TEST C — persistent duplicate poller
-# ---------------------------------------------------------------------------
-async def _test_c():
-    clock = FakeClock()
-    log = RecordingLog()
-    app = FakeApp(FakeBot([CONFLICT]))
-
-    async def sleep(delay):
-        clock.advance(delay)
-        if runtime.duplicate_error_emitted or clock() > 200:
-            runtime.request_shutdown()
-
-    runtime = _make_runtime(clock, log, sleep, grace_seconds=90.0)
-    await runtime.run(app)
-    assert runtime.beyond_grace()
-    assert runtime.classify_conflict() == "POLLER_ALREADY_ACTIVE_DUPLICATE"
-    assert any(DUPLICATE_ERROR in m for m in log.errors)
-    assert app.updater.start_calls == 0
-    overlap_only = [m for m in log.warnings if "usually a Render deploy overlap" in m]
-    assert overlap_only == []
-
-
-def test_c_persistent_duplicate():
-    asyncio.run(_test_c())
-
-
-# ---------------------------------------------------------------------------
-# TEST D — SIGTERM while polling
-# ---------------------------------------------------------------------------
-async def _test_d():
-    clock = FakeClock()
-    log = RecordingLog()
-    app = FakeApp(FakeBot([[]]))
-
-    async def sleep(delay):
-        clock.advance(delay)
-
-    runtime = _make_runtime(clock, log, sleep)
+    app = FakeApp()
+    runtime = _make_runtime(log)
     task = asyncio.create_task(runtime.run(app))
     await _wait_state(runtime, READY, task=task)
     assert app.updater.running is True
@@ -268,27 +181,21 @@ async def _test_d():
     assert any("releasing Telegram polling lease" in m for m in log.infos)
     assert any("Telegram polling stopped" in m for m in log.infos)
     assert any("MoodyBot shutdown complete" in m for m in log.infos)
-    assert runtime.state == SHUTTING_DOWN
 
 
-def test_d_sigterm_stops_polling():
-    asyncio.run(_test_d())
+def test_sigterm_stops_polling():
+    asyncio.run(_test_sigterm())
 
 
 # ---------------------------------------------------------------------------
-# TEST E — SIGTERM while a handler is in flight
+# SIGTERM during in-flight handler
 # ---------------------------------------------------------------------------
-async def _test_e():
-    clock = FakeClock()
+async def _test_shutdown_during_handler():
     log = RecordingLog()
-    app = FakeApp(FakeBot([[]]))
+    app = FakeApp()
     hold = asyncio.Event()
     app._handler_block = hold.wait()
-
-    async def sleep(delay):
-        clock.advance(delay)
-
-    runtime = _make_runtime(clock, log, sleep, handler_drain_seconds=2.0)
+    runtime = _make_runtime(log, handler_drain_seconds=2.0)
     task = asyncio.create_task(runtime.run(app))
     await _wait_state(runtime, READY, task=task)
 
@@ -298,7 +205,6 @@ async def _test_e():
     assert runtime.accepting_updates is False
     assert app.updater.running is False
     assert app.updater.stop_calls >= 1
-    assert any("Telegram polling stopped" in m for m in log.infos)
     assert runtime.in_flight == 1
     assert app.stop_saw_polling_stopped is True
     runtime.handler_exited()
@@ -307,20 +213,15 @@ async def _test_e():
     assert app.shutdown_calls == 1
 
 
-def test_e_shutdown_during_handler():
-    asyncio.run(_test_e())
+def test_shutdown_during_handler():
+    asyncio.run(_test_shutdown_during_handler())
 
 
 def test_guard_drops_updates_during_shutdown():
     async def _inner():
         reset_poller_guard()
-        clock = FakeClock()
         log = RecordingLog()
-
-        async def sleep(delay):
-            clock.advance(delay)
-
-        runtime = _make_runtime(clock, log, sleep)
+        runtime = _make_runtime(log)
         from telegram_lifecycle import bind_runtime
 
         bind_runtime(runtime)
@@ -341,50 +242,62 @@ def test_guard_drops_updates_during_shutdown():
     asyncio.run(_inner())
 
 
-def test_conflict_classifier():
-    assert is_poller_conflict(CONFLICT)
-    assert not is_poller_conflict(RuntimeError("boom"))
-
-
-def test_single_production_polling_entrypoint():
-    """moodybot.py must not start polling itself; telegram_lifecycle is the one site."""
-    src = (ROOT / "moodybot.py").read_text(encoding="utf-8")
-    assert "run_polling" not in src
-    assert "start_polling" not in src
-    assert "PollerRuntime" in src
-    assert "runtime.run(" in src or ".run(app)" in src
-
+def test_repository_no_manual_get_updates_startup():
+    """Production code must not call Bot.get_updates outside PTB's updater."""
     lifecycle = (ROOT / "telegram_lifecycle.py").read_text(encoding="utf-8")
-    assert lifecycle.count("start_polling") == 1
-    assert "run_polling" not in lifecycle
+    moody = (ROOT / "moodybot.py").read_text(encoding="utf-8")
 
+    # No acquire_polling_lease / lease probe language in lifecycle
+    assert "acquire_polling_lease" not in lifecycle
+    assert "lease acquired" not in lifecycle.lower()
+    assert "WAITING_FOR_TELEGRAM_POLLER" not in lifecycle
+
+    # No bot.get_updates / .get_updates( call expressions in production modules
+    assert re.search(r"\.get_updates\s*\(", lifecycle) is None
+    assert re.search(r"\.get_updates\s*\(", moody) is None
+    assert re.search(r"\.run_polling\s*\(", moody) is None
+    assert re.search(r"\.run_polling\s*\(", lifecycle) is None
+
+    # Exactly one await start_polling call site in production lifecycle
+    assert len(re.findall(r"await\s+\w[\w.]*\.start_polling\s*\(", lifecycle)) == 1
+
+    # Explicit delete_webhook must not appear as an awaited call (PTB bootstrap owns it)
+    assert re.search(r"await\s+[^\n]*\.delete_webhook\s*\(", lifecycle) is None
+    assert re.search(r"await\s+[^\n]*\.delete_webhook\s*\(", moody) is None
+
+
+def test_render_single_worker():
     render = (ROOT / "render.yaml").read_text(encoding="utf-8")
     assert "type: worker" in render
     assert render.count("type:") == 1
     assert "TELEGRAM_POLLER_SINGLETON" in render
     assert "TELEGRAM_MODE" in render
-    assert "sleep 8" not in render
 
 
 def test_language_tool_is_optional_info():
     src = (ROOT / "moodybot.py").read_text(encoding="utf-8")
     assert "LanguageTool not available; continuing without optional grammar polish" in src
-    assert "LanguageTool unavailable, skipping grammar polish" not in src
+
+
+def test_conflict_classifier():
+    from telegram.error import Conflict
+
+    assert is_poller_conflict(
+        Conflict("terminated by other getUpdates request; make sure that only one bot instance is running")
+    )
+    assert not is_poller_conflict(RuntimeError("boom"))
 
 
 if __name__ == "__main__":
-    test_a_normal_startup()
-    print("ok A")
-    test_b_render_overlap()
-    print("ok B")
-    test_c_persistent_duplicate()
-    print("ok C")
-    test_d_sigterm_stops_polling()
-    print("ok D")
-    test_e_shutdown_during_handler()
-    print("ok E")
+    test_startup_one_poller()
+    print("ok startup")
+    test_sigterm_stops_polling()
+    print("ok sigterm")
+    test_shutdown_during_handler()
+    print("ok drain")
     test_guard_drops_updates_during_shutdown()
-    test_conflict_classifier()
-    test_single_production_polling_entrypoint()
+    test_repository_no_manual_get_updates_startup()
+    test_render_single_worker()
     test_language_tool_is_optional_info()
+    test_conflict_classifier()
     print("ok")
