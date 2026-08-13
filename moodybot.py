@@ -1022,13 +1022,14 @@ def main():
         err = context.error
         if err is not None and is_poller_conflict(err):
             runtime = get_runtime()
-            tag = f"[{runtime.instance_id}] " if runtime is not None else ""
-            logger.warning(
-                "%sTelegram getUpdates conflict — another process may still be "
-                "polling this bot token: %s",
-                tag,
-                err,
-            )
+            if runtime is not None:
+                # Same classifier / fields as updater error_callback
+                runtime._polling_error_callback(err)
+            else:
+                logger.warning(
+                    "Telegram getUpdates 409 Conflict (no runtime bound): %s",
+                    err,
+                )
             return
         logger.error(f"Exception while handling an update: {err}")
         if update and hasattr(update, "message") and update.message:
