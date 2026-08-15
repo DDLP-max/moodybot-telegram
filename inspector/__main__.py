@@ -87,9 +87,10 @@ def main(argv: list[str] | None = None) -> None:
 
 
     if cmd == "capabilities":
-        # python -m inspector capabilities [hidden_transaction|escalation_payoff]
+        # python -m inspector capabilities [hidden_transaction|escalation_payoff|comic_premise]
         which = (args[1] if len(args) > 1 else "all").lower().replace("-", "_")
         from capability_detection import (
+            detect_comic_premise,
             detect_escalation_payoff,
             detect_hidden_transaction,
         )
@@ -100,6 +101,10 @@ def main(argv: list[str] | None = None) -> None:
             ),
             "escalation_payoff": (
                 "Then the actor scared the CFO. Then more budget. Then a pontoon boat."
+            ),
+            "comic_premise": (
+                "Only 3 more years of bulking and cutting and I can begin phase one "
+                "of looking women in the eyes"
             ),
             "none": "How do I replace a fiber connector?",
         }
@@ -121,6 +126,16 @@ def main(argv: list[str] | None = None) -> None:
                 f"payoff={ep.concrete_payoff_hint}"
             )
             ok = ok and ep.active
+        if which in {"all", "comic_premise"}:
+            comic = detect_comic_premise(samples["comic_premise"])
+            print(
+                f"comic_premise active={int(comic.active)} confidence={comic.confidence:.2f} "
+                f"signals={comic.signals}"
+            )
+            ok = ok and comic.active and comic.never_cure
+            comic_none = detect_comic_premise(samples["none"])
+            print(f"comic_premise_neg active={int(comic_none.active)}")
+            ok = ok and not comic_none.active
         raise SystemExit(0 if ok else 1)
 
     print(
@@ -130,7 +145,8 @@ def main(argv: list[str] | None = None) -> None:
         "  python -m inspector import-log [path] [--since YYYY-MM-DD]\n"
         "  python -m inspector rebuild [path] [--keep-seeds]\n"
         "  python -m inspector watch [path]\n"
-        "  python -m inspector capabilities [hidden_transaction|escalation_payoff]"
+        "  python -m inspector capabilities "
+        "[hidden_transaction|escalation_payoff|comic_premise]"
     )
 
 

@@ -236,6 +236,10 @@ class ResponsePlan:
     escalation_payoff: bool = False
     # When True, finalizer must not add Recognition Landing / moral / CTA after body
     payoff_is_terminal: bool = False
+    # Comic premise gate — heighten/tag; never therapeutic cure
+    comic_premise: bool = False
+    comic_premise_confidence: float = 0.0
+    never_cure_premise: bool = False
 
 
 @dataclass
@@ -1163,8 +1167,9 @@ def build_response_plan(
         topic_mode=topic_mode,
     )
 
-    # HIDDEN_TRANSACTION + ESCALATION_PAYOFF (capabilities, not modes)
+    # HIDDEN_TRANSACTION + ESCALATION_PAYOFF + comic-premise gate (not modes)
     from capability_detection import (
+        detect_comic_premise,
         detect_escalation_payoff,
         detect_hidden_transaction,
         log_capability_trace,
@@ -1172,7 +1177,8 @@ def build_response_plan(
 
     ht = detect_hidden_transaction(user_message)
     ep = detect_escalation_payoff(user_message)
-    log_capability_trace(ht, ep)
+    comic = detect_comic_premise(user_message)
+    log_capability_trace(ht, ep, comic)
     if ht.active:
         # Prefer as supporting (or primary when incentives are the claim)
         if primary in {
@@ -1190,6 +1196,25 @@ def build_response_plan(
                     mechanism_hint = "hidden_transaction_risk_transfer"
         if not supporting or supporting == "Epistemic Calibration":
             supporting = "Hidden Transaction"
+    if comic.should_block_therapy:
+        # Prefer bit continuation over Emotional State / Soft Emotional Precision
+        if primary in {
+            "Emotional State Recognition",
+            "Quiet Presence",
+            "Emotional Validation",
+            "Hidden Transaction",
+        } or not primary:
+            primary = "Humor As Disruption"
+        if supporting in {
+            None,
+            "",
+            "Epistemic Calibration",
+            "Boundary Analysis",
+            "Hidden Transaction",
+        }:
+            supporting = "Bit Continuation"
+        mechanism_hint = "comic_premise_continuation"
+        # Keep SNAP/low fine for tags — guidance forbids curing the premise
 
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
@@ -1237,6 +1262,9 @@ def build_response_plan(
         hidden_transaction_summary=(ht.actual_transaction or "")[:240],
         escalation_payoff=ep.active,
         payoff_is_terminal=bool(ep.active and ep.concrete_payoff_hint),
+        comic_premise=comic.active,
+        comic_premise_confidence=comic.confidence,
+        never_cure_premise=bool(comic.active and comic.never_cure),
     )
 
 
@@ -1820,6 +1848,7 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
 
 def _capability_extra_guidance(plan: ResponsePlan) -> str:
     from capability_detection import (
+        ComicPremiseAnalysis,
         EscalationPayoffAnalysis,
         HiddenTransactionAnalysis,
         capability_guidance,
@@ -1838,7 +1867,14 @@ def _capability_extra_guidance(plan: ResponsePlan) -> str:
         confidence=0.8 if getattr(plan, "escalation_payoff", False) else 0.0,
         concrete_payoff_hint="terminal" if getattr(plan, "payoff_is_terminal", False) else None,
     )
-    return capability_guidance(ht, ep)
+    comic = ComicPremiseAnalysis(
+        active=bool(getattr(plan, "comic_premise", False)),
+        confidence=float(getattr(plan, "comic_premise_confidence", 0) or 0),
+        never_cure=bool(getattr(plan, "never_cure_premise", False)),
+    )
+    if comic.active and not comic.signals:
+        comic.signals = ["routed"]
+    return capability_guidance(ht, ep, comic)
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -2340,6 +2376,8 @@ def finalize_response(
         "hidden_transaction_confidence": f"{float(getattr(plan, 'hidden_transaction_confidence', 0) or 0):.2f}",
         "escalation_payoff": str(bool(getattr(plan, "escalation_payoff", False))).lower(),
         "payoff_is_terminal": str(bool(getattr(plan, "payoff_is_terminal", False))).lower(),
+        "comic_premise": str(bool(getattr(plan, "comic_premise", False))).lower(),
+        "never_cure_premise": str(bool(getattr(plan, "never_cure_premise", False))).lower(),
         "closing_strategy": plan.closing_strategy,
         "landing": plan.landing,
         "anchors": ",".join(plan.anchors[:6]),

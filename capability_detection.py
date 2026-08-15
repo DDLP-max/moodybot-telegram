@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""HIDDEN_TRANSACTION + ESCALATION_PAYOFF — intelligence capabilities, not modes.
+"""HIDDEN_TRANSACTION + ESCALATION_PAYOFF + comic-premise gate.
 
 HIDDEN_TRANSACTION: what MoodyBot sees (unstated exchange under the stated event).
 ESCALATION_PAYOFF: how MoodyBot tells a story (beats that escalate → concrete stop).
+COMIC_PREMISE: recognize exaggerated comic bits before therapeutic reframing.
 
 Evidence-gated. Never slash commands. Never exposed as user-facing modes.
 """
@@ -18,6 +19,7 @@ logger = logging.getLogger("moodybot")
 # Confidence gates (spec)
 HT_FLOOR = 0.55
 HT_STRONG = 0.75
+COMIC_FLOOR = 0.55
 
 
 @dataclass
@@ -44,6 +46,20 @@ class EscalationPayoffAnalysis:
     beat_signals: List[str] = field(default_factory=list)
     concrete_payoff_hint: Optional[str] = None
     confidence: float = 0.0
+
+
+@dataclass
+class ComicPremiseAnalysis:
+    """Exaggerated comic premise — heighten/tag; never cure."""
+
+    active: bool = False
+    confidence: float = 0.0
+    signals: List[str] = field(default_factory=list)
+    never_cure: bool = True
+
+    @property
+    def should_block_therapy(self) -> bool:
+        return self.active and self.confidence >= COMIC_FLOOR
 
 
 # --- surface / motive mismatch cues ---
@@ -111,6 +127,109 @@ _MORAL_TAIL = re.compile(
     r"maybe\s+that'?s\s+what\s+we'?re\s+all"
     r").*$"
 )
+
+# Comic premise cues — conspicuous exaggeration / absurd optimization / punchline unlock
+_COMIC_OPTIMIZATION = re.compile(
+    r"\b("
+    r"bulk(?:ing)?|cut(?:ting)?|macros?|body[- ]?fat|calorie|PR\b|personal\s+record|"
+    r"optimize|optimization|protocol|phase\s+(?:one|two|1|2|three|3)|"
+    r"unlock|level\s+up|beginner\s+program|advanced\s+(?:compound|movement)"
+    r")\b",
+    re.I,
+)
+_COMIC_BASIC_SOCIAL = re.compile(
+    r"\b("
+    r"look(?:ing)?\s+(?:\w+\s+)?(?:women|people|girls|her|him)\s+in\s+the\s+eyes|"
+    r"eye\s+contact|saying\s+hello|talk(?:ing)?\s+to\s+(?:women|girls|strangers)|"
+    r"ask(?:ing)?\s+(?:someone|her|him)\s+out|hold(?:ing)?\s+a\s+conversation"
+    r")\b",
+    re.I,
+)
+_COMIC_ABSURD_DELAY = re.compile(
+    r"\b("
+    r"only\s+\d+\s+more\s+years?|in\s+\d+\s+more\s+years?|"
+    r"after\s+\d+\s+years?\s+of|once\s+i\s+(?:finish|complete|hit)|"
+    r"then\s+i\s+(?:can|could|will)\s+begin|begin\s+phase"
+    r")\b",
+    re.I,
+)
+_COMIC_PUNCHLINE_FRAME = re.compile(
+    r"\b("
+    r"phase\s+(?:one|1)\s+of|finally\s+(?:ready|allowed)\s+to|"
+    r"earn(?:ed|ing)?\s+the\s+right\s+to|graduate\s+to"
+    r")\b",
+    re.I,
+)
+# Genuine distress — do not treat as a bit
+_COMIC_GENUINE_DISTRESS = re.compile(
+    r"\b("
+    r"i'?m\s+(?:really\s+)?(?:scared|terrified|depressed|suicidal)|"
+    r"panic\s+attack|can'?t\s+leave\s+the\s+house|trauma|abuse|"
+    r"been\s+struggling\s+with\s+anxiety\s+for"
+    r")\b",
+    re.I,
+)
+# Known failure mode: curing the joke with therapist aphorism
+_PREMISE_CURE = re.compile(
+    r"(?i)("
+    r"the\s+body\s+isn'?t\s+the\s+gatekeeper|"
+    r"the\s+story\s+is\.?$|"
+    r"the\s+real\s+(?:issue|problem)\s+is|"
+    r"it'?s\s+not\s+(?:really\s+)?about\s+(?:your\s+)?(?:body|muscles?|physique)|"
+    r"what\s+you'?re\s+really\s+afraid\s+of|"
+    r"once\s+you\s+accept\s+yourself|"
+    r"self[- ]worth\s+isn'?t\s+measured"
+    r")"
+)
+
+
+def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
+    """Detect exaggerated comic premises before therapeutic reframing.
+
+    When an apparently vulnerable statement contains conspicuous exaggeration,
+    absurd sequencing, impossible optimization, or punchline construction,
+    treat it as a bit — never cure the premise.
+    """
+    text = (user_message or "").strip()
+    out = ComicPremiseAnalysis()
+    if not text or _TECHNICAL_NO_HT.search(text) or _COMIC_GENUINE_DISTRESS.search(text):
+        return out
+
+    signals: List[str] = []
+    score = 0.0
+
+    if _COMIC_OPTIMIZATION.search(text):
+        signals.append("optimization_frame")
+        score += 0.3
+    if _COMIC_BASIC_SOCIAL.search(text):
+        signals.append("basic_social_unlock")
+        score += 0.3
+    if _COMIC_ABSURD_DELAY.search(text):
+        signals.append("absurd_delay")
+        score += 0.25
+    if _COMIC_PUNCHLINE_FRAME.search(text):
+        signals.append("punchline_frame")
+        score += 0.25
+
+    # Fitness protocol applied to trivial human act = strong comic compound
+    if "optimization_frame" in signals and "basic_social_unlock" in signals:
+        score += 0.2
+        signals.append("fitness_to_social_absurdism")
+
+    out.signals = signals
+    out.confidence = round(min(0.95, score), 2)
+    # Need compound evidence — not bare "eye contact" alone
+    out.active = out.confidence >= COMIC_FLOOR and len(signals) >= 2
+    out.never_cure = True
+    return out
+
+
+def looks_like_premise_cure(draft: str) -> bool:
+    """True when a reply 'cures' a comic premise with therapist reframing."""
+    body = re.sub(r"\s*🥃\s*$", "", (draft or "").strip())
+    if not body:
+        return False
+    return bool(_PREMISE_CURE.search(body))
 
 
 def detect_hidden_transaction(user_message: str) -> HiddenTransactionAnalysis:
@@ -264,9 +383,20 @@ def draft_has_terminal_payoff(text: str) -> bool:
 def capability_guidance(
     ht: HiddenTransactionAnalysis,
     ep: EscalationPayoffAnalysis,
+    comic: Optional[ComicPremiseAnalysis] = None,
 ) -> str:
     """Injection for plan_closer_instruction — compressed, evidence-bound."""
     parts: List[str] = []
+    if comic and comic.should_block_therapy:
+        parts.append(
+            "\nCOMIC PREMISE (gate before therapeutic reframing — not a mode):\n"
+            f"Confidence={comic.confidence:.2f} signals={','.join(comic.signals[:6])}.\n"
+            "NEVER CURE THE PREMISE. The distortion IS the joke.\n"
+            "Heighten the bit or add a sharper tag. Stay inside the user's frame.\n"
+            "Do NOT reframe as sincere insecurity. Do NOT therapist-aphorism the setup.\n"
+            "FAIL: \"The body isn't the gatekeeper. The story is.\"\n"
+            "PASS: stay in the fitness/protocol absurdity applied to basic human contact.\n"
+        )
     if ht.active:
         tone = (
             "strong Moody formulation allowed"
@@ -300,7 +430,11 @@ def capability_guidance(
     return "".join(parts)
 
 
-def log_capability_trace(ht: HiddenTransactionAnalysis, ep: EscalationPayoffAnalysis) -> None:
+def log_capability_trace(
+    ht: HiddenTransactionAnalysis,
+    ep: EscalationPayoffAnalysis,
+    comic: Optional[ComicPremiseAnalysis] = None,
+) -> None:
     logger.info(
         "CAPABILITY_TRACE hidden_transaction=%s confidence=%.2f",
         1 if ht.active else 0,
@@ -311,5 +445,12 @@ def log_capability_trace(ht: HiddenTransactionAnalysis, ep: EscalationPayoffAnal
         1 if ep.active else 0,
         ep.confidence,
     )
+    if comic is not None:
+        logger.info(
+            "CAPABILITY_TRACE comic_premise=%s confidence=%.2f never_cure=%s",
+            1 if comic.active else 0,
+            comic.confidence,
+            1 if (comic.active and comic.never_cure) else 0,
+        )
     if ep.active:
         logger.info("NARRATIVE_TRACE structure=ESCALATION_PAYOFF")
