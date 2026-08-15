@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""python -m inspector seed | serve | import-log | rebuild | watch"""
+"""python -m inspector seed | serve | import-log | rebuild | watch """
 
 from __future__ import annotations
 
@@ -85,13 +85,52 @@ def main(argv: list[str] | None = None) -> None:
                 print(f"reloaded: {stats}")
         return
 
+
+    if cmd == "capabilities":
+        # python -m inspector capabilities [hidden_transaction|escalation_payoff]
+        which = (args[1] if len(args) > 1 else "all").lower().replace("-", "_")
+        from capability_detection import (
+            detect_escalation_payoff,
+            detect_hidden_transaction,
+        )
+
+        samples = {
+            "hidden_transaction": (
+                "Management already knows what it wants but hires McKinsey to recommend it."
+            ),
+            "escalation_payoff": (
+                "Then the actor scared the CFO. Then more budget. Then a pontoon boat."
+            ),
+            "none": "How do I replace a fiber connector?",
+        }
+        ok = True
+        if which in {"all", "hidden_transaction"}:
+            ht = detect_hidden_transaction(samples["hidden_transaction"])
+            print(
+                f"hidden_transaction active={int(ht.active)} confidence={ht.confidence:.2f} "
+                f"tx={ht.actual_transaction}"
+            )
+            ok = ok and ht.active
+            ht_none = detect_hidden_transaction(samples["none"])
+            print(f"hidden_transaction_neg active={int(ht_none.active)}")
+            ok = ok and not ht_none.active
+        if which in {"all", "escalation_payoff"}:
+            ep = detect_escalation_payoff(samples["escalation_payoff"])
+            print(
+                f"escalation_payoff active={int(ep.active)} confidence={ep.confidence:.2f} "
+                f"payoff={ep.concrete_payoff_hint}"
+            )
+            ok = ok and ep.active
+        raise SystemExit(0 if ok else 1)
+
     print(
         "Usage:\n"
         "  python -m inspector seed\n"
         "  python -m inspector serve [port]\n"
         "  python -m inspector import-log [path] [--since YYYY-MM-DD]\n"
         "  python -m inspector rebuild [path] [--keep-seeds]\n"
-        "  python -m inspector watch [path]"
+        "  python -m inspector watch [path]\n"
+        "  python -m inspector capabilities [hidden_transaction|escalation_payoff]"
     )
 
 

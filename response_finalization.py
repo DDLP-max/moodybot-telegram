@@ -229,6 +229,13 @@ class ResponsePlan:
     mode: str = "dynamic"
     selected_command: str = "/thoughts"
     anchors: List[str] = field(default_factory=list)
+    # Intelligence capabilities (not modes / slash commands)
+    hidden_transaction: bool = False
+    hidden_transaction_confidence: float = 0.0
+    hidden_transaction_summary: str = ""
+    escalation_payoff: bool = False
+    # When True, finalizer must not add Recognition Landing / moral / CTA after body
+    payoff_is_terminal: bool = False
 
 
 @dataclass
@@ -406,7 +413,8 @@ def classify_claim_domain(user_message: str) -> str:
     if is_practical_request(user_message):
         return "practical"
 
-    # Word-boundary for short tokens — "eat" must not match "threatened"
+    # Food = taste. Media titles/preference claims = taste. Bare "season" alone is not enough
+    # (e.g. "why did X season 8 fail?" is craft analysis, not SNAP-compress preference).
     if re.search(
         r"\b(mcdonald|burger|fries|pizza|coffee|beer|wine|restaurant|taste|"
         r"delicious|food|sushi|steak|dessert|recipe|hungry|eat|dining|"
@@ -417,6 +425,22 @@ def classify_claim_domain(user_message: str) -> str:
         for p in (
             "best place for", "best burger", "best fries", "favorite food",
         )
+    ):
+        return "taste_preference"
+
+    if re.search(
+        r"\b(breaking bad|better call saul|netflix|hbo|"
+        r"television|tv show|movie|film|series|binge|episode)\b",
+        text,
+    ) or any(
+        p in text
+        for p in (
+            "no show will", "best show", "favorite show", "best series",
+            "favorite series", "best movie", "favorite movie",
+        )
+    ) or (
+        re.search(r"\bshow(s)?\b", text)
+        and re.search(r"\b(best|worst|compare|ever|favorite|overrated|underrated)\b", text)
     ):
         return "taste_preference"
 
@@ -766,6 +790,14 @@ def classify_response_budget(
     # neutral — length heuristics
     if longish:
         return "high"
+    # Short craft/mechanism asks still need KNIFE room (not SNAP tweet-compress).
+    # e.g. "Why did Game of Thrones season 8 fail?" — thesis-proof drafts must survive.
+    if re.search(r"\b(why|how)\b", text, re.I) and re.search(
+        r"\b(fail|failed|collapse|work|happen|cause|because|succeed|wrong)\b",
+        text,
+        re.I,
+    ):
+        return "medium"
     if wc <= 35 and sentences <= 2:
         return "low"
     return "medium"
@@ -1130,6 +1162,35 @@ def build_response_plan(
         domain=domain,
         topic_mode=topic_mode,
     )
+
+    # HIDDEN_TRANSACTION + ESCALATION_PAYOFF (capabilities, not modes)
+    from capability_detection import (
+        detect_escalation_payoff,
+        detect_hidden_transaction,
+        log_capability_trace,
+    )
+
+    ht = detect_hidden_transaction(user_message)
+    ep = detect_escalation_payoff(user_message)
+    log_capability_trace(ht, ep)
+    if ht.active:
+        # Prefer as supporting (or primary when incentives are the claim)
+        if primary in {
+            "Hidden Incentive Analysis",
+            "Power / Incentive Analysis",
+            "Business / Tradeoff Analysis",
+            "Pattern Forensics",
+        }:
+            supporting = "Hidden Transaction"
+        elif domain in {"business", "court", "social_power", "relationship"} or ht.confidence >= 0.75:
+            if primary not in {"Quiet Presence", "Practical Next Action", "Operational Intelligence"}:
+                supporting = supporting or "Hidden Transaction"
+                if "Incentive" not in (primary or "") and ht.confidence >= 0.8:
+                    # Keep lens; elevate mechanism
+                    mechanism_hint = "hidden_transaction_risk_transfer"
+        if not supporting or supporting == "Epistemic Calibration":
+            supporting = "Hidden Transaction"
+
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
         "body_ends_response": "none",
@@ -1171,6 +1232,11 @@ def build_response_plan(
         mode=mode,
         selected_command=selected_command or "/thoughts",
         anchors=list(anchors.all_anchors),
+        hidden_transaction=ht.active,
+        hidden_transaction_confidence=ht.confidence,
+        hidden_transaction_summary=(ht.actual_transaction or "")[:240],
+        escalation_payoff=ep.active,
+        payoff_is_terminal=bool(ep.active and ep.concrete_payoff_hint),
     )
 
 
@@ -1525,11 +1591,21 @@ def lens_voice_guidance(lens: str) -> str:
             f"{q_line}"
             f"{family_line}"
             "Notices first: lived experience, craft, authenticity, sensory detail, anti-pretension.\n"
+            "Object-first: open on the work (food / show / city / craft) — not you / yourself / your fear.\n"
             "Shows before explaining. Prefer observation over diagnosis.\n"
-            "Common failure: diagnoses with psychology or philosophy.\n"
+            "Talk about the work — craft, standards, earned admiration. "
+            "Not what's secretly wrong with the person praising it.\n"
+            "Common failure: diagnoses the viewer with psychology "
+            "(nostalgia, fear best days are over, 'you protect yourself…').\n"
+            "Smell: 'You don't…' / 'You're actually…' used to psychoanalyze the speaker "
+            "instead of the object.\n"
             "GENERIC (any lens could write this): \"People mistake consistency for quality.\"\n"
             "DISTINCTIVE (Bourdain notices): \"You already know exactly what it's going to taste like.\"\n"
-            "PASS: \"That's like saying prison is just a room.\"\n"
+            "PASS (food): \"That's like saying prison is just a room.\"\n"
+            "PASS (TV): \"Breaking Bad didn't ruin television. It raised the price of impressing you.\"\n"
+            "PASS (TV): \"That's like saying the best meal you'll ever eat is the first great restaurant you found.\"\n"
+            "FAIL (TV → viewer psych): \"You don't protect Breaking Bad from every other show. "
+            "You protect yourself from the possibility that your best days of watching are already over.\"\n"
             "FAIL: \"Familiarity bias.\"\n"
         )
     if name == "Munger":
@@ -1582,6 +1658,12 @@ def lens_voice_guidance(lens: str) -> str:
             f"{family_line}"
             "Notices first: recurring social structures — only when actually present.\n"
             "Prefer the transferable human pattern over winning a demographic argument.\n"
+            "Language patterns: sometimes the word already ranked the thing. "
+            "Reframe the term — do not argue the tribes.\n"
+            "CANONICAL PASS (protect — do not regress): "
+            "\"The word 'foreplay' already decided the hierarchy. … "
+            "The term didn't describe desire. It ranked it.\"\n"
+            "Three sentences. No culture-essay tail. Stop.\n"
             "Common failure: finding the same mechanism every time; forcing ideology onto "
             "unrelated prompts (food, travel, ordinary preference).\n"
             "If no social pattern is evidenced, this lens should not have been selected.\n"
@@ -1612,6 +1694,10 @@ def lens_voice_guidance(lens: str) -> str:
             "'what they actually want…' / 'the real problem is…' / 'it isn't about…' "
             "(sometimes brilliant; often a steal). Do not invent sociology the prompt "
             "never claimed.\n"
+            "LENS DRIFT: taste / entertainment / craft claims belong to Bourdain. "
+            "Talk about the work — not the viewer's fear that their best days are over. "
+            "'You don't…' / 'You're actually…' used to psychoanalyze the speaker on a "
+            "taste claim is EI stealing Bourdain's job.\n"
             "FAIL (drift): effort prompt → 'escape hatch' / 'risk being refused'.\n"
             "PASS (grounded): \"Effort isn't attractive because it's romantic. It's "
             "attractive because it's evidence.\" / \"Are you willing to inconvenience "
@@ -1621,6 +1707,15 @@ def lens_voice_guidance(lens: str) -> str:
             "they want out without having to be the bad guy.\"\n"
             "PASS (Mode 2): \"Most people don't edit the relationship. They edit the ending.\" / "
             "\"The cleanest exits usually require the messiest rewrites.\"\n"
+            "MODE 1 CEILING (toxic intensity / money can't compete): naming the attachment "
+            "is not enough. Ask why chaos feels more valuable than peace — not only why she's still there.\n"
+            "FAIL (explains): \"She still won't trade the version of herself that only comes "
+            "alive when she's trying to survive you. That's the part she can't buy and can't fake.\"\n"
+            "PASS (reframes): \"You can't outbid an addiction with stability.\" / "
+            "\"Sometimes they miss the chemical weather that came with them.\" / "
+            "\"Your nervous system mistakes intensity for importance.\"\n"
+            "Keep a fresh image if you have one (\"the life that photographs clean\") — "
+            "then land the reframe; don't cash out with 'can't buy / can't fake.'\n"
             "FAIL (competent): \"People usually threaten others with the loss they'd fear most themselves.\"\n"
             "PASS (discovery): \"Every threat is autobiographical.\" / \"People don't invent fears. "
             "They export them.\" — then prove it.\n"
@@ -1719,7 +1814,31 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         + lens_voice
         + domain_block
         + extra
+        + _capability_extra_guidance(plan)
     )
+
+
+def _capability_extra_guidance(plan: ResponsePlan) -> str:
+    from capability_detection import (
+        EscalationPayoffAnalysis,
+        HiddenTransactionAnalysis,
+        capability_guidance,
+    )
+
+    ht = HiddenTransactionAnalysis(
+        confidence=float(getattr(plan, "hidden_transaction_confidence", 0) or 0),
+        actual_transaction=getattr(plan, "hidden_transaction_summary", None) or None,
+        surface_event=(getattr(plan, "original_subject", None) or "")[:160],
+    )
+    if not getattr(plan, "hidden_transaction", False):
+        ht.confidence = 0.0
+        ht.actual_transaction = None
+    ep = EscalationPayoffAnalysis(
+        active=bool(getattr(plan, "escalation_payoff", False)),
+        confidence=0.8 if getattr(plan, "escalation_payoff", False) else 0.0,
+        concrete_payoff_hint="terminal" if getattr(plan, "payoff_is_terminal", False) else None,
+    )
+    return capability_guidance(ht, ep)
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -1867,6 +1986,24 @@ def _apply_closing_strategy(
         plan.anchors = list(anchors.all_anchors)
 
     before = (text or "").strip()
+
+    # ESCALATION_PAYOFF terminal: body is the landing — forbid Recognition Landing / morals
+    from capability_detection import draft_has_terminal_payoff, strip_post_payoff_moral
+
+    if getattr(plan, "escalation_payoff", False) or getattr(plan, "payoff_is_terminal", False):
+        if draft_has_terminal_payoff(before) or getattr(plan, "payoff_is_terminal", False):
+            plan.payoff_is_terminal = True
+            cleaned, moral_stripped = strip_post_payoff_moral(before)
+            cleaned2, mod = protective_cleanup(cleaned)
+            plan.landing = "body_ends_response"
+            plan.closing_strategy = "none"
+            plan.allow_question = False
+            logger.info(
+                "FINALIZER_TRACE payoff_terminal=1 recognition_landing=0 moral_stripped=%s",
+                1 if moral_stripped else 0,
+            )
+            return cleaned2, mod or moral_stripped, False
+
     decision = select_landing(
         user_message,
         selected_command=plan.selected_command,
@@ -2199,6 +2336,10 @@ def finalize_response(
         "mechanism_hint": plan.mechanism_hint or "",
         "intervention": plan.intervention or "",
         "voice": plan.voice or "",
+        "hidden_transaction": str(bool(getattr(plan, "hidden_transaction", False))).lower(),
+        "hidden_transaction_confidence": f"{float(getattr(plan, 'hidden_transaction_confidence', 0) or 0):.2f}",
+        "escalation_payoff": str(bool(getattr(plan, "escalation_payoff", False))).lower(),
+        "payoff_is_terminal": str(bool(getattr(plan, "payoff_is_terminal", False))).lower(),
         "closing_strategy": plan.closing_strategy,
         "landing": plan.landing,
         "anchors": ",".join(plan.anchors[:6]),

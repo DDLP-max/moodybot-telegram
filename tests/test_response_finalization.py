@@ -190,7 +190,7 @@ def test_structure_checklist_no_mandatory_cta():
     )
     lower = checklist.lower()
     assert "cta present" not in lower or "cta is not mandatory" in lower
-    assert "closing beat" in lower or "closer strategy" in lower
+    assert "closer" in lower  # costume closer / no mandatory CTA
 
 
 if __name__ == "__main__":
