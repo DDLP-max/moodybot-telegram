@@ -457,6 +457,7 @@ def evaluate_gold_shape(
             psychologizing,
             restates_runway,
             unsupported_depth,
+            overperformance,
         )
         from capability_detection import detect_comic_premise
 
@@ -475,6 +476,8 @@ def evaluate_gold_shape(
             failures.append("unsupported_depth")
         if restates_runway(user_message, body):
             failures.append("runway_restatement")
+        if overperformance(user_message, body):
+            failures.append("overperformance")
     except Exception:
         pass
 

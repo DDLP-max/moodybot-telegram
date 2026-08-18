@@ -69,8 +69,22 @@ SOCIAL_MODES = (
     "provocation",
     "vulnerability",
     "question",
+    "direct_participation",
     "observation",
     "open",
+)
+
+# Topical slash-tones that must not outrank pick-one / name-one interaction shape.
+TOPICAL_AUTO_TONES = frozenset(
+    {
+        "/cinema",
+        "/sensory",
+        "/noir",
+        "/velvet",
+        "/ghost",
+        "/float",
+        "/drama",
+    }
 )
 
 
@@ -81,14 +95,36 @@ class SocialModeAnalysis:
     mode: str = "open"
     confidence: float = 0.0
     signals: List[str] = field(default_factory=list)
+    # Natural resolution of a question: name | explain | reason | ""
+    resolution: str = ""
+    # pick_one | why | how_to | open — decided before topical tone
+    interaction_shape: str = "open"
 
     @property
     def comic(self) -> bool:
         return self.mode == "comic"
 
     @property
+    def participation(self) -> bool:
+        return (
+            self.mode == "direct_participation"
+            or self.resolution == "name"
+            or "participation" in self.signals
+            or self.interaction_shape == "pick_one"
+        )
+
+    @property
+    def blocks_topical_auto_route(self) -> bool:
+        """Topic keywords (/cinema, movie, actor) must not beat pick-one."""
+        return self.participation
+
+    @property
     def depth_earned(self) -> bool:
-        return self.mode in {"vulnerability", "provocation", "question"}
+        if self.participation:
+            return False
+        return self.mode in {"vulnerability", "provocation"} or (
+            self.mode == "question" and self.resolution in {"explain", "reason"}
+        )
 
 
 # --- surface / motive mismatch cues ---
@@ -256,6 +292,19 @@ _QUESTION_SHAPE = re.compile(
     r"^\s*(?:how|what|why|when|where|should|do|does|can|is|are)\b|[?]\s*$",
     re.I,
 )
+# Participation ask — "name one" / pick / favorite. Not an invitation to excavate.
+_PARTICIPATION_ASK = re.compile(
+    r"\b("
+    r"name\s+(?:an?|one|your)|"
+    r"pick\s+(?:an?|one)|"
+    r"favorite\s+\w+|"
+    r"who(?:'s|\s+is)\s+overrated|"
+    r"who(?:'s|\s+is)\s+your\s+favorite|"
+    r"give\s+me\s+(?:an?|one)|"
+    r"one\s+actor"
+    r")\b",
+    re.I,
+)
 # Known failure mode: curing the joke with therapist aphorism
 _PREMISE_CURE = re.compile(
     r"(?i)("
@@ -400,12 +449,27 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
             out.mode = "question"
             out.confidence = 0.8
             out.signals = ["question_shape"]
+            if re.search(r"^\s*why\b", text, re.I):
+                out.resolution = "explain"
+                out.signals.append("why")
+                out.interaction_shape = "why"
+            else:
+                out.resolution = "reason"
+                out.interaction_shape = "how_to"
             return out
 
     if _COMIC_GENUINE_DISTRESS.search(text):
         out.mode = "vulnerability"
         out.confidence = 0.85
         out.signals = ["genuine_distress"]
+        return out
+
+    if _PARTICIPATION_ASK.search(text):
+        out.mode = "direct_participation"
+        out.confidence = 0.95
+        out.signals = ["participation", "pick_one"]
+        out.resolution = "name"
+        out.interaction_shape = "pick_one"
         return out
 
     comic = detect_comic_premise(text)
@@ -456,6 +520,26 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
     out.confidence = 0.4
     out.signals = signals
     return out
+
+
+def select_tone_command(
+    user_message: str,
+    *,
+    explicit_command: Optional[str] = None,
+    topical_auto_command: Optional[str] = None,
+) -> Tuple[str, str]:
+    """Pick a slash-tone. Interaction shape beats topical auto-route.
+
+    Returns (command, source) where source is explicit | social-first | auto-route | continue.
+    """
+    if explicit_command:
+        return explicit_command, "explicit"
+    social = classify_social_mode(user_message)
+    if social.blocks_topical_auto_route:
+        return "/thoughts", "social-first"
+    if topical_auto_command:
+        return topical_auto_command, "auto-route"
+    return "", "continue"
 
 
 def looks_like_premise_cure(draft: str) -> bool:
@@ -710,9 +794,32 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "like themselves before re-entering, when some of that self only returns "
             "through participation.\n"
         )
-    if m == "question":
+    if m == "direct_participation" or mode.participation or (mode.resolution == "name"):
         return (
-            "\nSOCIAL MODE: actual question/problem. Reason about it. "
+            "\nSOCIAL MODE: direct participation (pick-one / name-one).\n"
+            "PRECEDENCE: interaction shape → social mode → capability → topical tone. "
+            "Vocabulary tells Moody what people are talking about. Interaction tells Moody what they're doing. What they're doing wins. "
+            "Do not auto-route /cinema because the prompt mentioned actor or movie.\n"
+            "intent=answer. capability=none. tone=neutral/moody. SNAP.\n"
+            "Answer the requested item first. One item is sufficient. "
+            "At most one short comic or opinionated tag. Do not explain unless asked why.\n"
+            "OVERPERFORMANCE: don't spend intelligence the interaction didn't ask for.\n"
+            "PASS: \"Adam Sandler.\"\n"
+            "PASS: \"Adam Sandler. I can already hear the Netflix menu loading.\"\n"
+            "FAIL: naming the actor, then writing the closing narration to "
+            "Cinema Paradiso (\"the frame forgets its own heartbeat\").\n"
+        )
+    if m == "question":
+        if mode.resolution == "explain":
+            return (
+                "\nSOCIAL MODE: why-question. Explanation is earned. "
+                "Answer the why. Do not manufacture a second thesis.\n"
+            )
+        return (
+            "\nSOCIAL MODE: actual question/problem. Reason about it at the "
+            "question's natural resolution depth. "
+            "A factual/analytical question may require reasoning. "
+            "A \"name one\" requires a name. "
             "Do not manufacture a Moody Insight™ the question did not ask for.\n"
         )
     if m == "observation":

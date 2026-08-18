@@ -384,6 +384,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             psychologizing,
             restates_runway,
             unsupported_depth,
+            overperformance,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -444,6 +445,23 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "Start where the post stops",
                 "pass",
                 "opens at the inferential edge",
+            )
+        if overperformance(prompt, out) or "overperformance" in failures:
+            add(
+                "Overperformance",
+                "fail",
+                "spent intelligence the interaction didn't ask for — a name-one required a name, not closing narration",
+                examples=[
+                    "✗ The moment Adam Sandler appears, the frame forgets its own heartbeat…",
+                    "✓ Adam Sandler.",
+                    "✓ Adam Sandler. I see his face and already know how the next two hours smell.",
+                ],
+            )
+        else:
+            add(
+                "Overperformance",
+                "pass",
+                "did not overspend past the question's natural resolution",
             )
     except Exception:
         pass

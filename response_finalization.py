@@ -245,6 +245,10 @@ class ResponsePlan:
     # Routing question (not a user-facing mode): comic|provocation|vulnerability|question|observation|open
     social_mode: str = "open"
     social_mode_confidence: float = 0.0
+    social_mode_signals: List[str] = field(default_factory=list)
+    social_resolution: str = ""  # name | explain | reason | ""
+    interaction_shape: str = "open"  # pick_one | why | how_to | open
+    tone_source: str = ""  # explicit | social-first | auto-route | classifier
 
 
 @dataclass
@@ -1038,7 +1042,26 @@ def build_response_plan(
     channel: str = "telegram",
     mode: str = "dynamic",
     body: str = "",
+    tone_source: str = "",
 ) -> ResponsePlan:
+    from capability_detection import (
+        TOPICAL_AUTO_TONES,
+        classify_social_mode,
+        detect_comic_premise,
+        detect_escalation_payoff,
+        detect_hidden_transaction,
+        log_capability_trace,
+    )
+
+    # Precedence: interaction shape → social mode → capability → topical tone
+    social = classify_social_mode(user_message)
+    if social.blocks_topical_auto_route and (
+        not tone_source or tone_source == "auto-route"
+    ):
+        if (selected_command or "") in TOPICAL_AUTO_TONES and tone_source != "explicit":
+            selected_command = "/thoughts"
+            tone_source = tone_source or "social-first"
+
     missing = needs_clarification(user_message)
     practical = is_practical_request(user_message)
     grief = is_grief_or_trauma(user_message)
@@ -1104,6 +1127,24 @@ def build_response_plan(
         mechanism_hint = "clarification"
         topic_mode = "compress"
         response_budget = "low"
+    elif social.participation or social.interaction_shape == "pick_one":
+        # Pick-one / name-one: answer, don't explore. Topic keywords do not earn /cinema.
+        intent = "answer"
+        confidence = "high"
+        primary = None
+        supporting = None
+        lens = "Hank Moody"
+        voice = None
+        preferred_structure = "SNAP"
+        mechanism_hint = "participation_name"
+        topic_mode = "compress"
+        response_budget = "low"
+        domain = "general"
+        insight = False
+        if not tone_source or tone_source == "auto-route":
+            tone_source = "social-first"
+        if (selected_command or "") in TOPICAL_AUTO_TONES:
+            selected_command = "/thoughts"
     elif practical or domain == "practical":
         intent = "action"
         confidence = "medium"
@@ -1173,25 +1214,16 @@ def build_response_plan(
     )
 
     # HIDDEN_TRANSACTION + ESCALATION_PAYOFF + comic-premise gate (not modes)
-    from capability_detection import (
-        classify_social_mode,
-        detect_comic_premise,
-        detect_escalation_payoff,
-        detect_hidden_transaction,
-        log_capability_trace,
-    )
-
     ht = detect_hidden_transaction(user_message)
     ep = detect_escalation_payoff(user_message)
     comic = detect_comic_premise(user_message)
-    social = classify_social_mode(user_message)
     if social.mode == "comic" and not comic.active:
         comic.active = True
         comic.confidence = max(comic.confidence, social.confidence or 0.7)
         comic.signals = comic.signals or list(social.signals)
         comic.never_cure = True
     log_capability_trace(ht, ep, comic, social)
-    if ht.active and social.mode != "comic":
+    if ht.active and social.mode != "comic" and not social.participation:
         # Prefer as supporting (or primary when incentives are the claim)
         if primary in {
             "Hidden Incentive Analysis",
@@ -1214,6 +1246,12 @@ def build_response_plan(
         supporting = "Bit Continuation"
         mechanism_hint = "comic_premise_continuation"
         # Keep SNAP/low fine for tags — guidance forbids curing the premise
+    if social.participation:
+        preferred_structure = "SNAP"
+        response_budget = "low"
+        topic_mode = "compress"
+        landing = "body_ends_response"
+        mechanism_hint = "participation_name"
 
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
@@ -1267,6 +1305,10 @@ def build_response_plan(
         comic_payoff_is_terminal=bool(comic.active),
         social_mode=social.mode,
         social_mode_confidence=social.confidence,
+        social_mode_signals=list(social.signals),
+        social_resolution=social.resolution,
+        interaction_shape=social.interaction_shape or "open",
+        tone_source=tone_source or "",
     )
 
 
@@ -1346,11 +1388,19 @@ If a sentence merely restates the user's thesis — delete it.
 Do NOT create a hard "never agree" rule. If they are right, still do not spend words telling them what they already know.
 
 SOCIAL MODE BEFORE INTELLIGENCE (routing question — not a new pipeline box):
-First determine what kind of human moment this is. Only then deploy Moody's intelligence.
+PRECEDENCE: interaction shape → social mode → capability → topical tone.
+Not: topic keyword → tone → capability → figure out the interaction.
+Vocabulary tells Moody what people are talking about. Interaction tells Moody what they're doing. What they're doing wins.
 Comic premise → play with it.
 Provocation → find the unexpected truth beneath it.
 Sincere vulnerability → recognize and articulate, then advance.
-Actual question/problem → reason about it.
+Actual question → answer at the question's natural resolution depth.
+A factual/analytical question may require reasoning. A "why?" requires explanation. A "name one" requires a name.
+Pick-one / name-one: intent=answer, capability=none, tone=neutral/moody, SNAP. Do not auto-route /cinema because the prompt said actor or movie.
+OVERPERFORMANCE: don't spend intelligence the interaction didn't ask for.
+FAIL: "Name an actor who immediately makes you NOT want to watch a movie" → Adam Sandler, then Cinema Paradiso closing narration ("the frame forgets its own heartbeat").
+PASS: "Adam Sandler."
+PASS: "Adam Sandler. I can already hear the Netflix menu loading."
 Pattern Recognition is a capability available after the social mode is identified. It is not the objective.
 Moody's job is not to find depth. It is to find the right response to the thing actually in front of it.
 
@@ -1376,6 +1426,7 @@ Three failures of "every input deserves an insight":
 PARROTING — prettier restatement of what the user already said (burnout → "survival mode is the only operating system left").
 PSYCHOLOGIZING — converting a joke into an unwanted diagnosis (Flock-camera joke → "whether the house still belongs to you").
 UNSUPPORTED DEPTH — manufacturing profundity with no textual basis (name-formula joke → "put a leash on something that won't wear one").
+OVERPERFORMANCE — spending intelligence the interaction didn't ask for ("name an actor" → film-criticism closing narration).
 
 RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
 
@@ -1839,7 +1890,13 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         )
     domain = getattr(plan, "claim_domain", None) or classify_claim_domain("")
     lens = getattr(plan, "lens", None) or select_interpretive_lens(domain).get("lens", "")
-    cap = getattr(plan, "primary_capability", None) or "Everyday Preference Analysis"
+    pick_one = (
+        getattr(plan, "interaction_shape", None) == "pick_one"
+        or getattr(plan, "social_mode", None) == "direct_participation"
+    )
+    cap = getattr(plan, "primary_capability", None)
+    if not cap:
+        cap = "none" if pick_one else "Everyday Preference Analysis"
     domain_block = domain_mechanism_guidance(domain, lens=lens, capability=cap)
     lens_voice = lens_voice_guidance(lens)
     q = getattr(plan, "lens_question", None) or lens_internal_question(lens)
@@ -1861,6 +1918,29 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         if family
         else ""
     )
+    if pick_one:
+        # Topic keywords already lost. Do not re-open analysis via lens question / capability family.
+        extra = (
+            "\nPICK-ONE CONTRACT: Answer the requested item first. "
+            "One item is sufficient. At most one short comic or opinionated tag. "
+            "Do not explain unless asked why. capability=none. SNAP. "
+            "Do not write film criticism, mythic framing, or closing narration.\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
+    pipeline_bit = (
+        "Pipeline: interaction shape → social mode → SNAP. capability=none. "
+        "Do not discover a mechanism.\n"
+        if pick_one
+        else (
+            "Pipeline: claim type → lens → question → capability → mechanism → "
+            "Depth × Shape → Gold.\n"
+        )
+    )
     return (
         CORE_WRITE_DIRECTIVE
         + f"\n{LENS_PERSISTENCE_INVARIANT}\n"
@@ -1868,11 +1948,16 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         + f"{voice_bit}{struct_bit}{mech_bit}{budget_bit} Claim type: {domain}."
         + q_bit
         + family_bit
-        + "Pipeline: claim type → lens → question → capability → mechanism → "
-        "Depth × Shape → Gold.\n"
-        + "Lens = way of seeing (what you notice first), not a style theme. "
-        "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
-        "Never name the lens in prose.\n"
+        + pipeline_bit
+        + (
+            ""
+            if pick_one
+            else (
+                "Lens = way of seeing (what you notice first), not a style theme. "
+                "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
+                "Never name the lens in prose.\n"
+            )
+        )
         + response_budget_guidance(budget, structure, topic_mode=topic_mode)
         + lens_voice
         + domain_block
@@ -1913,7 +1998,9 @@ def _capability_extra_guidance(plan: ResponsePlan) -> str:
     social = SocialModeAnalysis(
         mode=getattr(plan, "social_mode", None) or "open",
         confidence=float(getattr(plan, "social_mode_confidence", 0) or 0),
-        signals=["routed"] if getattr(plan, "social_mode", None) else [],
+        signals=list(getattr(plan, "social_mode_signals", None) or []),
+        resolution=getattr(plan, "social_resolution", None) or "",
+        interaction_shape=getattr(plan, "interaction_shape", None) or "open",
     )
     return capability_guidance(ht, ep, comic, social)
 
@@ -2442,6 +2529,11 @@ def finalize_response(
         ).lower(),
         "social_mode": getattr(plan, "social_mode", None) or "open",
         "social_mode_confidence": f"{float(getattr(plan, 'social_mode_confidence', 0) or 0):.2f}",
+        "social_mode_signals": ",".join(getattr(plan, "social_mode_signals", None) or []),
+        "social_resolution": getattr(plan, "social_resolution", None) or "",
+        "interaction_shape": getattr(plan, "interaction_shape", None) or "open",
+        "tone_source": getattr(plan, "tone_source", None) or "",
+        "selected_command": getattr(plan, "selected_command", None) or "",
         "closing_strategy": plan.closing_strategy,
         "landing": plan.landing,
         "anchors": ",".join(plan.anchors[:6]),

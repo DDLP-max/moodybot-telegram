@@ -495,7 +495,18 @@ def route_command(user_input: str) -> str:
         return "/spiral"
     elif "/villain" in user_input.lower():
         return "/villain"
-    
+
+    # Interaction shape → social mode → capability → topical tone.
+    # "Name an actor who… movie" is pick-one, not a /cinema essay.
+    try:
+        from capability_detection import select_tone_command
+
+        cmd, source = select_tone_command(user_input)
+        if source == "social-first":
+            return cmd
+    except Exception:
+        logger.exception("social-first tone gate failed; continuing topical auto-route")
+
     # Base logic for automatic routing
     if contains_keywords(user_input, ["villain", "was right", "hero", "justice"]):
         return "/villain"
@@ -764,11 +775,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processed_user_input = process_user_input(user_input)
 
     # Detect the appropriate tone/command based on message content
-    selected_command = route_command(user_input)
-    if not selected_command:
-        selected_command = select_best_command(user_input)
+    from capability_detection import classify_social_mode
 
-    source = "auto-route" if selected_command.startswith("/") else "classifier"
+    social = classify_social_mode(user_input)
+    typed_slash = any(
+        cmd in (user_input or "").lower()
+        for cmd in (
+            "/savage", "/roast", "/cut", "/validate", "/jukebox", "/velvet",
+            "/noir", "/clinical", "/dark", "/ghost", "/numb", "/cinema",
+            "/sensory", "/tighten", "/contrast", "/godfather", "/spiral",
+            "/villain", "/thoughts",
+        )
+    )
+    selected_command = route_command(user_input)
+    if social.blocks_topical_auto_route and not typed_slash:
+        selected_command = "/thoughts"
+        source = "social-first"
+    elif not selected_command:
+        selected_command = select_best_command(user_input)
+        source = "classifier"
+    else:
+        source = "explicit" if typed_slash else "auto-route"
+
     logger.info(
         "[update %s] Selected tone: %s (via %s)",
         update_id,
@@ -783,13 +811,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_command=selected_command,
         channel="telegram",
         mode="validation" if selected_command == "/validate" else "dynamic",
+        tone_source=source,
     )
     logger.info(
-        "[update %s] Response plan: strategy=%s intent=%s capability=%s prompt_hash=%s",
+        "[update %s] Response plan: social_mode=%s interaction_shape=%s intent=%s "
+        "capability=%s tone=%s tone_source=%s response_budget=%s structure=%s "
+        "prompt_hash=%s",
         update_id,
-        response_plan.closing_strategy,
+        response_plan.social_mode,
+        getattr(response_plan, "interaction_shape", None) or "open",
         response_plan.intent,
-        response_plan.primary_capability,
+        response_plan.primary_capability or "none",
+        selected_command,
+        getattr(response_plan, "tone_source", None) or source,
+        getattr(response_plan, "response_budget", None) or "",
+        response_plan.routed_structure or response_plan.preferred_structure,
         p_hash,
     )
 
@@ -798,7 +834,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"role": "user", "content": user_input},
     ]
 
-    if selected_command in STRUCTURE_PROMPTS:
+    inject_structure = selected_command in STRUCTURE_PROMPTS
+    if social.blocks_topical_auto_route and not typed_slash:
+        inject_structure = False
+    if inject_structure:
         messages.insert(0, {
             "role": "system",
             "content": STRUCTURE_PROMPTS[selected_command]

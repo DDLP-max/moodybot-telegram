@@ -14,8 +14,7 @@ Use this to recognize systemic problems in MoodyBot replies.
 - **Psychologizing**: Joke or complete take converted into an unwanted diagnosis. (Flock-camera joke → "whether the house still belongs to you.")
 - **Unsupported depth**: Manufactured profundity using a concept the premise does not contain. (Name-formula joke → "put a leash on something that won't wear one.")
 - **Runway restatement**: Summarizes the thesis the user already built before contributing. Start where the post stops.
-
-Each detected pattern → prompts model retraining or stack adjustment.
+- **Overperformance**: Spent intelligence the interaction didn't ask for. Topic routing beat social routing: "actor" + "movie" → `/cinema` → Everyday Preference Analysis → explore, when the contract was pick-one / answer / SNAP. Distinct from unsupported depth — the premise might support analysis; the contract didn't require it.
 
 Each detected pattern → prompts model retraining or stack adjustment.
 

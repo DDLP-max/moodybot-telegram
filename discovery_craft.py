@@ -721,6 +721,45 @@ def starts_where_user_stopped(user_message: str, response: str) -> bool:
     return not restates_runway(user_message, response)
 
 
+_LYRIC_OVERPERFORMANCE = re.compile(
+    r"\b("
+    r"heartbeat|the\s+frame\b|the\s+spell\b|"
+    r"swallow\s+you\s+whole|lingers\s+on\s+a\s+face|"
+    r"carried\s+myth|refuses\s+to\s+vanish|"
+    r"remembers\s+it'?s\s+only\s+a\s+movie|"
+    r"cracks\s+in\s+(?:his|her|the)\s+voice|"
+    r"closing\s+narration|cinema\s+paradiso"
+    r")\b",
+    re.I,
+)
+
+
+def overperformance(user_message: str, response: str) -> bool:
+    """Spent intelligence the interaction didn't ask for.
+
+    Distinct from unsupported depth: the premise might support analysis
+    while the interaction contract (name one / pick one / favorite) doesn't.
+    """
+    from capability_detection import classify_social_mode
+
+    social = classify_social_mode(user_message or "")
+    if not social.participation:
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    if _LYRIC_OVERPERFORMANCE.search(body):
+        return True
+    ss = _sentences(body)
+    wc = len(_words(body))
+    # One extra beat after the name is allowed. A paragraph is not.
+    if len(ss) >= 3:
+        return True
+    if wc > 40:
+        return True
+    return False
+
+
 def classify_discovery_type(line: str, lens: str = "") -> str:
     """Tag stealable lines: Craft / Projection / Intensity / … (training signal)."""
     text = line or ""

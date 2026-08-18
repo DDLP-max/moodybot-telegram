@@ -22,6 +22,7 @@ from discovery_craft import (
     restates_runway,
     starts_where_user_stopped,
     unsupported_depth,
+    overperformance,
 )
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
@@ -124,6 +125,21 @@ HATE_PEOPLE = (
     "I hate people. Not in a cute misanthrope way. In a I-need-a-nap-from-existing way."
 )
 
+NAME_ONE_ACTOR = (
+    "Name an actor who immediately makes you NOT want to watch a movie"
+)
+NAME_ONE_FAIL = (
+    "The moment Adam Sandler appears, the frame forgets its own heartbeat. "
+    "Light that once carried myth now lingers on a face that refuses to vanish, "
+    "turning every scene into a reminder that someone is still watching from the outside. "
+    "What was meant to swallow you whole suddenly remembers it's only a movie, "
+    "and the spell leaks out through the cracks in his voice."
+)
+NAME_ONE_PASS = "Adam Sandler."
+NAME_ONE_PASS_BEAT = (
+    "Adam Sandler. I see his face and already know how the next two hours smell."
+)
+
 
 def _checks(insp):
     return {c["name"]: c for c in insp["checks"]}
@@ -196,6 +212,8 @@ def test_courtship_is_observation():
 def test_fiber_still_question():
     social = classify_social_mode("How do I replace a fiber connector?")
     assert social.mode == "question"
+    assert social.participation is False
+    assert social.resolution == "reason"
 
 
 # --- Parroting / recognition must advance ----------------------------------
@@ -288,6 +306,10 @@ def test_guidance_names_the_gates():
     assert "start where the user stopped" in blob
     assert "parroting" in blob
     assert "unsupported depth" in blob
+    assert "overperformance" in blob
+    assert "natural resolution" in blob
+    assert "interaction shape" in blob
+    assert "what they're doing wins" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
     assert "recognition must advance" in burn
@@ -313,6 +335,93 @@ def test_matt_comic_still_routes():
     assert plan.primary_capability == "Humor As Disruption"
 
 
+def test_name_one_actor_does_not_become_film_criticism():
+    """Participation question: name one. Not Cinema Paradiso.
+
+    Trace assertions — output tests can pass while the router is still wrong.
+    """
+    from capability_detection import select_tone_command
+    from structure_prompts import STRUCTURE_PROMPTS
+
+    social = classify_social_mode(NAME_ONE_ACTOR)
+    assert social.mode == "direct_participation"
+    assert social.participation is True
+    assert social.interaction_shape == "pick_one"
+    assert social.resolution == "name"
+    assert social.depth_earned is False
+    assert social.blocks_topical_auto_route is True
+    assert social.confidence >= 0.9
+
+    # Smoking gun: actor + movie would have auto-routed /cinema
+    assert "actor" in NAME_ONE_ACTOR.lower() and "movie" in NAME_ONE_ACTOR.lower()
+    cmd, source = select_tone_command(
+        NAME_ONE_ACTOR, topical_auto_command="/cinema"
+    )
+    assert cmd != "/cinema"
+    assert cmd == "/thoughts"
+    assert source == "social-first"
+    assert "/cinema" in STRUCTURE_PROMPTS
+
+    plan = build_response_plan(NAME_ONE_ACTOR, selected_command="/cinema")
+    assert plan.social_mode == "direct_participation"
+    assert plan.interaction_shape == "pick_one"
+    assert plan.intent == "answer"
+    assert plan.primary_capability in (None, "", "none")
+    assert plan.primary_capability != "Everyday Preference Analysis"
+    assert plan.preferred_structure == "SNAP"
+    assert plan.response_budget == "low"
+    assert (plan.routed_structure or "").upper().startswith("SNAP") or plan.preferred_structure == "SNAP"
+    assert plan.selected_command != "/cinema"
+    assert plan.selected_command == "/thoughts"
+    assert plan.tone_source == "social-first"
+    assert plan.landing == "body_ends_response"
+    assert plan.claim_domain != "taste_preference"
+
+    # Even if handle_message mistakenly passed /cinema, do not explore
+    assert plan.intent != "explore"
+
+    assert overperformance(NAME_ONE_ACTOR, NAME_ONE_FAIL) is True
+    assert overperformance(NAME_ONE_ACTOR, NAME_ONE_PASS) is False
+    assert overperformance(NAME_ONE_ACTOR, NAME_ONE_PASS_BEAT) is False
+
+    fails = evaluate_gold_shape(NAME_ONE_ACTOR, NAME_ONE_FAIL, "SNAP")
+    assert "overperformance" in fails
+    ok_fails = evaluate_gold_shape(NAME_ONE_ACTOR, NAME_ONE_PASS, "SNAP")
+    assert "overperformance" not in ok_fails
+    beat_fails = evaluate_gold_shape(NAME_ONE_ACTOR, NAME_ONE_PASS_BEAT, "SNAP")
+    assert "overperformance" not in beat_fails
+
+    insp = _inspect(NAME_ONE_ACTOR, NAME_ONE_FAIL)
+    assert _checks(insp)["Overperformance"]["status"] == "fail"
+    insp_ok = _inspect(NAME_ONE_ACTOR, NAME_ONE_PASS)
+    assert _checks(insp_ok)["Overperformance"]["status"] == "pass"
+    insp_beat = _inspect(NAME_ONE_ACTOR, NAME_ONE_PASS_BEAT)
+    assert _checks(insp_beat)["Overperformance"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan)
+    guide_l = guide.lower()
+    assert "pick-one" in guide_l or "direct participation" in guide_l
+    assert "overperformance" in guide_l
+    assert "adam sandler" in guide_l
+    assert "Capability (Intelligence): none" in guide
+    assert "Capability (Intelligence): Everyday Preference Analysis" not in guide
+    assert "CAPABILITY: Everyday Preference Analysis" not in guide
+    assert "Question (invisible step" not in guide
+    assert "frame forgets" in guide_l or "cinema paradiso" in guide_l
+
+
+def test_greatest_role_may_still_be_cinema():
+    """Negative control: cinema is the object, not a costume. /cinema may participate."""
+    from capability_detection import select_tone_command
+
+    q = "What is De Niro's greatest role?"
+    social = classify_social_mode(q)
+    assert social.blocks_topical_auto_route is False
+    cmd, source = select_tone_command(q, topical_auto_command="/cinema")
+    assert cmd == "/cinema"
+    assert source == "auto-route"
+
+
 if __name__ == "__main__":
     test_burnout_is_vulnerability_not_comic()
     test_flock_and_stocks_are_comic_bits()
@@ -329,4 +438,6 @@ if __name__ == "__main__":
     test_condom_transformation_not_flagged()
     test_guidance_names_the_gates()
     test_matt_comic_still_routes()
+    test_name_one_actor_does_not_become_film_criticism()
+    test_greatest_role_may_still_be_cinema()
     print("ok")
