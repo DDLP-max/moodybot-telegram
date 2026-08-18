@@ -62,6 +62,35 @@ class ComicPremiseAnalysis:
         return self.active and self.confidence >= COMIC_FLOOR
 
 
+# Social mode is a routing question, not a pipeline stage and not a user-facing mode.
+# Identify the human moment first; Pattern Recognition is a tool after that.
+SOCIAL_MODES = (
+    "comic",
+    "provocation",
+    "vulnerability",
+    "question",
+    "observation",
+    "open",
+)
+
+
+@dataclass
+class SocialModeAnalysis:
+    """What kind of human moment is this? Gates whether depth is even allowed."""
+
+    mode: str = "open"
+    confidence: float = 0.0
+    signals: List[str] = field(default_factory=list)
+
+    @property
+    def comic(self) -> bool:
+        return self.mode == "comic"
+
+    @property
+    def depth_earned(self) -> bool:
+        return self.mode in {"vulnerability", "provocation", "question"}
+
+
 # --- surface / motive mismatch cues ---
 _INSUFFICIENT_JUSTIFICATION = re.compile(
     r"\b("
@@ -165,8 +194,66 @@ _COMIC_GENUINE_DISTRESS = re.compile(
     r"\b("
     r"i'?m\s+(?:really\s+)?(?:scared|terrified|depressed|suicidal)|"
     r"panic\s+attack|can'?t\s+leave\s+the\s+house|trauma|abuse|"
-    r"been\s+struggling\s+with\s+anxiety\s+for"
+    r"been\s+struggling\s+with\s+anxiety\s+for|"
+    r"burn(?:ed|t)?\s+out|survival\s+mode|"
+    r"forgotten\s+how\s+to\s+(?:socialize|connect|be\s+a\s+person)|"
+    r"hobbies\s+(?:are\s+)?gone|personality\s+(?:feels?\s+)?muted|"
+    r"psychologically\s+deplet|i\s+don'?t\s+know\s+how\s+to\s+connect"
     r")\b",
+    re.I,
+)
+# Joke-formula / anti-joke riff (stripper-name, first-pet + street)
+_COMIC_JOKE_FORMULA = re.compile(
+    r"\b("
+    r"(?:porn[\s-]?star|stripper|whore|stage)\s+name|"
+    r"first\s+pet|"
+    r"street\s+you\s+grew\s+up|"
+    r"now\s+it'?s\s+just\s+your\s+(?:actual\s+)?(?:fucking\s+)?name"
+    r")\b",
+    re.I,
+)
+# Surveillance / domestic analogy joke (Flock, Ring, wife as camera)
+_COMIC_SURVEILLANCE_BIT = re.compile(
+    r"\b(flock|ring\s+camera|alpr|license[\s-]?plate\s+reader|"
+    r"searchable\s+footage)\b",
+    re.I,
+)
+_COMIC_DOMESTIC = re.compile(
+    r"\b(wife|girlfriend|spouse|she\s+knows|married)\b",
+    re.I,
+)
+# Wife/stocks-style joke: domestic life analogized to a market/system
+_COMIC_MARKET_BIT = re.compile(
+    r"\b(stocks?|ticker|volatility|red\s+days?|green\s+days?)\b",
+    re.I,
+)
+_COMIC_JOKE_PARALLEL = re.compile(
+    r"\b(love\s+language|same\s+(?:as|coverage|volatility)|"
+    r"except\s+the|worse\s+returns|just\s+(?:her|my\s+wife)\s+watching)\b",
+    re.I,
+)
+# Self-deprecating comic misanthropy (not a cry for diagnosis)
+_COMIC_SELF_DEPRECATE = re.compile(
+    r"\b("
+    r"i\s+hate\s+people|"
+    r"not\s+in\s+a\s+cute|"
+    r"need\s+a\s+nap\s+from\s+existing|"
+    r"misanthrope"
+    r")\b",
+    re.I,
+)
+# Crude provocation with latent human content — NOT a bit to cure,
+# but also not automatic comic-never-cure. Depth may be earned.
+_PROVOCATION_CRUDE = re.compile(
+    r"\b("
+    r"condoms?|pull\s+out|raw\s+dog|creampie|"
+    r"fuck(?:ing)?\s+(?:is|as|like)|"
+    r"whores?|sluts?"
+    r")\b",
+    re.I,
+)
+_QUESTION_SHAPE = re.compile(
+    r"^\s*(?:how|what|why|when|where|should|do|does|can|is|are)\b|[?]\s*$",
     re.I,
 )
 # Known failure mode: curing the joke with therapist aphorism
@@ -182,6 +269,36 @@ _PREMISE_CURE = re.compile(
     r")"
 )
 
+# Second-beat insight after a punchline already landed (get-off-stage failures)
+_COMIC_INSIGHT_TAIL = re.compile(
+    r"(?i)("
+    r"never\s+asked|"
+    r"\banyway\.?\s*$|"
+    r"the\s+(?:mirror|story|truth|heart|soul)\b|"
+    r"what\s+(?:the\s+joke|this)\s+really\s+(?:means|says)|"
+    r"beneath\s+the\s+(?:joke|humor)|"
+    r"self[- ]worth|once\s+you\s+accept|"
+    r"gatekeeper|the\s+body\s+isn'?t"
+    r")"
+)
+
+# Staying inside the bit (fitness / protocol / social unlock vocabulary)
+_COMIC_FRAME_CONTINUE = re.compile(
+    r"(?i)\b("
+    r"spotter|gaze|floor|bulk|cut(?:ting)?|phase|compound|body[- ]?fat|"
+    r"macros?|PR\b|eye\s+contact|hello|unlock|lift\s+your|"
+    r"reps?|sets?|gym|mirror\s+selfie|percentage"
+    r")\b"
+)
+
+# First sentence already has a clean heighten/punch
+_COMIC_STRONG_PUNCH = re.compile(
+    r"(?i)\b("
+    r"spotter|lift\s+your\s+gaze|compound\s+movement|"
+    r"body[- ]?fat\s+percentage|phase\s+two|advanced\s+compound"
+    r")\b"
+)
+
 
 def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
     """Detect exaggerated comic premises before therapeutic reframing.
@@ -189,6 +306,9 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
     When an apparently vulnerable statement contains conspicuous exaggeration,
     absurd sequencing, impossible optimization, or punchline construction,
     treat it as a bit — never cure the premise.
+
+    Also: joke-formula riffs, domestic/surveillance analogies, anti-jokes.
+    Genuine distress / burnout is never a bit.
     """
     text = (user_message or "").strip()
     out = ComicPremiseAnalysis()
@@ -216,11 +336,125 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
         score += 0.2
         signals.append("fitness_to_social_absurdism")
 
+    if _COMIC_JOKE_FORMULA.search(text):
+        signals.append("joke_formula")
+        score += 0.55
+    if _COMIC_SURVEILLANCE_BIT.search(text) and _COMIC_DOMESTIC.search(text):
+        signals.append("surveillance_domestic_bit")
+        score += 0.6
+    if _COMIC_MARKET_BIT.search(text) and _COMIC_DOMESTIC.search(text) and (
+        _COMIC_JOKE_PARALLEL.search(text) or _COMIC_SURVEILLANCE_BIT.search(text)
+    ):
+        signals.append("domestic_market_bit")
+        score += 0.55
+    if _COMIC_SELF_DEPRECATE.search(text):
+        signals.append("self_deprecating_bit")
+        score += 0.4
+        # Need a second beat so bare "I hate people" is not automatically a bit
+        if len(re.findall(r"[.!?]", text)) >= 1 and len(text.split()) >= 8:
+            score += 0.2
+            signals.append("self_deprecating_extended")
+
     out.signals = signals
     out.confidence = round(min(0.95, score), 2)
-    # Need compound evidence — not bare "eye contact" alone
-    out.active = out.confidence >= COMIC_FLOOR and len(signals) >= 2
+    # Need compound evidence — not bare "eye contact" alone — unless a
+    # standalone joke-formula / analogy bit is itself the premise.
+    strong_bit = any(
+        s in signals
+        for s in (
+            "joke_formula",
+            "surveillance_domestic_bit",
+            "domestic_market_bit",
+            "fitness_to_social_absurdism",
+        )
+    )
+    out.active = out.confidence >= COMIC_FLOOR and (len(signals) >= 2 or strong_bit)
     out.never_cure = True
+    return out
+
+
+def classify_social_mode(user_message: str) -> SocialModeAnalysis:
+    """First routing question: what kind of human moment is this?
+
+    Not a new pipeline stage. Gates intelligence — especially whether
+    Pattern Recognition / depth is even allowed.
+    """
+    text = (user_message or "").strip()
+    out = SocialModeAnalysis()
+    if not text:
+        return out
+
+    signals: List[str] = []
+
+    if _TECHNICAL_NO_HT.search(text) or (
+        _QUESTION_SHAPE.search(text)
+        and not _COMIC_JOKE_FORMULA.search(text)
+        and not _COMIC_SURVEILLANCE_BIT.search(text)
+    ):
+        # Practical / technical questions reason; joke-questions still play.
+        if _TECHNICAL_NO_HT.search(text) or re.search(
+            r"\b(how\s+do\s+i|what\s+should\s+i|which\s+\w+\s+should)\b",
+            text,
+            re.I,
+        ):
+            out.mode = "question"
+            out.confidence = 0.8
+            out.signals = ["question_shape"]
+            return out
+
+    if _COMIC_GENUINE_DISTRESS.search(text):
+        out.mode = "vulnerability"
+        out.confidence = 0.85
+        out.signals = ["genuine_distress"]
+        return out
+
+    comic = detect_comic_premise(text)
+    if comic.active:
+        out.mode = "comic"
+        out.confidence = comic.confidence
+        out.signals = list(comic.signals)
+        return out
+
+    # Joke-formula / crude name riff that didn't quite hit comic floor
+    if _COMIC_JOKE_FORMULA.search(text):
+        out.mode = "comic"
+        out.confidence = 0.7
+        out.signals = ["joke_formula"]
+        return out
+
+    if _PROVOCATION_CRUDE.search(text) and not _COMIC_GENUINE_DISTRESS.search(text):
+        # Name-formula whores are comic; other crude is provocation (depth may be earned)
+        out.mode = "provocation"
+        out.confidence = 0.7
+        out.signals = ["crude_provocation"]
+        return out
+
+    # Complete observational take — already built the runway
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    thesisy = bool(
+        re.search(
+            r"\b("
+            r"this\s+was\s+not\s+the\s+case|"
+            r"people\s+have\s+this\s+backwards|"
+            r"be\s+wary|"
+            r"guess\s+what\s+happens|"
+            r"the\s+myth\s+of|"
+            r"in\s+(?:times|her)\s+past|"
+            r"used\s+to\s+(?:hound|be|say)"
+            r")\b",
+            text,
+            re.I,
+        )
+    )
+    if thesisy and len(sentences) >= 2 and "?" not in text:
+        out.mode = "observation"
+        out.confidence = 0.7
+        out.signals = ["articulated_thesis"]
+        return out
+
+    out.mode = "open"
+    out.confidence = 0.4
+    out.signals = signals
     return out
 
 
@@ -230,6 +464,58 @@ def looks_like_premise_cure(draft: str) -> bool:
     if not body:
         return False
     return bool(_PREMISE_CURE.search(body))
+
+
+def _comic_sentences(text: str) -> List[str]:
+    body = re.sub(r"\s*🥃\s*$", "", (text or "").strip())
+    if not body:
+        return []
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    if len(paras) >= 2:
+        return paras
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+
+
+def strip_post_comic_punchline(text: str) -> Tuple[str, bool]:
+    """COMIC PAYOFF IS TERMINAL — drop second aphorism after a clean punch.
+
+    Keep multi-beat tags that stay inside the frame
+    (e.g. \"Don't rush it. Eye contact is an advanced compound movement.\").
+    Strip insight/poetic closers after the joke already landed
+    (e.g. \"…lift your gaze. The mirror never asked for your number anyway.\").
+    """
+    body = re.sub(r"\s*🥃\s*$", "", (text or "").strip())
+    parts = _comic_sentences(body)
+    if len(parts) < 2:
+        return body, False
+
+    first = parts[0].rstrip()
+    rest = " ".join(parts[1:]).strip()
+    if not first or not rest:
+        return body, False
+
+    rest_is_insight = bool(_COMIC_INSIGHT_TAIL.search(rest))
+    rest_continues_bit = bool(_COMIC_FRAME_CONTINUE.search(rest))
+    first_is_punch = bool(_COMIC_STRONG_PUNCH.search(first)) or (
+        len(first.split()) >= 12 and bool(_COMIC_FRAME_CONTINUE.search(first))
+    )
+
+    if rest_is_insight and not rest_continues_bit:
+        return first, True
+    if first_is_punch and not rest_continues_bit and len(rest.split()) <= 18:
+        return first, True
+    return body, False
+
+
+def comic_punchline_is_terminal(text: str) -> bool:
+    """True when draft should stop at the punch (no second beat needed)."""
+    _trimmed, stripped = strip_post_comic_punchline(text)
+    if stripped:
+        return True
+    parts = _comic_sentences(text)
+    if len(parts) == 1 and _COMIC_STRONG_PUNCH.search(parts[0] or ""):
+        return True
+    return False
 
 
 def detect_hidden_transaction(user_message: str) -> HiddenTransactionAnalysis:
@@ -380,22 +666,103 @@ def draft_has_terminal_payoff(text: str) -> bool:
     return False
 
 
+def social_mode_guidance(mode: SocialModeAnalysis) -> str:
+    """Generation gate: identify the human moment before deploying intelligence."""
+    m = (mode.mode or "open").lower()
+    if m == "comic":
+        return (
+            "\nSOCIAL MODE: comic premise. Play inside it. Do not excavate trauma.\n"
+            "DEPTH MUST BE EARNED BY THE PREMISE — a joke did not earn depth.\n"
+            "If explaining the reply requires a concept the premise does not contain, "
+            "you have left the bit. Sometimes the correct intelligence is eight words "
+            "and leave. Moody's job is not to find depth. It is to find the right "
+            "response to the thing actually in front of it.\n"
+            "FAIL (psychologizing): converting the joke into a diagnosis.\n"
+            "FAIL (unsupported depth): \"put a leash on something that won't wear one\" "
+            "on a name-formula joke that contains no leash, ownership, or restraint.\n"
+            "PASS: \"Identity theft has gotten incredibly lazy.\"\n"
+            "PASS: stay inside the metaphor (surveillance joke → footage, plates, "
+            "timestamps — not whether the house still belongs to you).\n"
+        )
+    if m == "provocation":
+        return (
+            "\nSOCIAL MODE: provocation. Find the unexpected human truth beneath it.\n"
+            "Do not scold, explain the joke, or merely agree. Transformation is earned "
+            "when the crude surface actually contains a body, a risk, a want.\n"
+            "PASS: \"…two people admit the body is a liability they can't outrun "
+            "and still want the night anyway.\"\n"
+        )
+    if m == "vulnerability":
+        return (
+            "\nSOCIAL MODE: sincere vulnerability. Abandon comedy. Depth is earned.\n"
+            "RECOGNITION MUST ADVANCE. Mirroring can show you understood. "
+            "Mirroring cannot be the payload.\n"
+            "After removing metaphor, what does the reply know that the user didn't "
+            "already say? If nothing — it is parroting, even if it sounds empathic.\n"
+            "Contribute at least one: new inference, hidden contradiction, causal "
+            "mechanism the user didn't name, consequence, useful distinction, "
+            "surprising reframe.\n"
+            "START WHERE THE USER STOPPED. They already said survival mode / lost "
+            "connection / hobbies gone. Do not rename that an operating system.\n"
+            "FAIL: semantic restatement with prettier language (evaluator-bait empathy).\n"
+            "PASS: they treat reduced social capacity as a character regression; "
+            "what they described is resource allocation. Or: they are waiting to feel "
+            "like themselves before re-entering, when some of that self only returns "
+            "through participation.\n"
+        )
+    if m == "question":
+        return (
+            "\nSOCIAL MODE: actual question/problem. Reason about it. "
+            "Do not manufacture a Moody Insight™ the question did not ask for.\n"
+        )
+    if m == "observation":
+        return (
+            "\nSOCIAL MODE: the take is already articulated.\n"
+            "START WHERE THE POST STOPS. Do not summarize the runway they built. "
+            "Take off from the end of it. One additional thought — not thesis "
+            "repetition then insight then restated insight.\n"
+            "FAIL: \"The myth of the passive woman was never about how women "
+            "actually behaved…\" (they already said women weren't passive).\n"
+            "PASS: \"Women have always pursued. They just used to do it with enough "
+            "plausible deniability that the guy could still feel like the hunter "
+            "instead of the hunted.\"\n"
+            "Compression is not the goal. Informational advancement is.\n"
+        )
+    return (
+        "\nSOCIAL MODE: open. First decide what kind of human moment this is, "
+        "then deploy intelligence. Pattern Recognition is a capability after "
+        "that — not the objective. DEPTH MUST BE EARNED BY THE PREMISE.\n"
+        "RECOGNITION MUST ADVANCE. START WHERE THE USER STOPPED.\n"
+    )
+
+
 def capability_guidance(
     ht: HiddenTransactionAnalysis,
     ep: EscalationPayoffAnalysis,
     comic: Optional[ComicPremiseAnalysis] = None,
+    social: Optional[SocialModeAnalysis] = None,
 ) -> str:
     """Injection for plan_closer_instruction — compressed, evidence-bound."""
     parts: List[str] = []
+    if social is not None:
+        parts.append(social_mode_guidance(social))
     if comic and comic.should_block_therapy:
         parts.append(
             "\nCOMIC PREMISE (gate before therapeutic reframing — not a mode):\n"
             f"Confidence={comic.confidence:.2f} signals={','.join(comic.signals[:6])}.\n"
             "NEVER CURE THE PREMISE. The distortion IS the joke.\n"
             "Heighten the bit or add a sharper tag. Stay inside the user's frame.\n"
+            "COMIC PAYOFF IS TERMINAL. Once the punchline lands, STOP — "
+            "body_ends_response. No second aphorism, no emotional truth, "
+            "no explaining what the joke secretly means.\n"
             "Do NOT reframe as sincere insecurity. Do NOT therapist-aphorism the setup.\n"
+            "Do NOT attach noir/trauma fan fiction the joke did not ask for.\n"
             "FAIL: \"The body isn't the gatekeeper. The story is.\"\n"
-            "PASS: stay in the fitness/protocol absurdity applied to basic human contact.\n"
+            "FAIL: punchline + poetic closer "
+            "(\"…lift your gaze. The mirror never asked for your number anyway.\")\n"
+            "FAIL: \"whether the house still belongs to you\" on a Flock-camera joke.\n"
+            "PASS: one heighten inside the frame, then get off stage "
+            "(\"…you'll need a spotter just to lift your gaze.\")\n"
         )
     if ht.active:
         tone = (
@@ -434,6 +801,7 @@ def log_capability_trace(
     ht: HiddenTransactionAnalysis,
     ep: EscalationPayoffAnalysis,
     comic: Optional[ComicPremiseAnalysis] = None,
+    social: Optional[SocialModeAnalysis] = None,
 ) -> None:
     logger.info(
         "CAPABILITY_TRACE hidden_transaction=%s confidence=%.2f",
@@ -445,6 +813,12 @@ def log_capability_trace(
         1 if ep.active else 0,
         ep.confidence,
     )
+    if social is not None:
+        logger.info(
+            "CAPABILITY_TRACE social_mode=%s confidence=%.2f",
+            social.mode,
+            social.confidence,
+        )
     if comic is not None:
         logger.info(
             "CAPABILITY_TRACE comic_premise=%s confidence=%.2f never_cure=%s",
@@ -452,5 +826,7 @@ def log_capability_trace(
             comic.confidence,
             1 if (comic.active and comic.never_cure) else 0,
         )
+        if comic.active:
+            logger.info("NARRATIVE_TRACE structure=COMIC_PAYOFF_TERMINAL")
     if ep.active:
         logger.info("NARRATIVE_TRACE structure=ESCALATION_PAYOFF")

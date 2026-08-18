@@ -1,7 +1,8 @@
 # MoodyBot Gold
 
 Reverse-engineered from historical MoodyBot outputs in `moodybot_log.txt`
-(~4,909 User/MoodyBot pairs).
+(~4,909 User/MoodyBot pairs), plus modern canonical craft wins that clear
+the same **9/10 writing** bar.
 
 ## Goal
 
@@ -35,7 +36,7 @@ AI-sounding sentences, unnecessary paragraphs.
 | `pattern-analysis.md` | Recurring patterns + numbers |
 | `style-guide.md` | Descriptive style of best outputs (not a prompt) |
 | `prompt-gap-analysis.md` | Where current prompt diverges from Gold behavior |
-| `_curate_hand.py` | Curation script (reproducible fingerprints) |
+| `_rebuild_gold.py` | Reproducible rebuild (log fingerprints + canonical) |
 
 ## Schema
 
@@ -59,15 +60,26 @@ AI-sounding sentences, unnecessary paragraphs.
 
 ## Method
 
-1. Parse all pairs from `moodybot_log.txt` (the production conversation corpus;
-   the tiny `moodybot.log` file is only a process stub).
+1. Parse all pairs from `moodybot_log.txt` (production conversation corpus).
 2. Hard-reject banned phrases, CTA spam, multi-metaphor costume, therapy/systems jargon.
-3. Hand-curate fingerprints of responses that clear a true **9/10** writing bar.
-4. Drop residual manufactured closers / fake profundity on re-read.
+3. Keep only fingerprints that clear a true **9/10** writing bar on re-read.
+4. Add modern canonical craft wins (Foreplay, Prison, Breaking Bad, Threat, Ending, etc.).
 5. Compute statistics only on the final Gold set.
 
-**Final Gold count: 18** (from 4,909 pairs).
+**Final Gold count: 19** (12 from log + 7 canonical craft; from 4,909 pairs scanned).
 
 This is intentionally strict. The log contains many 7/10 and 8/10 replies;
 Gold keeps only responses that still feel inevitable after the costume era,
 engagement era, and systems-jargon era are stripped away.
+
+## Rebuild
+
+```bash
+python training/moodybot-gold/_rebuild_gold.py
+```
+
+Related identity floor (separate from this training set):
+
+```bash
+python -m inspector canonical
+```

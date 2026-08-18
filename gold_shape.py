@@ -42,13 +42,15 @@ STOCK_SOCIAL_MECHANISMS = re.compile(
 
 TASTE_DOMAIN_MARKERS = re.compile(
     r"\b(mcdonald|burger|fries|pizza|coffee|food|taste|restaurant|"
-    r"delicious|sushi|steak|dessert|eat|dining|fries)\b",
+    r"delicious|sushi|steak|dessert|eat|dining|fries|"
+    r"show|series|movie|film|tv|television|netflix|hbo|binge|"
+    r"breaking bad|better call saul|episode|season)\b",
     re.I,
 )
 
 PREFERENCE_DOMAIN_MARKERS = re.compile(
     r"\b(best|worst|overrated|underrated|favorite|familiar|consistency|"
-    r"convenience|nostalgia|value|brand|iphone|tesla)\b",
+    r"convenience|nostalgia|value|brand|iphone|tesla|compare|ever)\b",
     re.I,
 )
 
@@ -447,12 +449,32 @@ def evaluate_gold_shape(
 
     # Prompt has the insight; response only abridges it — zero new value
     try:
-        from discovery_craft import paraphrase_collapse, mechanism_drift
+        from discovery_craft import (
+            lens_drift,
+            mechanism_drift,
+            paraphrase_collapse,
+            parroting,
+            psychologizing,
+            restates_runway,
+            unsupported_depth,
+        )
+        from capability_detection import detect_comic_premise
 
         if paraphrase_collapse(user_message, body):
             failures.append("paraphrase_collapse")
         if mechanism_drift(user_message, body):
             failures.append("mechanism_drift")
+        if lens_drift(user_message, body):
+            failures.append("lens_drift")
+        comic_on = bool(detect_comic_premise(user_message).active)
+        if parroting(user_message, body):
+            failures.append("parroting")
+        if psychologizing(user_message, body, comic=comic_on):
+            failures.append("psychologizing")
+        if unsupported_depth(user_message, body, comic=comic_on):
+            failures.append("unsupported_depth")
+        if restates_runway(user_message, body):
+            failures.append("runway_restatement")
     except Exception:
         pass
 

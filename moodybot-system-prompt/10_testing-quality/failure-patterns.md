@@ -10,6 +10,12 @@ Use this to recognize systemic problems in MoodyBot replies.
 - **Flat Arc**: No shift, just reflection  
 - **CTA Overkill**: Too much call-to-action in emotionally raw moments
 - **Formula Convergence**: Correct lens/mechanism, but every reply opens and lands the same way (see `approach-diversity-regression.md`)
+- **Parroting**: Recognition that only restates the user's model in prettier language. Test: after stripping metaphor, what does the reply know that they didn't say? If nothing — fail. (Burnout → "survival mode is the only operating system left.")
+- **Psychologizing**: Joke or complete take converted into an unwanted diagnosis. (Flock-camera joke → "whether the house still belongs to you.")
+- **Unsupported depth**: Manufactured profundity using a concept the premise does not contain. (Name-formula joke → "put a leash on something that won't wear one.")
+- **Runway restatement**: Summarizes the thesis the user already built before contributing. Start where the post stops.
+
+Each detected pattern → prompts model retraining or stack adjustment.
 
 Each detected pattern → prompts model retraining or stack adjustment.
 

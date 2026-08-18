@@ -105,6 +105,12 @@ def card_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     tone = "green"
     if _mechanism_mismatch(event, insp):
         tag, tone = "Mechanism mismatch", "red"
+    elif "lens_drift" in str((event.get("diagnostics") or {}).get("quality_failures") or ""):
+        tag, tone = "Lens drift", "red"
+    elif any(c.get("name") == "Lens drift" and c.get("status") == "fail" for c in insp.get("checks") or []):
+        tag, tone = "Lens drift", "red"
+    elif any(c.get("name") == "Mode 1 ceiling" and c.get("status") == "fail" for c in insp.get("checks") or []):
+        tag, tone = "Mode 1 ceiling", "yellow"
     elif "mechanism_drift" in str((event.get("diagnostics") or {}).get("quality_failures") or ""):
         tag, tone = "Mechanism drift", "yellow"
     elif _last_line_trap(insp):
@@ -332,6 +338,8 @@ def collect_hall_candidates(
     Stealable lines from the corpus that aren't starred yet.
     This is the 257 — not the 3 manual stars.
     """
+    from discovery_craft import classify_discovery_type
+
     starred = {(h.get("line") or "").strip().lower() for h in hall if h.get("line")}
     seen: set[str] = set()
     out: List[Dict[str, Any]] = []
@@ -351,13 +359,17 @@ def collect_hall_candidates(
             continue
         seen.add(key)
         d = e.get("diagnostics") or {}
+        lens = d.get("lens") or d.get("interpretive_lens") or ""
+        dtype = classify_discovery_type(line, lens)
         out.append(
             {
                 "id": f"cand-{(e.get('id') or '')[:12]}",
                 "ts": e.get("ts") or "",
                 "line": line,
                 "event_id": e.get("id") or "",
-                "lens": d.get("lens") or d.get("interpretive_lens") or "",
+                "lens": lens,
+                "discovery_type": dtype,
+                "type": dtype,
                 "note": "candidate — not starred yet",
                 "stars": 4 if steal >= 9 else 3,
                 "stealability": round(steal, 1),
@@ -371,8 +383,11 @@ def collect_hall_candidates(
 
 
 def hall_notebook(hall: List[Dict[str, Any]], events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Writer's notebook: candidates (auto) + starred (manual) + spears."""
+    """Writer's notebook: candidates (auto) + starred (manual) + spears + by lens/type."""
+    from discovery_craft import classify_discovery_type
+
     by_lens: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    by_type: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     spears: List[Dict[str, Any]] = []
     starred = list(hall)
     candidates = collect_hall_candidates(events, hall, limit=500)
@@ -384,12 +399,29 @@ def hall_notebook(hall: List[Dict[str, Any]], events: List[Dict[str, Any]]) -> D
         if sl:
             spear_lines.add(sl.lower())
 
+    def _enrich(h: Dict[str, Any]) -> Dict[str, Any]:
+        row = dict(h)
+        lens = row.get("lens") or "Unlabeled"
+        dtype = (
+            row.get("discovery_type")
+            or row.get("type")
+            or classify_discovery_type(row.get("line") or "", lens)
+        )
+        row["discovery_type"] = dtype
+        row["type"] = dtype
+        return row
+
     for h in hall:
-        lens = h.get("lens") or "Unlabeled"
-        by_lens[lens].append(h)
-        line = (h.get("line") or "").strip().lower()
-        if line in spear_lines or (h.get("note") or "").lower().find("spear") >= 0:
-            spears.append(h)
+        row = _enrich(h)
+        lens = row.get("lens") or "Unlabeled"
+        by_lens[lens].append(row)
+        by_type[row.get("discovery_type") or "General"].append(row)
+        line = (row.get("line") or "").strip().lower()
+        if line in spear_lines or (row.get("note") or "").lower().find("spear") >= 0:
+            spears.append(row)
+
+    candidates = [_enrich(c) for c in candidates]
+    starred = [_enrich(h) for h in starred]
 
     return {
         "candidates": candidates,
@@ -397,12 +429,14 @@ def hall_notebook(hall: List[Dict[str, Any]], events: List[Dict[str, Any]]) -> D
         "discoveries": starred,  # back-compat alias
         "spears": spears,
         "by_lens": dict(sorted(by_lens.items(), key=lambda kv: -len(kv[1]))),
+        "by_type": dict(sorted(by_type.items(), key=lambda kv: -len(kv[1]))),
         "counts": {
             "candidates": len(candidates),
             "starred": len(starred),
             "discoveries": len(starred),
             "spears": len(spears),
             **{k: len(v) for k, v in by_lens.items()},
+            **{f"type:{k}": len(v) for k, v in by_type.items()},
         },
     }
 

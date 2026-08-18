@@ -102,7 +102,7 @@ AUTHENTICITY_CASES = [
         "If the girl or guy you're talking to isn't 100% obsessed with you, move on. "
         "With the right person there's no guessing games. When someone is really into you, you'll know.",
         "Emotional Intelligence",
-        "history trying to sell you a harder story",
+        "without a sweeping group claim",
     ),
 ]
 

@@ -305,6 +305,102 @@ SAMPLES.append(
         "source": "seed-mechanism-drift-effort",
     }
 )
+SAMPLES.append(
+    {
+        "prompt": "no show will ever compare to breaking bad and better call saul... ever.",
+        "output": (
+            "You don't protect Breaking Bad from every other show. You protect yourself "
+            "from the possibility that your best days of watching are already over. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "taste_preference",
+            "lens": "Bourdain",
+            "interpretive_lens": "Bourdain",
+            "response_budget": "medium",
+            "preferred_structure": "SNAP",
+            "routing_structure": "SNAP",
+            "selected_structure": "SNAP",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "lens_drift",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "mechanism_mismatch": "false",
+        },
+        "source": "seed-lens-drift-breaking-bad",
+    }
+)
+SAMPLES.append(
+    {
+        "prompt": (
+            "Ima tell you this and im never speaking on it again. The next man can have "
+            "way more money, a flyer Benz, buy her every colors sequence of Van Cleefs "
+            "from NY to Orchard Road in Singapore, but that toxic inbetween love & hate "
+            "feeling you give her. She puts no price on that.."
+        ),
+        "output": (
+            "The next man can give her the watch, the car, the life that photographs clean. "
+            "She still won't trade the version of herself that only comes alive when she's "
+            "trying to survive you. That's the part she can't buy and can't fake. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "emotional",
+            "lens": "Emotional Intelligence",
+            "interpretive_lens": "Emotional Intelligence",
+            "response_budget": "medium",
+            "preferred_structure": "KNIFE",
+            "routing_structure": "KNIFE",
+            "selected_structure": "KNIFE",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "none",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "mechanism_mismatch": "false",
+        },
+        "source": "seed-mode1-ceiling-toxic-intensity",
+    }
+)
+
+
+SAMPLES.append(
+    {
+        "prompt": (
+            "'Foreplay' is a misleading term that makes women's pleasure sound optional "
+            "while treating men's pleasure mandatory."
+        ),
+        "output": (
+            'The word "foreplay" already decided the hierarchy. It calls everything before '
+            "penetration the opening act, which only works if penetration is the main event. "
+            "The term didn't describe desire. It ranked it. 🥃"
+        ),
+        "diagnostics": {
+            "claim_domain": "social_power",
+            "lens": "Pattern Recognition",
+            "interpretive_lens": "Pattern Recognition",
+            "response_budget": "low",
+            "preferred_structure": "SNAP",
+            "routing_structure": "SNAP",
+            "selected_structure": "SNAP",
+            "structure_override": "false",
+            "structure_persistence": "routing_only",
+            "lens_locked": "true",
+            "quality_rewrite_triggered": "false",
+            "quality_failures": "none",
+            "premise_relocated": "true",
+            "dominant_mechanism_count": "1",
+            "spear_detected": "true",
+            "spear_line": 'The word "foreplay" already decided the hierarchy.',
+            "mechanism_mismatch": "false",
+            "canonical": "true",
+        },
+        "source": "seed-canonical-foreplay-language",
+    }
+)
 
 
 def main() -> None:
@@ -330,9 +426,31 @@ def main() -> None:
             "Every threat is autobiographical.",
             event_id=last["id"],
             lens="Emotional Intelligence",
-            note="seed — discovery density target",
+            discovery_type="Projection",
+            note="seed — EI subject-first discovery",
         )
-        print("starred hall-of-fame line")
+        star_discovery(
+            "Breaking Bad didn't ruin television. It raised the price of impressing you.",
+            event_id=last["id"],
+            lens="Bourdain",
+            discovery_type="Craft",
+            note="seed — Bourdain object-first discovery",
+        )
+        star_discovery(
+            'The word "foreplay" already decided the hierarchy.',
+            event_id=last["id"],
+            lens="Pattern Recognition",
+            discovery_type="Language",
+            note="canonical — protect; do not regress (language ranked it)",
+        )
+        star_discovery(
+            "The term didn't describe desire. It ranked it.",
+            event_id=last["id"],
+            lens="Pattern Recognition",
+            discovery_type="Language",
+            note="canonical — protect; do not regress (language ranked it)",
+        )
+        print("starred hall-of-fame lines (Projection + Craft + Language canonical)")
 
 
 if __name__ == "__main__":

@@ -105,9 +105,16 @@
       <a href="{{ url_for('inspector_hall', bucket='spears') }}" class="{% if bucket == 'spears' %}active{% endif %}">
         <span>🎯 Spears</span><span class="n">{{ counts.spears or 0 }}</span>
       </a>
+      <div style="margin:10px 8px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">By lens</div>
       {% for lens, rows in notebook.by_lens.items() %}
       <a href="{{ url_for('inspector_hall', lens=lens) }}" class="{% if bucket == lens %}active{% endif %}">
         <span>{{ lens }}</span><span class="n">{{ rows|length }}</span>
+      </a>
+      {% endfor %}
+      <div style="margin:10px 8px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">By type</div>
+      {% for dtype, rows in (notebook.by_type or {}).items() %}
+      <a href="{{ url_for('inspector_hall', type=dtype) }}" class="{% if bucket == 'type:' ~ dtype %}active{% endif %}">
+        <span>{{ dtype }}</span><span class="n">{{ rows|length }}</span>
       </a>
       {% endfor %}
     </aside>
@@ -115,7 +122,7 @@
       {% if bucket == 'candidates' %}
       <p class="intro">Auto-mined stealable lines from the full corpus — not starred yet. This is the {{ counts.candidates }} you saw on the dashboard. Star the ones worth keeping.</p>
       {% elif bucket == 'starred' %}
-      <p class="intro">Manually starred lines — your locked writer's notebook ({{ counts.starred }}).</p>
+      <p class="intro">Manually starred lines — your locked writer's notebook ({{ counts.starred }}). Tagged by lens + type for training signal.</p>
       {% else %}
       <p class="intro">Writer's notebook — stealable sentences, not whole replies.</p>
       {% endif %}
@@ -123,14 +130,17 @@
       {% for h in hall %}
       <div class="line-card">
         {% if h.candidate %}<span class="pill">Candidate</span>{% endif %}
+        {% if h.lens %}<span class="pill">{{ h.lens }}</span>{% endif %}
+        {% if h.discovery_type or h.type %}<span class="pill">{{ h.discovery_type or h.type }}</span>{% endif %}
         <div class="line">{{ h.line }}</div>
         <div class="stars">{{ '⭐' * (h.stars or 5) }}{% if h.stealability %} · {{ h.stealability }}{% endif %}</div>
-        <div class="meta">{{ h.lens or '—' }} · {{ (h.ts or '')[:16].replace('T',' ') }}{% if h.note %} · {{ h.note }}{% endif %}</div>
+        <div class="meta">Lens: {{ h.lens or '—' }} · Type: {{ h.discovery_type or h.type or '—' }} · {{ (h.ts or '')[:16].replace('T',' ') }}{% if h.note %} · {{ h.note }}{% endif %}</div>
         <div class="row-actions">
           {% if h.candidate %}
           <form method="post" action="{{ url_for('inspector_star') }}" style="display:inline">
             <input type="hidden" name="event_id" value="{{ h.event_id }}" />
             <input type="hidden" name="lens" value="{{ h.lens or '' }}" />
+            <input type="hidden" name="discovery_type" value="{{ h.discovery_type or h.type or '' }}" />
             <input type="hidden" name="line" value="{{ h.line }}" />
             <input type="hidden" name="stars" value="{{ h.stars or 5 }}" />
             <input type="hidden" name="note" value="promoted from candidates" />

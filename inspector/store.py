@@ -157,17 +157,26 @@ def star_discovery(
     *,
     event_id: str = "",
     lens: str = "",
+    discovery_type: str = "",
     note: str = "",
     stars: int = 5,
 ) -> Dict[str, Any]:
-    """Hall of Fame — stealable sentences Matt starred."""
+    """Hall of Fame — stealable sentences Matt starred (lens + type tags)."""
     _ensure()
+    try:
+        from discovery_craft import classify_discovery_type
+
+        dtype = (discovery_type or "").strip() or classify_discovery_type(line, lens)
+    except Exception:
+        dtype = (discovery_type or "").strip() or "General"
     row = {
         "id": uuid.uuid4().hex[:10],
         "ts": datetime.now(timezone.utc).isoformat(),
         "line": (line or "").strip(),
         "event_id": event_id,
         "lens": lens,
+        "discovery_type": dtype,
+        "type": dtype,  # alias for templates
         "note": note,
         "stars": max(1, min(5, int(stars or 5))),
     }

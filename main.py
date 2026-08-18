@@ -229,16 +229,22 @@ def inspector_hall():
     if bucket in {"discoveries", "starred"}:
         bucket = "starred"
     lens = (request.args.get("lens") or "").strip()
+    dtype = (request.args.get("type") or "").strip()
     lines = notebook["candidates"]
     if bucket == "starred":
         lines = notebook["starred"]
     elif bucket == "spears":
         lines = notebook["spears"]
+    elif dtype:
+        lines = notebook.get("by_type", {}).get(dtype, [])
+        bucket = f"type:{dtype}"
     elif lens:
         lines = notebook["by_lens"].get(lens, [])
         bucket = lens
     elif bucket in notebook["by_lens"]:
         lines = notebook["by_lens"][bucket]
+    elif bucket.startswith("type:") and bucket[5:] in notebook.get("by_type", {}):
+        lines = notebook["by_type"][bucket[5:]]
 
     return render_template(
         "inspector_hall.html",
@@ -264,6 +270,9 @@ def inspector_star():
             line,
             event_id=request.form.get("event_id") or "",
             lens=request.form.get("lens") or "",
+            discovery_type=request.form.get("discovery_type")
+            or request.form.get("type")
+            or "",
             note=request.form.get("note") or "",
             stars=stars_i,
         )

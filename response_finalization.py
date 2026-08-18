@@ -240,6 +240,11 @@ class ResponsePlan:
     comic_premise: bool = False
     comic_premise_confidence: float = 0.0
     never_cure_premise: bool = False
+    # When True, finalizer strips post-punchline insight and forbids second closers
+    comic_payoff_is_terminal: bool = False
+    # Routing question (not a user-facing mode): comic|provocation|vulnerability|question|observation|open
+    social_mode: str = "open"
+    social_mode_confidence: float = 0.0
 
 
 @dataclass
@@ -1169,6 +1174,7 @@ def build_response_plan(
 
     # HIDDEN_TRANSACTION + ESCALATION_PAYOFF + comic-premise gate (not modes)
     from capability_detection import (
+        classify_social_mode,
         detect_comic_premise,
         detect_escalation_payoff,
         detect_hidden_transaction,
@@ -1178,8 +1184,14 @@ def build_response_plan(
     ht = detect_hidden_transaction(user_message)
     ep = detect_escalation_payoff(user_message)
     comic = detect_comic_premise(user_message)
-    log_capability_trace(ht, ep, comic)
-    if ht.active:
+    social = classify_social_mode(user_message)
+    if social.mode == "comic" and not comic.active:
+        comic.active = True
+        comic.confidence = max(comic.confidence, social.confidence or 0.7)
+        comic.signals = comic.signals or list(social.signals)
+        comic.never_cure = True
+    log_capability_trace(ht, ep, comic, social)
+    if ht.active and social.mode != "comic":
         # Prefer as supporting (or primary when incentives are the claim)
         if primary in {
             "Hidden Incentive Analysis",
@@ -1196,23 +1208,10 @@ def build_response_plan(
                     mechanism_hint = "hidden_transaction_risk_transfer"
         if not supporting or supporting == "Epistemic Calibration":
             supporting = "Hidden Transaction"
-    if comic.should_block_therapy:
-        # Prefer bit continuation over Emotional State / Soft Emotional Precision
-        if primary in {
-            "Emotional State Recognition",
-            "Quiet Presence",
-            "Emotional Validation",
-            "Hidden Transaction",
-        } or not primary:
-            primary = "Humor As Disruption"
-        if supporting in {
-            None,
-            "",
-            "Epistemic Calibration",
-            "Boundary Analysis",
-            "Hidden Transaction",
-        }:
-            supporting = "Bit Continuation"
+    if comic.should_block_therapy or social.mode == "comic":
+        # Bit continuation over Pattern Recognition / EI / Hidden Transaction
+        primary = "Humor As Disruption"
+        supporting = "Bit Continuation"
         mechanism_hint = "comic_premise_continuation"
         # Keep SNAP/low fine for tags — guidance forbids curing the premise
 
@@ -1265,6 +1264,9 @@ def build_response_plan(
         comic_premise=comic.active,
         comic_premise_confidence=comic.confidence,
         never_cure_premise=bool(comic.active and comic.never_cure),
+        comic_payoff_is_terminal=bool(comic.active),
+        social_mode=social.mode,
+        social_mode_confidence=social.confidence,
     )
 
 
@@ -1274,11 +1276,12 @@ Surface geometry (mandatory): CUT → NAME → PROVE ONCE → STOP → 🥃
 Deep reasoning stays internal. External delivery is aggressive compression.
 
 Layers (mandatory — keep independent):
-1) Identity — interpretive lens (perspective selection). Internally: whose eyes?
-2) Question — one invisible ask that opens many capabilities under that lens
-3) Intelligence — capability / mental tool (NOT an alias for the lens)
-4) Writing — Depth × Shape (SNAP / KNIFE / REFLECTION)
-5) Editing — Editor (Gold) compression within the allocated budget
+  0) Social mode — what kind of human moment? (before intelligence; not a new pipeline box)
+  1) Identity — interpretive lens (perspective selection). Internally: whose eyes?
+  2) Question — one invisible ask that opens many capabilities under that lens
+  3) Intelligence — capability / mental tool (NOT an alias for the lens)
+  4) Writing — Depth × Shape (SNAP / KNIFE / REFLECTION)
+  5) Editing — Editor (Gold) compression within the allocated budget
 
 Pipeline:
 claim type → interpretive lens → question → capability → mechanism fit → response budget (depth × shape) → generate → Editor → 🥃
@@ -1341,6 +1344,38 @@ Relocate: user premise → reframe → name the deeper mechanism → one proof �
 Every substantive sentence must add NEW understanding.
 If a sentence merely restates the user's thesis — delete it.
 Do NOT create a hard "never agree" rule. If they are right, still do not spend words telling them what they already know.
+
+SOCIAL MODE BEFORE INTELLIGENCE (routing question — not a new pipeline box):
+First determine what kind of human moment this is. Only then deploy Moody's intelligence.
+Comic premise → play with it.
+Provocation → find the unexpected truth beneath it.
+Sincere vulnerability → recognize and articulate, then advance.
+Actual question/problem → reason about it.
+Pattern Recognition is a capability available after the social mode is identified. It is not the objective.
+Moody's job is not to find depth. It is to find the right response to the thing actually in front of it.
+
+DEPTH MUST BE EARNED BY THE PREMISE:
+When somebody hands Moody pain, depth is valuable.
+When somebody hands Moody a joke, depth can be heckling.
+If explaining the response requires introducing a concept that does not exist in the premise, the response has left the bit.
+Sometimes the correct intelligence is eight words and leave.
+
+RECOGNITION MUST ADVANCE:
+After removing metaphor and stylistic language, what does the response know that the user didn't already say?
+If the answer is nothing, it is parroting — even if every sentence sounds like excellent empathy.
+Mirroring can establish that Moody understood. Mirroring cannot be the payload.
+A recognition response must contribute at least one of: new inference, hidden contradiction, causal mechanism, consequence, useful distinction, surprising reframe.
+
+START WHERE THE USER STOPPED:
+Don't summarize the runway they already built. Take off from the end of it.
+Compression is not the goal. Informational advancement is.
+FAIL: restate premise → explain → insight → restate insight.
+PASS: premise already established → new inference → payoff → exit.
+
+Three failures of "every input deserves an insight":
+PARROTING — prettier restatement of what the user already said (burnout → "survival mode is the only operating system left").
+PSYCHOLOGIZING — converting a joke into an unwanted diagnosis (Flock-camera joke → "whether the house still belongs to you").
+UNSUPPORTED DEPTH — manufacturing profundity with no textual basis (name-formula joke → "put a leash on something that won't wear one").
 
 RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
 
@@ -1851,6 +1886,7 @@ def _capability_extra_guidance(plan: ResponsePlan) -> str:
         ComicPremiseAnalysis,
         EscalationPayoffAnalysis,
         HiddenTransactionAnalysis,
+        SocialModeAnalysis,
         capability_guidance,
     )
 
@@ -1874,7 +1910,12 @@ def _capability_extra_guidance(plan: ResponsePlan) -> str:
     )
     if comic.active and not comic.signals:
         comic.signals = ["routed"]
-    return capability_guidance(ht, ep, comic)
+    social = SocialModeAnalysis(
+        mode=getattr(plan, "social_mode", None) or "open",
+        confidence=float(getattr(plan, "social_mode_confidence", 0) or 0),
+        signals=["routed"] if getattr(plan, "social_mode", None) else [],
+    )
+    return capability_guidance(ht, ep, comic, social)
 
 
 def detect_generic_cta(text: str) -> bool:
@@ -2023,8 +2064,12 @@ def _apply_closing_strategy(
 
     before = (text or "").strip()
 
-    # ESCALATION_PAYOFF terminal: body is the landing — forbid Recognition Landing / morals
-    from capability_detection import draft_has_terminal_payoff, strip_post_payoff_moral
+    # ESCALATION_PAYOFF / COMIC PAYOFF terminal: body is the landing
+    from capability_detection import (
+        draft_has_terminal_payoff,
+        strip_post_comic_punchline,
+        strip_post_payoff_moral,
+    )
 
     if getattr(plan, "escalation_payoff", False) or getattr(plan, "payoff_is_terminal", False):
         if draft_has_terminal_payoff(before) or getattr(plan, "payoff_is_terminal", False):
@@ -2039,6 +2084,20 @@ def _apply_closing_strategy(
                 1 if moral_stripped else 0,
             )
             return cleaned2, mod or moral_stripped, False
+
+    if getattr(plan, "comic_premise", False) or getattr(plan, "comic_payoff_is_terminal", False):
+        cleaned, punch_stripped = strip_post_comic_punchline(before)
+        cleaned2, mod = protective_cleanup(cleaned)
+        plan.comic_payoff_is_terminal = True
+        plan.landing = "body_ends_response"
+        plan.closing_strategy = "none"
+        plan.allow_question = False
+        logger.info(
+            "FINALIZER_TRACE comic_payoff_terminal=1 recognition_landing=0 "
+            "second_beat_stripped=%s",
+            1 if punch_stripped else 0,
+        )
+        return cleaned2, mod or punch_stripped, False
 
     decision = select_landing(
         user_message,
@@ -2378,6 +2437,11 @@ def finalize_response(
         "payoff_is_terminal": str(bool(getattr(plan, "payoff_is_terminal", False))).lower(),
         "comic_premise": str(bool(getattr(plan, "comic_premise", False))).lower(),
         "never_cure_premise": str(bool(getattr(plan, "never_cure_premise", False))).lower(),
+        "comic_payoff_is_terminal": str(
+            bool(getattr(plan, "comic_payoff_is_terminal", False))
+        ).lower(),
+        "social_mode": getattr(plan, "social_mode", None) or "open",
+        "social_mode_confidence": f"{float(getattr(plan, 'social_mode_confidence', 0) or 0):.2f}",
         "closing_strategy": plan.closing_strategy,
         "landing": plan.landing,
         "anchors": ",".join(plan.anchors[:6]),

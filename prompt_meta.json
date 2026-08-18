@@ -1,8 +1,8 @@
 {
-  "section_count": 218,
-  "char_count": 247853,
-  "prompt_hash": "0e8921b138808f0f",
-  "prompt_hash_sha256": "0e8921b138808f0fb2d4140c7394ca41a9e3d9232566da70ef1aaaf2532a3b5e",
+  "section_count": 220,
+  "char_count": 263980,
+  "prompt_hash": "80599fcdc85454a6",
+  "prompt_hash_sha256": "80599fcdc85454a68ba5baca6b50ac3ae4accb1d31bbb1621e1fbc8e767b7afd",
   "final_20_sections": [
     "9_response-engine/thesis-discipline.md",
     "9_response-engine/thinking-vs-writing.md",
@@ -26,12 +26,12 @@
     "10_testing-quality/final-quality-gates.md"
   ],
   "critical_module_positions": {
-    "epistemic-calibration": "213/218",
-    "evidence-vs-inference": "212/218",
-    "practical-next-action": "214/218",
-    "signature-line": "215/218",
-    "recognition-callbacks": "216/218",
-    "response-generation-order": "217/218",
-    "final-quality-gates": "218/218"
+    "epistemic-calibration": "215/220",
+    "evidence-vs-inference": "214/220",
+    "practical-next-action": "216/220",
+    "signature-line": "217/220",
+    "recognition-callbacks": "218/220",
+    "response-generation-order": "219/220",
+    "final-quality-gates": "220/220"
   }
 }

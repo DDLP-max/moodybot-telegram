@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""python -m inspector seed | serve | import-log | rebuild | watch """
+"""python -m inspector seed | serve | import-log | rebuild | watch | canonical"""
 
 from __future__ import annotations
 
@@ -85,6 +85,13 @@ def main(argv: list[str] | None = None) -> None:
                 print(f"reloaded: {stats}")
         return
 
+    if cmd == "canonical":
+        from .canonical import format_suite_report, run_canonical_suite
+
+        only = [a for a in args[1:] if not a.startswith("-")]
+        summary = run_canonical_suite(only=only or None)
+        print(format_suite_report(summary))
+        raise SystemExit(0 if summary["ok"] else 1)
 
     if cmd == "capabilities":
         # python -m inspector capabilities [hidden_transaction|escalation_payoff|comic_premise]
@@ -145,8 +152,12 @@ def main(argv: list[str] | None = None) -> None:
         "  python -m inspector import-log [path] [--since YYYY-MM-DD]\n"
         "  python -m inspector rebuild [path] [--keep-seeds]\n"
         "  python -m inspector watch [path]\n"
+        "  python -m inspector canonical [id...]\n"
         "  python -m inspector capabilities "
-        "[hidden_transaction|escalation_payoff|comic_premise]"
+        "[hidden_transaction|escalation_payoff|comic_premise]\n"
+        "\n"
+        "Canonical = identity regression floor (see inspector/CANONICAL.md).\n"
+        "Hall of Fame = growing training signal — keep them separate."
     )
 
 

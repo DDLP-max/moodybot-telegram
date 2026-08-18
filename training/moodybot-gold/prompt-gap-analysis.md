@@ -5,9 +5,9 @@ the Gold corpus almost never exhibits.
 
 **Not in scope:** rewriting the prompt. Architecture unchanged.
 
-Gold reference: `training/moodybot-gold/` (n=18 elite historical replies).
+Gold reference: `training/moodybot-gold/` (n=19 elite replies — historical log + canonical craft).
 Prompt reference: `moodybot-system-prompt/` + compiled `system_prompt.txt`
-+ live `CORE_WRITE_DIRECTIVE` in `response_finalization.py`.
++ live directives in `response_finalization.py`.
 
 ---
 
@@ -21,14 +21,14 @@ For each gap:
 
 ---
 
-## Gaps
+## Gaps that remain
 
 ### 1. Signature Line / Recognition Callback machinery still exists as a taught object
 
 **Prompt encourages**
 - Entire modules: `signature-line.md`, `recognition-callbacks.md`
-- `response-type-mapping.md` maps many intents to “Recognition Callback”
-- Even when marked optional/off, the prompt still teaches the *shape* of a manufactured closer
+- `response-type-mapping.md` and `response-generation-order.md` still teach the shape
+- Even when marked optional/off, the prompt still spends tokens on manufactured closers
 
 **Gold almost never**
 - Appends a separate quotable closer after the body lands
@@ -36,249 +36,143 @@ For each gap:
 - Treats ending as a product feature
 
 **Gap**
-Gold endings are simply where the thought stops. The prompt still spends
-surface area teaching an ending genre Gold rejects.
+Gold endings are simply where the thought stops. The prompt still teaches an ending genre Gold rejects.
 
 ---
 
 ### 2. Engagement / share / CTA systems remain in the stack
 
 **Prompt encourages**
-- `6_engagement-conversion/` (share triggers, comment bait, CTA integrity)
-- Formatting README still frames “CTA integrity” as structural
-- Historical log shows Tag/Mention/@MoodyBotAI tails were once common
+- `6_engagement-conversion/` (share triggers, comment bait, CTA library, CTA structure)
+- Ogilvy/Draper copy cores with “One Clear CTA”
+- Brand CTA lines that invite tags, confessions, and public performance
 
 **Gold almost never**
 - Asks for tags, shares, confessions-to-the-brand
-- Ends with engagement bait questions as the point of the reply
+- Ends with engagement bait as the point of the reply
 
 **Gap**
-Gold is anti-engagement-theater. Any remaining CTA/share pedagogy pulls
-generation toward behaviors absent from the best historical writing.
+Gold is anti-engagement-theater. Remaining CTA/share pedagogy pulls generation toward behaviors absent from the best historical writing.
 
 ---
 
-### 3. Emotional-arc / structure checklists
+### 3. Length-tier and “quotable” pedagogy can inflate replies past the Gold stop
 
 **Prompt encourages**
-- `structure-checklist.md`: “Contains emotional arc (shift from A → B)”
-- Length-tier language about “prefer one quotable”
-- Response-type tables that prescribe arc + callback by category
+- Historical length-tier language and quotable-line modules
+- Some personas still perform “atmospheric” extension
 
 **Gold almost never**
-- Performs an emotional arc as choreography
-- Builds A→B theater when a single cut would do
-- Optimizes for quotability as a separate deliverable (the line emerges from the insight)
+- Continues after the payoff
+- Adds a second insight “for completeness”
+- Averages ~48 words; median ~34
 
 **Gap**
-Checklists push performance of structure. Gold performs insight, then silence.
+Anything that rewards development-for-its-own-sake fights Gold’s primary craft move: stop.
 
 ---
 
-### 4. Poetic / noir / gothic permission surfaces
+### 4. Systems language still exists in capability / worldview modules
 
 **Prompt encourages**
-- Gothic flourish / mythic line permission modules
-- Persona notes that still mention noir / poetic depth
-- Mode escalation toward poetic modules
+- Capability packs and operator language that name incentives, architectures, engines
+- Internal vocabulary that can leak to the surface if translation fails
 
 **Gold almost never**
-- Stacks mythic lines
-- Relies on whiskey-bar / noir costume for authority
-- Uses multiple metaphors per reply (~0.11 `like a`/`as if` per Gold response)
+- Says “governing incentive structure,” “identity architecture,” “pattern recognition engine”
+- Sounds like a systems diagram narrating itself
 
 **Gap**
-Permission to ornament is enough to reintroduce costume Gold discarded.
-Recent write rules say “do not require” poetry — but older modules still
-offer it as craft.
+Gold thinks abstractly and speaks concretely. Prompt surface area that models jargon increases leak risk even when `concrete-before-abstract` exists.
 
 ---
 
-### 5. Internal analytical vocabulary is still named extensively in-prompt
+### 5. Therapy-adjacent and validation personas still live in the stack
 
 **Prompt encourages**
-- Long INTERNAL ONLY lists: incentive structure, narrative contract, coherence,
-  epistemic calibration, pattern forensics, governing mechanism, etc.
-- “Governing pattern” as a mandatory pipeline noun
+- Soft emotional precision / validation capabilities
+- Inspiration sources that comfort without always cutting
 
 **Gold almost never**
-- Speaks those labels aloud
-- Sounds like pattern-forensics documentation
+- Opens with validation theater
+- Sounds like a psychology textbook
+- Narrates the reader’s inner movie to completion
 
-**Partial credit**
-Current `CORE_WRITE_DIRECTIVE` correctly bans dumping these into prose.
-Gold supports that ban.
-
-**Remaining gap**
-Naming the forbidden vocabulary at length still primes the model to think
-in those tokens. Gold’s best lines invent ordinary nouns (loyalty program,
-courtroom, stupid machine) without visiting the jargon list at all.
+**Gap**
+Gold names the mechanism and trusts the reader. Soft-validation pathways compete with that instinct.
 
 ---
 
-### 6. Over-specified generation procedures
+### 6. Persona costume and “voice flavor” menus exceed Gold’s actual range
 
 **Prompt encourages**
-- Multi-step mandatory order: intent → evidence → governing pattern →
-  translate → write → thesis tests → distraction test → cross-examination →
-  trust-the-reader → concrete diction…
-- Multiple overlapping docs (`insight-first`, `thesis-discipline`,
-  `trust-the-reader`, `thinking-vs-writing`, `concrete-before-abstract`)
+- Large inspiration-source and style-modifier catalogs (noir, velvet, savage, etc.)
+- Mode escalation that layers flavor when the quote is flat
 
 **Gold almost never**
-- Feels like compliance with a procedure
-- Shows seams of “I am now translating my governing pattern”
+- Needs a costume to land
+- Stacks atmospheric modifiers
+- Sounds like a different celebrity each turn
 
 **Gap**
-The *content* of recent rules (one thesis, stop, concrete speech) matches Gold.
-The *quantity* of procedural instruction does not. Gold reads like judgment,
-not like a completed checklist.
+Gold’s identity is mechanism + spoken English. Flavor menus invite imitation that Gold does not require.
 
 ---
 
-### 7. Length / completeness pressure from older modules
+### 7. “Always / mandatory” instructional density
 
 **Prompt encourages**
-- Cultural analysis paths: Observation → Drivers → Nuance → Consequence
-- Business paths: System → Incentive → Leverage
-- Implicit completeness across response-type mapping
+- Many hard rules across modules (always translate, always rhythm, always…)
+- High instructional volume in the assembled `system_prompt.txt` (~200+ sections)
 
-**Gold profile**
-- Median ~66 words, ~1.1 paragraphs
-- KNIFE dominates (reframe → short proof → stop)
-- Does not walk four-stage analytical ladders unless every rung is necessary
+**Gold almost never**
+- Reads like compliance with a checklist
+- Needs dozens of constraints to sound human
 
 **Gap**
-Older type-mapping still asks for more stages than Gold uses.
+Volume of instruction can produce checklist prose — the opposite of Gold’s casual inevitability.
 
 ---
 
-### 8. “Quotable line” as a goal vs. quotable line as a byproduct
+## Gaps that have narrowed (keep protecting)
 
-**Prompt encourages**
-- Quotable-lines modules / share frameworks / “prefer one quotable”
-- Signature Line doctrine (even disabled) that treats the last sentence as craft object
+These used to be larger failures; craft work moved toward Gold. Do not regress:
 
-**Gold**
-- 100% contain a short memorable sentence
-- But it is usually the thesis or the proof spike, not an appended mic-drop
+| Gold behavior | Craft that protects it |
+|---------------|------------------------|
+| Object-first on taste/entertainment | Lens drift + early-noun checks; Law 5c |
+| Stealable discovery over explanation | Mode 1 ceiling; unforgettable-lines; EI Mode 2 |
+| Escape the author’s frame | Paraphrase collapse; prison-cell standard |
+| Short stop after payoff | Gold/Editor compression; Canonical Suite |
+| No viewer psych on Breaking Bad-class prompts | Bourdain routing + object-first invariant |
 
-**Gap**
-Optimizing for quotability produces tacked-on endings.
-Gold’s quotability is a side effect of a clean cut.
-
----
-
-### 9. Agreement / validation openings
-
-**Prompt residue**
-- Softer witness / confession paths can lean mirror-first
-- Engagement-era habits in the historical log: “You’re not alone…” essays
-
-**Gold**
-- ~56% begin with contradiction / premise relocation
-- ~6% begin with agreement
-- Validation is not the product; rearrangement is
-
-**Gap**
-Any prompt path that rewards soothing agreement first fights the Gold open.
+Canonical Suite (`python -m inspector canonical`) is the regression floor for these wins.
 
 ---
 
-### 10. Rhetorical questions as engagement device
+## Highest-leverage prompt mismatches (if prioritized later)
 
-**Prompt / history**
-- Comment-bait and older closers use questions to continue the thread
-- Some Gold replies still contain a question, but sparsely (0.44 avg)
+1. **CTA / engagement / Signature Line surface area** — Gold has ~0% of this; prompt still teaches it.
+2. **Instructional volume** — Gold is short; the compiled prompt is enormous.
+3. **Costume/persona menus** — Gold is one voice noticing differently; not a wardrobe.
+4. **Systems jargon residences** — Gold never says the machinery aloud.
 
-**Gold**
-- Questions are rare and usually structural (“is it?”) or diagnostic
-- Not “What do you think?” / “Agree?” / confession prompts
-
-**Gap**
-Prompt material that treats questions as engagement tools diverges from Gold.
+Do not rewrite yet.
+Discover first. Preserve what already worked.
+Then remove prompt pressure that fights the Gold floor.
 
 ---
 
-### 11. Systems-explanation pride
+## Bottom line
 
-**Prompt**
-- “MoodyBot sees systems” appears as brand identity (useful)
-- Risk: models perform systems-seeing by *talking about systems*
+The Gold corpus shows MoodyBot was already capable of:
 
-**Gold**
-- Sees systems; speaks human
-- “Loyalty program,” “courtroom,” “filter,” “scenery” — never “incentive architecture”
+- premise relocation
+- one memorable line
+- concrete speech
+- early stop
 
-**Gap**
-Identity line is right; surrounding analytical celebration still risks essay diction.
-Gold never congratulates itself for sophistication.
+The current prompt still spends significant weight on behaviors Gold almost never exhibits (engagement theater, manufactured closers, costume, systems talk).
 
----
-
-### 12. Multi-insight generosity
-
-**Prompt tension**
-- Trust-the-reader / thesis-discipline now fight this (aligned with Gold)
-- Older modules still reward “nuance,” “possible drivers,” extra layers
-
-**Gold**
-- One idea. Spear, not handful.
-- Bonus insights are treated as defects
-
-**Gap**
-The stack is inconsistent: new rules say one thesis; old mapping still
-invites extra drivers/nuance stages.
-
----
-
-## Where the current prompt already matches Gold
-
-Do not “fix” these away — they are converging on the corpus:
-
-- Concrete before abstract / speak concretely
-- Insight first / stop when body lands
-- Trust the reader / no triple restatement
-- Thesis discipline / one spine
-- Protect-only finalizer (does not rewrite into costume)
-- Explicit bans on Signature Line / CTA as mandatory
-
-These are the parts of the present stack that look like reverse-engineering
-Gold rather than inventing costume.
-
----
-
-## Summary table
-
-| Prompt pressure | Frequency in Gold |
-|-----------------|-------------------|
-| Manufactured closer / Signature Line | ~0 |
-| CTA / tag / share tail | ~0 |
-| Multi-metaphor costume | ~0 (≤1 image, rare) |
-| Emotional-arc choreography | ~0 |
-| Therapy language | ~0 |
-| Engine jargon in prose | ~0 |
-| Four-stage analytical ladders | rare |
-| Premise rejection / relocation open | common (~56%) |
-| One memorable load-bearing line | always |
-| Stop after payoff | always |
-| Short spoken sentences | always |
-
----
-
-## Conclusion
-
-The Gold corpus says MoodyBot’s best historical writing was already:
-
-**cut → name → prove once → stop.**
-
-The current prompt is partially catching up (especially recent generation
-directives), but still carries older machinery that teaches:
-
-**arc → ornament → quotable → callback → engage.**
-
-That older machinery is the gap.
-
-Do not invent a new style to close it.
-Remove or silence the pressures Gold never obeyed —
-when you are ready to change the prompt.
+Architecture stays frozen.
+The style was found in history — not invented in instructions.

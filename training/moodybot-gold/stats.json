@@ -1,33 +1,39 @@
 {
   "n": 19,
-  "source_pairs_scanned": 4909,
-  "avg_sentence_length_words": 11.09,
-  "avg_response_length_words": 75.17,
-  "median_response_length_words": 66.0,
-  "metaphor_like_a_per_response": 0.111,
-  "pct_with_any_like_a_metaphor": 11.1,
-  "humor_frequency_pct": 33.3,
-  "avg_rhetorical_questions": 0.44,
-  "adjective_density": 0.0198,
-  "pct_beginning_with_contradiction": 55.6,
-  "pct_beginning_with_agreement": 5.6,
+  "corpus_pairs_scanned": 4909,
+  "avg_sentence_length_words": 10.57,
+  "avg_response_length_words": 48.42,
+  "median_response_length_words": 34,
+  "metaphor_like_a_per_response": 0.053,
+  "pct_with_any_like_a_metaphor": 5.3,
+  "humor_frequency_pct": 31.6,
+  "avg_rhetorical_questions": 0.16,
+  "adjective_density": 0.019,
+  "pct_beginning_with_contradiction": 73.7,
+  "pct_beginning_with_agreement": 5.3,
   "avg_paragraphs": 1.11,
-  "avg_flesch_kincaid_grade": 5.23,
-  "avg_flesch_reading_ease": 77.78,
-  "pct_with_physical_image": 44.4,
-  "pct_with_short_memorable_sentence": 100.0,
+  "avg_flesch_kincaid_grade": 5.43,
+  "avg_flesch_reading_ease": 73.83,
+  "pct_with_physical_image": 52.6,
+  "pct_with_short_memorable_sentence": 94.7,
   "structure_counts": {
-    "KNIFE": 12,
-    "SNAP": 2,
-    "STORY": 5
+    "SNAP": 7,
+    "KNIFE": 10,
+    "STORY": 2
   },
   "category_counts": {
-    "culture_media": 1,
     "philosophy": 1,
-    "relationships": 9,
-    "psychology_self": 4,
+    "psychology_self": 2,
+    "relationships": 8,
     "money_work": 2,
     "social_critique": 1,
-    "power_status": 1
+    "power_status": 1,
+    "language_culture": 1,
+    "taste_preference": 3
+  },
+  "source_counts": {
+    "moodybot_log": 12,
+    "canonical-live": 1,
+    "canonical-craft": 6
   }
 }

@@ -221,3 +221,521 @@ def protected_discovery_indices(draft_sentences: List[str]) -> Set[int]:
     """Indices Editor must not delete to satisfy brevity."""
     return {i for i, s in enumerate(draft_sentences) if looks_like_discovery(s)}
 
+
+# --- Object-first vs subject-first (lens stance) ---------------------------------
+
+_ENTERTAINMENT_OBJECT = re.compile(
+    r"\b(show|series|movie|film|tv|television|netflix|hbo|"
+    r"breaking bad|better call saul|binge|episode|season|"
+    r"mcdonald|burger|restaurant|food|taste)\b",
+    re.I,
+)
+
+_VIEWER_PSYCH = re.compile(
+    r"\byou don'?t\b|"
+    r"\byou'?re actually\b|"
+    r"\bwhat you'?re really\b|"
+    r"\bprotect yourself from\b|"
+    r"\byour best days\b|"
+    r"\bbest days of (watching|eating|living)\b|"
+    r"\balready over\b|"
+    r"\bfear that you'?ll never\b|"
+    r"\bpossibility that your\b|"
+    r"\byou protect yourself\b",
+    re.I,
+)
+
+_OBJECT_CRAFT = re.compile(
+    r"\b(craft|standard|respect(?:ed|s)? the audience|competence|"
+    r"raised the (bar|price)|impressing you|meal|restaurant|"
+    r"earned|wrote|filmed|scene|writing|acting)\b",
+    re.I,
+)
+
+# Early-noun lexicon (heuristic — not absolute)
+_OBJECT_EARLY_NOUNS = re.compile(
+    r"\b(show|shows|food|meal|craft|city|restaurant|music|television|"
+    r"film|movie|series|storytelling|writing|audience|burger|coffee|"
+    r"taste|episode|kitchen|chef|cuisine|menu|espresso|"
+    r"breaking bad|better call saul)\b",
+    re.I,
+)
+_SUBJECT_EARLY = re.compile(
+    r"\b(you|yourself|your fear|your insecurity|your best|"
+    r"protect yourself|you'?re actually|you don'?t)\b",
+    re.I,
+)
+_SUBJECT_OPEN = re.compile(
+    r"^\s*(you|you'?re|you don'?t|your |yourself)\b",
+    re.I,
+)
+_EI_UNEXPECTED_OBJECT = re.compile(
+    r"\b(cinematography|mise[- ]en[- ]sc[eè]ne|film editing|screenwriting)\b",
+    re.I,
+)
+_EI_EXPECTED = re.compile(
+    r"\b(you|they|people|relationship|boundary|fear|she|he|her|him)\b",
+    re.I,
+)
+
+
+def _first_sentence(text: str) -> str:
+    parts = _sentences(text)
+    return parts[0] if parts else ""
+
+
+def object_domain(
+    user_message: str = "",
+    *,
+    claim_domain: str = "",
+    lens: str = "",
+) -> bool:
+    """Taste / travel / craft — Bourdain starts with the object."""
+    return (
+        claim_domain in {"taste_preference", "cultural_insight", "travel"}
+        or (lens or "") == "Bourdain"
+        or bool(_ENTERTAINMENT_OBJECT.search(user_message or ""))
+    )
+
+
+def early_noun_report(
+    user_message: str,
+    response: str,
+    *,
+    claim_domain: str = "",
+    lens: str = "",
+) -> dict:
+    """
+    Lens-first noun test (heuristic).
+
+    Bourdain / object domain: early nouns should be the work (show, food, craft…).
+    Unexpected early subject spine: you / yourself / your fear.
+
+    EI: expected you/they/people/fear. Unexpected film-craft jargon as the spine.
+    """
+    first = _first_sentence(response)
+    lens_n = (lens or "").strip()
+    report = {
+        "ok": True,
+        "first_sentence": first,
+        "stance": "",
+        "direction": "",
+        "expected_hits": [],
+        "unexpected_hits": [],
+        "why": "",
+    }
+    if not first:
+        return report
+
+    if object_domain(user_message, claim_domain=claim_domain, lens=lens_n):
+        report["stance"] = "object-first"
+        obj_hits = _OBJECT_EARLY_NOUNS.findall(first)
+        sub_hits = _SUBJECT_EARLY.findall(first)
+        report["expected_hits"] = obj_hits
+        report["unexpected_hits"] = sub_hits
+        subject_open = bool(_SUBJECT_OPEN.search(first))
+        psych_frame = bool(
+            _VIEWER_PSYCH.search(first)
+            or re.search(r"\bprotect (yourself|Breaking|the)\b", first, re.I)
+        )
+        sensory_ok = bool(
+            re.search(r"\b(taste|tastes|meal|food|smell|kitchen|restaurant)\b", first, re.I)
+        )
+        # Invariant: don't open on you/yourself/fear. "You already know… taste like" is ok.
+        if subject_open and (psych_frame or (not obj_hits and not sensory_ok)):
+            report["ok"] = False
+            report["direction"] = "Object → Subject"
+            report["why"] = (
+                "object-first lens — early reply opens on you/yourself/fear "
+                "instead of the work (show/food/craft/city)"
+            )
+        elif subject_open and psych_frame:
+            report["ok"] = False
+            report["direction"] = "Object → Subject"
+            report["why"] = (
+                "object-first lens — subject-open psych frame "
+                "(you don't protect… / your fear) even if the object is named"
+            )
+        return report
+
+    if lens_n in {"Emotional Intelligence", "Hank Moody"}:
+        report["stance"] = "subject-first"
+        report["expected_hits"] = _EI_EXPECTED.findall(first)
+        bad = _EI_UNEXPECTED_OBJECT.findall(first)
+        report["unexpected_hits"] = bad
+        if bad and not _EI_EXPECTED.search(first):
+            report["ok"] = False
+            report["direction"] = "Subject → Object"
+            report["why"] = (
+                "subject-first lens — early reply opens on film-craft jargon "
+                "instead of people/feeling/boundary"
+            )
+        return report
+
+    return report
+
+
+def lens_drift(
+    user_message: str,
+    response: str,
+    *,
+    claim_domain: str = "",
+    lens: str = "",
+) -> bool:
+    """
+    Object-first domain answered subject-first (viewer psychoanalysis).
+
+    Broader than 'food guy': Bourdain starts with the object (food / show / city / craft);
+    EI starts with the person. Wrong ownership of the prompt = lens drift.
+    """
+    user = user_message or ""
+    resp = response or ""
+    if not resp.strip():
+        return False
+
+    if not object_domain(user, claim_domain=claim_domain, lens=lens):
+        return False
+
+    early = early_noun_report(
+        user, resp, claim_domain=claim_domain, lens=lens or "Bourdain"
+    )
+    if not early.get("ok"):
+        return True
+
+    if not _VIEWER_PSYCH.search(resp):
+        return False
+
+    if re.search(
+        r"\byou don'?t\b.+\byou (protect|fear)\b|"
+        r"\bprotect yourself from the possibility\b|"
+        r"\byour best days\b",
+        resp,
+        re.I | re.S,
+    ):
+        return True
+
+    if not _OBJECT_CRAFT.search(resp):
+        return True
+
+    return False
+
+
+def lens_drift_diagnosis(
+    user_message: str,
+    response: str,
+    *,
+    claim_domain: str = "",
+    lens: str = "",
+) -> dict:
+    """Engineering-grade lens-drift card (Inspector)."""
+    domain = claim_domain or ("taste_preference" if object_domain(user_message) else "")
+    expected = "Bourdain" if object_domain(user_message, claim_domain=domain, lens=lens) else (lens or "—")
+    early = early_noun_report(
+        user_message, response, claim_domain=domain, lens=lens or expected
+    )
+    drifted = lens_drift(
+        user_message, response, claim_domain=domain, lens=lens or expected
+    ) or (not early.get("ok"))
+    return {
+        "drifted": drifted,
+        "domain": domain or "—",
+        "expected_lens": expected,
+        "actual_reasoning": (
+            "Emotional projection / subject-first"
+            if drifted and early.get("direction", "").startswith("Object")
+            else ("Object costume on subject claim" if drifted else "aligned")
+        ),
+        "drift": early.get("direction") or ("Object → Subject" if drifted else "—"),
+        "layer": "Generation" if drifted else "—",
+        "fix": "Lens guidance + object-first open" if drifted else "—",
+        "early": early,
+    }
+
+
+def lens_drift_examples(user_message: str) -> List[str]:
+    if re.search(r"\b(breaking bad|better call saul|show|series|movie)\b", user_message or "", re.I):
+        return [
+            "✓ Breaking Bad didn't ruin television. It raised the price of impressing you.",
+            "✓ That's like saying the best meal you'll ever eat is the first great restaurant you found.",
+            "✓ After Breaking Bad and Better Call Saul, competence stopped being enough.",
+        ]
+    return [
+        "✓ Talk about the work — craft, standards, earned admiration (object-first).",
+        "✓ That's like saying a prison cell is just a room.",
+    ]
+
+
+# --- Hall of Fame discovery typing ---------------------------------------------
+
+_DISCOVERY_TYPE_RULES = (
+    ("Language", re.compile(
+        r"\balready decided the hierarchy\b|"
+        r"\bdidn'?t describe .+ ranked it\b|"
+        r"\bthe (word|term) .+\b(hierarchy|ranked|opening act)\b|"
+        r"\bit ranked it\b",
+        re.I,
+    )),
+    ("Craft", re.compile(
+        r"\braised the (bar|price)\b|\bprison cell\b|\bmeal\b|\brestaurant\b|"
+        r"\btelevision\b|\bimpressing you\b|\bcompetence\b|\bphotographs clean\b|"
+        r"\bfamiliarity\b|\btaste like\b",
+        re.I,
+    )),
+    ("Projection", re.compile(
+        r"\bautobiographical\b|\bexport (them|fear)\b|\bthreat\b|"
+        r"\bpointed the wrong way\b|\bconfession\b",
+        re.I,
+    )),
+    ("Intensity", re.compile(
+        r"\boutbid\b|\bchemical weather\b|\bintensity for importance\b|"
+        r"\bmistakes? intensity\b|\baddiction with stability\b",
+        re.I,
+    )),
+    ("Certainty", re.compile(
+        r"\bwarranty\b|\bisn'?t perfection\b|\bcertainty\b",
+        re.I,
+    )),
+    ("Exit", re.compile(
+        r"\bedit the ending\b|\bmessiest rewrites\b|\bdifferent things\b",
+        re.I,
+    )),
+    ("Incentive", re.compile(
+        r"\bincentive\b|\binvestment\b|\bexpense\b|\bmoney changes\b",
+        re.I,
+    )),
+    ("Evidence", re.compile(
+        r"\bone (fact|data point)\b|\bassumption\b|\bseparate the two\b",
+        re.I,
+    )),
+    ("Pattern", re.compile(
+        r"\bsame mechanism\b|\bpattern repeats\b|\bconsistency\b",
+        re.I,
+    )),
+)
+
+
+# --- Insight gating (not a pipeline stage) ---------------------------------
+# DEPTH MUST BE EARNED / RECOGNITION MUST ADVANCE / START WHERE THE POST STOPS
+
+_STYLE_METAPHOR = re.compile(
+    r"\b("
+    r"operating\s+systems?|firmware|bandwidth|baseline|"
+    r"nervous\s+system|rewires?|registers\s+as|"
+    r"the\s+budget\s+was|first\s+things\s+cut|"
+    r"architecture|landscape|machinery|weather\s+system"
+    r")\b",
+    re.I,
+)
+
+_SYNONYM_FOLD = (
+    (re.compile(r"\boperating\s+systems?\b", re.I), "mode"),
+    (re.compile(r"\bnervous\s+system\b", re.I), "body"),
+    (re.compile(r"\brewires?\b", re.I), "changes"),
+    (re.compile(r"\bconnect(?:ion|ing)?\b", re.I), "connect"),
+    (re.compile(r"\breach(?:ing)?\s+out\b", re.I), "connect"),
+    (re.compile(r"\bsocialize|socializing\b", re.I), "connect"),
+    (re.compile(r"\bhobbies\b", re.I), "self"),
+    (re.compile(r"\bpersonality\b", re.I), "self"),
+    (re.compile(r"\bmuted\b", re.I), "gone"),
+    (re.compile(r"\bforgotten\b", re.I), "gone"),
+    (re.compile(r"\bcut\b", re.I), "gone"),
+    (re.compile(r"\bdeplet(?:ed|ion)\b", re.I), "survival"),
+)
+
+_DIAGNOSIS_LANG = re.compile(
+    r"\b("
+    r"nervous\s+system|rewires?|the\s+body\s+registers|"
+    r"what\s+['\"]normal['\"]\s+feels|"
+    r"still\s+belongs\s+to\s+you|house\s+still\s+belongs|"
+    r"attachment\s+wound|diagnos|"
+    r"what\s+this\s+(?:really|secretly)\s+means|"
+    r"beneath\s+the\s+(?:joke|humor|bit)|"
+    r"train(?:s|ed)?\s+the\s+nervous|"
+    r"registers\s+it\s+as\s+loss"
+    r")\b",
+    re.I,
+)
+
+_FOREIGN_DEPTH_CLUSTERS = {
+    "restraint": (
+        "leash",
+        "collar",
+        "tether",
+        "restrain",
+        "won't wear one",
+        "wear one",
+    ),
+    "property_existential": (
+        "still belongs to you",
+        "house still belongs",
+        "whether the house",
+        "belongs to you",
+    ),
+    "trauma_lecture": (
+        "attachment wound",
+        "registers as loss",
+        "train the nervous",
+        "rewires what",
+    ),
+}
+
+_RESTATEMENT_OPEN = re.compile(
+    r"^(the\s+myth\s+of|people\s+have\s+this\s+backwards|"
+    r"this\s+was\s+never\s+about\s+how|"
+    r"the\s+idea\s+that\b.+\b(?:is|was)\s+(?:wrong|false|a\s+myth)|"
+    r"the\s+flood\s+of\s+attention\s+doesn'?t\s+just)\b",
+    re.I,
+)
+
+
+def _fold_style(text: str) -> str:
+    t = _STYLE_METAPHOR.sub(" ", text or "")
+    for rx, repl in _SYNONYM_FOLD:
+        t = rx.sub(repl, t)
+    return t
+
+
+def _content_tokens(text: str) -> set:
+    """Content tokens after metaphor-fold; glue words don't count as new information."""
+    extra_stop = {
+        "has", "have", "had", "having", "become", "became", "becomes",
+        "left", "only", "now", "one", "ones", "different", "another",
+        "requires", "require", "required", "still", "just", "really",
+        "very", "already", "also", "even", "yet", "other", "every",
+        "any", "all", "most", "more", "than", "then", "into", "onto",
+        "over", "under", "out", "off", "down", "back", "away",
+        "doesn't", "don't", "didn't", "isn't", "aren't", "wasn't",
+        "i've", "i'm", "you're", "they're", "we're",
+        "anymore", "longer", "long", "know", "feels", "feel",
+        "people", "someone", "somebody", "something",
+    }
+    return {w for w in _token_set(text) if w not in extra_stop}
+
+
+def parroting(user_message: str, response: str) -> bool:
+    """True when, after stripping metaphor, the reply knows nothing new.
+
+    Recognition that only renames the user's causal model is parroting —
+    even if every sentence sounds emotionally intelligent.
+    """
+    user = _fold_style(user_message or "")
+    resp = _fold_style(response or "")
+    if not user.strip() or not resp.strip():
+        return False
+    u, r = _content_tokens(user), _content_tokens(resp)
+    if not u or not r or len(r) < 4:
+        return False
+    novel = r - u
+    novel_ratio = len(novel) / max(1, len(r))
+    overlap = overlap_ratio(user, resp)
+    # High overlap + almost no novel content tokens = restatement
+    if overlap >= 0.45 and novel_ratio <= 0.28:
+        return True
+    if novel_ratio <= 0.18:
+        return True
+    if not novel and overlap >= 0.35:
+        return True
+    return False
+
+
+def recognition_advances(user_message: str, response: str) -> bool:
+    """Payload test: at least one inferential move past the prompt."""
+    if parroting(user_message, response):
+        return False
+    resp = response or ""
+    # Explicit advance cues (not required, but sufficient)
+    if re.search(
+        r"\b("
+        r"plausible\s+deniability|resource\s+allocation|"
+        r"waiting\s+to\s+feel\s+like|"
+        r"only\s+returns?\s+through|"
+        r"character\s+regression|"
+        r"hunter\s+instead|"
+        r"liability\s+they\s+can'?t\s+outrun"
+        r")\b",
+        resp,
+        re.I,
+    ):
+        return True
+    u, r = _content_tokens(_fold_style(user_message or "")), _content_tokens(
+        _fold_style(resp)
+    )
+    if not r:
+        return False
+    return (len(r - u) / max(1, len(r))) >= 0.32
+
+
+def psychologizing(user_message: str, response: str, *, comic: bool = False) -> bool:
+    """Joke or complete take converted into an unwanted diagnosis."""
+    if not (response or "").strip():
+        return False
+    if not comic and not _DIAGNOSIS_LANG.search(response or ""):
+        return False
+    if not _DIAGNOSIS_LANG.search(response or ""):
+        return False
+    # Depth-earned vulnerability may name the body; that's not heckling
+    if re.search(
+        r"\b(survival\s+mode|burn(?:ed|t)?\s+out|i\s+don'?t\s+know\s+how\s+to\s+connect)\b",
+        user_message or "",
+        re.I,
+    ):
+        return False
+    return True
+
+
+def unsupported_depth(user_message: str, response: str, *, comic: bool = False) -> bool:
+    """Reply introduces a concept family the premise does not contain.
+
+    Comic gate: if explaining the response requires a concept that does not
+    exist in the premise, the response has left the bit.
+    """
+    if not comic:
+        return False
+    ul = (user_message or "").lower()
+    rl = (response or "").lower()
+    if not rl.strip():
+        return False
+    for _name, terms in _FOREIGN_DEPTH_CLUSTERS.items():
+        if any(t in rl for t in terms) and not any(t in ul for t in terms):
+            return True
+    return False
+
+
+def restates_runway(user_message: str, response: str) -> bool:
+    """First sentence restates the already-articulated thesis (then maybe advances)."""
+    ss = _sentences(response or "")
+    if not ss:
+        return False
+    first = ss[0]
+    if _RESTATEMENT_OPEN.search(first):
+        return True
+    if len(_words(first)) >= 12 and overlap_ratio(first, user_message or "") >= 0.48:
+        return True
+    return False
+
+
+def starts_where_user_stopped(user_message: str, response: str) -> bool:
+    """Take off from the end of the user's runway — no thesis repetition lead-in."""
+    if not (response or "").strip():
+        return False
+    return not restates_runway(user_message, response)
+
+
+def classify_discovery_type(line: str, lens: str = "") -> str:
+    """Tag stealable lines: Craft / Projection / Intensity / … (training signal)."""
+    text = line or ""
+    for name, rx in _DISCOVERY_TYPE_RULES:
+        if rx.search(text):
+            return name
+    lens_n = (lens or "").strip()
+    if lens_n == "Bourdain":
+        return "Craft"
+    if lens_n == "Munger":
+        return "Incentive"
+    if lens_n == "CIA":
+        return "Evidence"
+    if lens_n in {"Emotional Intelligence", "Hank Moody"}:
+        return "Projection"
+    if lens_n == "Pattern Recognition":
+        return "Pattern"
+    return "General"

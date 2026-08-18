@@ -23,7 +23,8 @@ _SYSTEMS = re.compile(
 _DISCOVERYISH = re.compile(
     r"^(every |people don'?t |threats |peace |consistency |the mirror |"
     r"the fastest |a threat |funny how |nobody wants |the fantasy |"
-    r"everyone says |the line about |most people don'?t |the cleanest )\b|"
+    r"everyone says |the line about |most people don'?t |the cleanest |"
+    r"you can'?t outbid |chaos has a way )\b|"
     r"\bis autobiographical\b|\bexport (them|fear)\b|"
     r"\bonly become immoral\b|\bwhen you'?re the one being measured\b|"
     r"\bcomes with a warranty\b|\bisn'?t perfection\.? it'?s certainty\b|"
@@ -31,7 +32,19 @@ _DISCOVERYISH = re.compile(
     r"\bis the giveaway\b|"
     r"\bedit the (relationship|ending)\b|"
     r"\bmessiest rewrites\b|"
-    r"\bprison cell is just a room\b",
+    r"\bprison cell is just a room\b|"
+    r"\boutbid an addiction\b|"
+    r"\bchemical weather\b|"
+    r"\bmistakes? intensity for importance\b|"
+    r"\bintensity for importance\b|"
+    r"\balready decided the hierarchy\b|"
+    r"\bdidn'?t describe desire\b|"
+    r"\bit ranked it\b|"
+    r"\braised the price\b|"
+    r"\bdidn'?t ruin television\b|"
+    r"\bmakes the safest\b|"
+    r"\bdoesn'?t make the best\b|"
+    r"\bautobiographical\b",
     re.I,
 )
 # Competent analysis that summarizes the mechanism instead of landing a discovery
@@ -53,12 +66,40 @@ _GENERIC_MECHANISM = re.compile(
     r"\binsurance policy\b|"
     r"\bthe real engine\b|"
     r"\bis just the language people use\b|"
-    r"\bthe language people use when\b",
+    r"\bthe language people use when\b|"
+    r"\bcan'?t buy and can'?t fake\b|"
+    r"\bshe can'?t buy\b|"
+    r"\bthe part she can'?t\b|"
+    r"\bno price on that\b",
+    re.I,
+)
+# Names the attachment / dynamic — psychologist Mode 1, not yet the reframe
+_MODE1_DYNAMIC = re.compile(
+    r"\bcomes alive when\b|"
+    r"\btrying to survive you\b|"
+    r"\bversion of herself that\b|"
+    r"\bonly comes alive\b|"
+    r"\bwon'?t trade the version\b",
+    re.I,
+)
+_TOXIC_VALUE_PROMPT = re.compile(
+    r"\b(toxic|love.?hate|van cleef|next man|no price|"
+    r"money can'?t|chaos|intensity|survive you|"
+    r"flyer benz|orchard road)\b",
+    re.I,
+)
+_REFRAME_DISCOVERY = re.compile(
+    r"\boutbid\b|\bchemical weather\b|\bintensity for importance\b|"
+    r"\bmistakes? intensity\b|\baddiction with stability\b|"
+    r"\btrauma .{0,40}(value|love)\b|"
+    r"\bpeace feels (suspicious|deeper|safer)\b|"
+    r"\bchaos .{0,30}(deeper|valuable|importance)\b",
     re.I,
 )
 _CONCRETE_SHARP = re.compile(
     r"\b(breasts?|butt|legs?|waist|wallet|bank account|gold digger|"
-    r"on display|shallow|grade|measured|immoral)\b",
+    r"on display|shallow|grade|measured|immoral|"
+    r"photographs clean|watch, the car)\b",
     re.I,
 )
 
@@ -101,6 +142,12 @@ def _verdict_sentence(
             "text": s,
             "verdict": "discovery",
             "note": "stealable — would someone steal this sentence?",
+        }
+    if _MODE1_DYNAMIC.search(s):
+        return {
+            "text": s,
+            "verdict": "strong",
+            "note": "names the dynamic (Mode 1) — psychologist; ask for the reframe",
         }
     if _CONCRETE_SHARP.search(s) and len(s.split()) <= 28:
         return {
@@ -329,6 +376,78 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Insight gating — parroting / psychologizing / unsupported depth / runway
+    try:
+        from capability_detection import detect_comic_premise
+        from discovery_craft import (
+            parroting,
+            psychologizing,
+            restates_runway,
+            unsupported_depth,
+        )
+
+        comic_on = bool(detect_comic_premise(prompt).active) or (
+            str(d.get("comic_premise") or "").lower() == "true"
+        )
+        if parroting(prompt, out) or "parroting" in failures:
+            add(
+                "Recognition must advance",
+                "fail",
+                "parroting — after stripping metaphor, the reply knows nothing the user didn't already say. Mirroring cannot be the payload.",
+                examples=[
+                    "✗ survival mode has become the only operating system left",
+                    "✓ reduced social capacity isn't character regression — it's resource allocation",
+                ],
+            )
+        else:
+            add(
+                "Recognition must advance",
+                "pass",
+                "reply contributes an inference past the prompt",
+            )
+        if psychologizing(prompt, out, comic=comic_on) or "psychologizing" in failures:
+            add(
+                "Psychologizing",
+                "fail",
+                "converted a joke or complete take into an unwanted diagnosis — depth the premise did not earn",
+                examples=[
+                    "✗ whether the house still belongs to you",
+                    "✓ stay inside the metaphor (footage, plates, timestamps)",
+                ],
+            )
+        else:
+            add("Psychologizing", "pass", "did not diagnose a joke")
+        if unsupported_depth(prompt, out, comic=comic_on) or "unsupported_depth" in failures:
+            add(
+                "Unsupported depth",
+                "fail",
+                "manufactured profundity using a concept that does not exist in the premise — left the bit",
+                examples=[
+                    "✗ put a leash on something that won't wear one",
+                    "✓ Identity theft has gotten incredibly lazy.",
+                ],
+            )
+        else:
+            add("Unsupported depth", "pass", "no foreign concept cluster on a comic premise")
+        if restates_runway(prompt, out) or "runway_restatement" in failures:
+            add(
+                "Start where the post stops",
+                "fail",
+                "summarized the runway the user already built before contributing",
+                examples=[
+                    "✗ The myth of the passive woman was never about how women actually behaved…",
+                    "✓ Women have always pursued. They just used to do it with enough plausible deniability…",
+                ],
+            )
+        else:
+            add(
+                "Start where the post stops",
+                "pass",
+                "opens at the inferential edge",
+            )
+    except Exception:
+        pass
+
     # Mechanism drift — plausible EI drawer that isn't the prompt's strongest fit
     try:
         from discovery_craft import (
@@ -354,6 +473,67 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             )
         else:
             add("Mechanism drift", "pass", "no favorite-drawer pivot detected")
+    except Exception:
+        pass
+
+    # Lens drift — object-first domain answered subject-first (wrong lens ownership)
+    try:
+        from discovery_craft import (
+            early_noun_report,
+            lens_drift,
+            lens_drift_diagnosis,
+            lens_drift_examples,
+        )
+
+        domain = str(d.get("claim_domain") or "")
+        lens_name = str(d.get("lens") or d.get("interpretive_lens") or "")
+        diag = lens_drift_diagnosis(
+            prompt, out, claim_domain=domain, lens=lens_name
+        )
+        early = diag.get("early") or early_noun_report(
+            prompt, out, claim_domain=domain, lens=lens_name
+        )
+        drifted_lens = bool(diag.get("drifted")) or ("lens_drift" in failures)
+        if drifted_lens:
+            add(
+                "Lens drift",
+                "fail",
+                f"Domain: {diag.get('domain')} · Expected: {diag.get('expected_lens')} · "
+                f"Actual: {diag.get('actual_reasoning')} · Drift: {diag.get('drift')} · "
+                f"Layer: {diag.get('layer')} · Fix: {diag.get('fix')}",
+                examples=lens_drift_examples(prompt)
+                + [
+                    "✗ You don't protect Breaking Bad… You protect yourself from "
+                    "the possibility that your best days of watching are already over."
+                ],
+            )
+        else:
+            add(
+                "Lens drift",
+                "pass",
+                "object/subject stance matches lens (no Object→Subject projection)",
+            )
+
+        if early and early.get("stance"):
+            if early.get("ok"):
+                add(
+                    "Early nouns",
+                    "pass",
+                    f"{early.get('stance')} — first sentence keeps the lens's expected open",
+                    examples=[early.get("first_sentence", "")[:160]],
+                )
+            else:
+                add(
+                    "Early nouns",
+                    "fail",
+                    early.get("why")
+                    or "early nouns violate lens stance (object-first vs subject-first)",
+                    examples=[
+                        f"first: {early.get('first_sentence', '')[:140]}",
+                        f"unexpected: {', '.join(early.get('unexpected_hits') or []) or '—'}",
+                        "✓ Breaking Bad / television / craft — not you / yourself / your fear",
+                    ],
+                )
     except Exception:
         pass
 
@@ -393,12 +573,49 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 f"✗ {opening[:120]}",
             ],
         )
+    elif (
+        _TOXIC_VALUE_PROMPT.search(prompt)
+        and not _REFRAME_DISCOVERY.search(out)
+    ):
+        has_mode1 = any(_MODE1_DYNAMIC.search(r["text"]) for r in sent_rows)
+        add(
+            "Discovery",
+            "fail" if has_mode1 or strong_n else "weak",
+            "Mode 1 ceiling — named the attachment; missed why chaos feels more valuable than peace",
+            examples=[
+                "✓ You can't outbid an addiction with stability.",
+                "✓ Sometimes they miss the chemical weather that came with them.",
+                "✓ Your nervous system mistakes intensity for importance.",
+                f"✗ {ending[:140]}",
+            ],
+        )
     elif discovery_line:
         add("Discovery", "pass", "stealable line present", examples=[discovery_line])
     elif strong_n >= 1 and not last_is_summary:
         add("Discovery", "weak", "strong concrete lines, but no discovery close")
     else:
         add("Discovery", "weak", "no clear discovery line detected", examples=[opening[:160]])
+
+    # Mode 1 ceiling as its own teachable check when toxic-value + explain-without-reframe
+    if _TOXIC_VALUE_PROMPT.search(prompt) and not _REFRAME_DISCOVERY.search(out):
+        add(
+            "Mode 1 ceiling",
+            "fail",
+            "psychologist named the dynamic; writer didn't reframe the claim "
+            "(trauma/intensity mistaken for value)",
+            examples=[
+                "✓ You can't outbid an addiction with stability.",
+                "✗ …the version of herself that only comes alive when she's trying to survive you.",
+            ],
+        )
+    elif any(_MODE1_DYNAMIC.search(r["text"]) for r in sent_rows) and not discovery_line:
+        add(
+            "Mode 1 ceiling",
+            "weak",
+            "names the dynamic without a stealable reframe",
+        )
+    else:
+        add("Mode 1 ceiling", "pass", "reframe present or not a Mode-1-ceiling prompt")
 
     if ending_is_reveal_speaker(out) and opening_move in {"relocation", "reversal"}:
         add(
@@ -456,6 +673,9 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
         stealability -= 1
     if ending_is_reveal_speaker(out) and opening_move == "relocation":
         stealability -= 1
+    # Mode 1 ceiling: named the dynamic, missed the reframe — cap below Hall-of-Fame
+    if _TOXIC_VALUE_PROMPT.search(prompt) and not _REFRAME_DISCOVERY.search(out):
+        stealability = min(stealability, 7)
     stealability = max(0, min(10, stealability))
     memorability = stealability  # back-compat alias
 
