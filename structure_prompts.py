@@ -27,4 +27,32 @@ STRUCTURE_PROMPTS = {
     "/cbt": "Structure: Emotion label → Thought loop name → Belief reframe. Do not therapize — mirror what's already in them, but sharper.",
     "/ghost": "Speak like a memory that never got processed. Structure: A quiet moment of recall → Emotional drift → Thread left open. Do not explain. Do not fix. Let it ache. Let it haunt. Use Velvet + Noir + Float tone. No CTA unless it's a ghostly mirror.",
     "/bomb": "Philosophical detonation. Structure: Core contradiction → Narrative collapse → Mythic explosion. No soft landings. Leave echoes."
-} 
+}
+
+# /cinema permission does not grant the four-beat essay. Rhetorical awe stops at one image.
+CINEMA_SNAP_PROMPT = (
+    "Cinema may color the reply. One image. Stop at the spear. "
+    "Do not answer a rhetorical how-come with a causal theory. "
+    "Never: Title drop → mythic framing → emotional fallout → poetic rupture. "
+    "PASS: The Sopranos sits there like a loaded gun on the kitchen table until you pick it up. "
+    "FAIL: that image, then why nobody told them."
+)
+
+
+def structure_prompt_for(command, social=None, plan=None):
+    """Full slash-structure only when the interaction earns it.
+
+    /cinema on rhetorical awe gets SNAP cinema, not the spoken-essay template.
+    """
+    if not command:
+        return None
+    rhetorical = False
+    if social is not None:
+        rhetorical = bool(
+            getattr(social, "rhetorical_question", False)
+            or getattr(social, "interaction_shape", "") == "awe"
+            or "rhetorical" in (getattr(social, "signals", None) or [])
+        )
+    if command == "/cinema" and rhetorical:
+        return CINEMA_SNAP_PROMPT
+    return STRUCTURE_PROMPTS.get(command) 

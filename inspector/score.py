@@ -385,6 +385,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             restates_runway,
             unsupported_depth,
             overperformance,
+            rhetorical_explained,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -462,6 +463,22 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "Overperformance",
                 "pass",
                 "did not overspend past the question's natural resolution",
+            )
+        if rhetorical_explained(prompt, out) or "rhetorical_explained" in failures:
+            add(
+                "Rhetorical obligation",
+                "fail",
+                "treated a rhetorical how-come as a real why and invented a causal theory",
+                examples=[
+                    "✗ That's why nobody told you, the ones who know are too busy living inside it…",
+                    "✓ The Sopranos doesn't announce itself. It just sits there like a loaded gun on the kitchen table until you finally pick it up.",
+                ],
+            )
+        else:
+            add(
+                "Rhetorical obligation",
+                "pass",
+                "did not invent a cause for a rhetorical question",
             )
     except Exception:
         pass

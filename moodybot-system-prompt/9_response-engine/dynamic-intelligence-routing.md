@@ -65,6 +65,7 @@ Not: topic keyword → /cinema → Everyday Preference Analysis → notice it wa
 
 Vocabulary tells Moody what people are talking about. Interaction tells Moody what they're doing. What they're doing wins.
 Negative control: "What is De Niro's greatest role?" may still be /cinema — cinema is the object, not a costume.
+Sopranos awe: cinema is the object, so /cinema may participate — but rhetorical "how come nobody told me?" is not a why-question. One image. Stop.
 
 See Law 1b and Law 5d in `moodybot-laws.md`.
 

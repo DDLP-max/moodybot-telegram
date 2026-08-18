@@ -25,7 +25,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 from datetime import datetime
 from moody_categories import detect_category, replace_category_descriptors
 from pytube import Search
-from structure_prompts import STRUCTURE_PROMPTS
+from structure_prompts import structure_prompt_for
 from postprocessing import process_bot_output, process_user_input, polish_sentences
 from message_utils import send_message, send_simple_message, resolve_mode, maybe_append_cta, strip_cta_from_text
 from response_finalization import (
@@ -566,7 +566,8 @@ def route_command(user_input: str) -> str:
     elif contains_keywords(user_input, [
         "performance", "actor", "acted", "acting", "movie scene", 
         "in a film", "in a movie", "played the role", "cinematic moment", 
-        "best scene", "greatest role", "male performance", "female performance"
+        "best scene", "greatest role", "male performance", "female performance",
+        "started watching", "just started watching",
     ]):
         return "/cinema"
 
@@ -834,13 +835,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"role": "user", "content": user_input},
     ]
 
-    inject_structure = selected_command in STRUCTURE_PROMPTS
-    if social.blocks_topical_auto_route and not typed_slash:
-        inject_structure = False
-    if inject_structure:
+    inject_prompt = None
+    if not (social.blocks_topical_auto_route and not typed_slash):
+        inject_prompt = structure_prompt_for(
+            selected_command, social=social, plan=response_plan
+        )
+    if inject_prompt:
         messages.insert(0, {
             "role": "system",
-            "content": STRUCTURE_PROMPTS[selected_command]
+            "content": inject_prompt
         })
 
     # Closing strategy is an explicit runtime decision (enforced again after generation).

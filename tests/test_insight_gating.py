@@ -23,6 +23,7 @@ from discovery_craft import (
     starts_where_user_stopped,
     unsupported_depth,
     overperformance,
+    rhetorical_explained,
 )
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
@@ -138,6 +139,19 @@ NAME_ONE_FAIL = (
 NAME_ONE_PASS = "Adam Sandler."
 NAME_ONE_PASS_BEAT = (
     "Adam Sandler. I see his face and already know how the next two hours smell."
+)
+
+SOPRANOS = (
+    "i started watching the sopranos and wow how come no one ever told me to watch this"
+)
+SOPRANOS_PASS = (
+    "The Sopranos doesn't announce itself. It just sits there like a loaded gun "
+    "on the kitchen table until you finally pick it up."
+)
+SOPRANOS_FAIL = (
+    SOPRANOS_PASS
+    + " That's why nobody told you, the ones who know are too busy living inside it "
+    "to bother selling it."
 )
 
 
@@ -310,6 +324,7 @@ def test_guidance_names_the_gates():
     assert "natural resolution" in blob
     assert "interaction shape" in blob
     assert "what they're doing wins" in blob
+    assert "rhetorical" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
     assert "recognition must advance" in burn
@@ -422,6 +437,70 @@ def test_greatest_role_may_still_be_cinema():
     assert source == "auto-route"
 
 
+def test_sopranos_awe_allows_cinema_but_not_invented_causality():
+    """Cinema is the object — /cinema may participate. Rhetorical how-come is not a why.
+
+    Trace: interaction_shape=awe, SNAP, not explore. Structure prompt must not be
+    the four-beat cinema essay.
+    """
+    from capability_detection import select_tone_command
+    from structure_prompts import CINEMA_SNAP_PROMPT, STRUCTURE_PROMPTS, structure_prompt_for
+
+    social = classify_social_mode(SOPRANOS)
+    assert social.interaction_shape == "awe"
+    assert social.rhetorical_question is True
+    assert social.participation is False
+    assert social.blocks_topical_auto_route is False
+    assert social.resolution != "explain"
+    assert social.depth_earned is False
+
+    cmd, source = select_tone_command(SOPRANOS, topical_auto_command="/cinema")
+    assert cmd == "/cinema"
+    assert source == "auto-route"
+
+    cinema_prompt = structure_prompt_for("/cinema", social=social)
+    assert cinema_prompt == CINEMA_SNAP_PROMPT
+    assert "Final poetic rupture" not in (cinema_prompt or "")
+    assert "Final poetic rupture" in STRUCTURE_PROMPTS["/cinema"]
+
+    plan = build_response_plan(SOPRANOS, selected_command="/cinema")
+    assert plan.interaction_shape == "awe"
+    assert plan.intent != "explore"
+    assert plan.preferred_structure == "SNAP"
+    assert plan.response_budget == "low"
+    assert plan.selected_command == "/cinema"
+    assert plan.primary_capability in (None, "", "none")
+    assert plan.intent != "explore"
+
+    assert rhetorical_explained(SOPRANOS, SOPRANOS_FAIL) is True
+    assert rhetorical_explained(SOPRANOS, SOPRANOS_PASS) is False
+    fails = evaluate_gold_shape(SOPRANOS, SOPRANOS_FAIL, "SNAP")
+    assert "rhetorical_explained" in fails
+    ok_fails = evaluate_gold_shape(SOPRANOS, SOPRANOS_PASS, "SNAP")
+    assert "rhetorical_explained" not in ok_fails
+
+    insp = _inspect(SOPRANOS, SOPRANOS_FAIL)
+    assert _checks(insp)["Rhetorical obligation"]["status"] == "fail"
+    insp_ok = _inspect(SOPRANOS, SOPRANOS_PASS)
+    assert _checks(insp_ok)["Rhetorical obligation"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "rhetorical" in guide
+    assert "loaded gun" in guide
+    assert "how come" in guide
+    assert "question (invisible step" not in guide
+
+
+def test_got_season_8_is_a_real_why_not_awe():
+    q = "Why did Game of Thrones season 8 fail?"
+    social = classify_social_mode(q)
+    assert social.interaction_shape != "awe"
+    assert social.rhetorical_question is False
+    from structure_prompts import STRUCTURE_PROMPTS, structure_prompt_for
+
+    assert structure_prompt_for("/cinema", social=social) == STRUCTURE_PROMPTS["/cinema"]
+
+
 if __name__ == "__main__":
     test_burnout_is_vulnerability_not_comic()
     test_flock_and_stocks_are_comic_bits()
@@ -440,4 +519,6 @@ if __name__ == "__main__":
     test_matt_comic_still_routes()
     test_name_one_actor_does_not_become_film_criticism()
     test_greatest_role_may_still_be_cinema()
+    test_sopranos_awe_allows_cinema_but_not_invented_causality()
+    test_got_season_8_is_a_real_why_not_awe()
     print("ok")

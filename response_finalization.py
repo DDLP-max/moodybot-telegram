@@ -1145,6 +1145,20 @@ def build_response_plan(
             tone_source = "social-first"
         if (selected_command or "") in TOPICAL_AUTO_TONES:
             selected_command = "/thoughts"
+    elif social.rhetorical_question or social.interaction_shape == "awe":
+        # Cinema may color the reply. Rhetorical how-come is not a why-question.
+        intent = "respond"
+        confidence = "high"
+        primary = None
+        supporting = None
+        lens = "Hank Moody"
+        voice = None
+        preferred_structure = "SNAP"
+        mechanism_hint = "image_not_explanation"
+        topic_mode = "compress"
+        response_budget = "low"
+        insight = False
+        # Keep /cinema if already selected — permission ≠ unlimited prose.
     elif practical or domain == "practical":
         intent = "action"
         confidence = "medium"
@@ -1252,6 +1266,12 @@ def build_response_plan(
         topic_mode = "compress"
         landing = "body_ends_response"
         mechanism_hint = "participation_name"
+    elif social.rhetorical_question or social.interaction_shape == "awe":
+        preferred_structure = "SNAP"
+        response_budget = "low"
+        topic_mode = "compress"
+        landing = "body_ends_response"
+        mechanism_hint = "image_not_explanation"
 
     # Legacy closing_strategy field mirrors landing for telemetry compatibility
     legacy_map = {
@@ -1396,11 +1416,15 @@ Provocation → find the unexpected truth beneath it.
 Sincere vulnerability → recognize and articulate, then advance.
 Actual question → answer at the question's natural resolution depth.
 A factual/analytical question may require reasoning. A "why?" requires explanation. A "name one" requires a name.
+Rhetorical questions do not create an explanatory obligation. "How come nobody told me?" after discovering a show means holy shit, this is good — not a causal theory about their recommendation network.
 Pick-one / name-one: intent=answer, capability=none, tone=neutral/moody, SNAP. Do not auto-route /cinema because the prompt said actor or movie.
+Cinema as the object may admit /cinema. /cinema permission ≠ unlimited prose. Natural resolution depth still governs after topical capability is admitted.
 OVERPERFORMANCE: don't spend intelligence the interaction didn't ask for.
 FAIL: "Name an actor who immediately makes you NOT want to watch a movie" → Adam Sandler, then Cinema Paradiso closing narration ("the frame forgets its own heartbeat").
 PASS: "Adam Sandler."
 PASS: "Adam Sandler. I can already hear the Netflix menu loading."
+FAIL: "I started watching the Sopranos and wow how come no one ever told me" → loaded-gun image, then "That's why nobody told you, the ones who know are too busy living inside it."
+PASS: "The Sopranos doesn't announce itself. It just sits there like a loaded gun on the kitchen table until you finally pick it up."
 Pattern Recognition is a capability available after the social mode is identified. It is not the objective.
 Moody's job is not to find depth. It is to find the right response to the thing actually in front of it.
 
@@ -1426,7 +1450,7 @@ Three failures of "every input deserves an insight":
 PARROTING — prettier restatement of what the user already said (burnout → "survival mode is the only operating system left").
 PSYCHOLOGIZING — converting a joke into an unwanted diagnosis (Flock-camera joke → "whether the house still belongs to you").
 UNSUPPORTED DEPTH — manufacturing profundity with no textual basis (name-formula joke → "put a leash on something that won't wear one").
-OVERPERFORMANCE — spending intelligence the interaction didn't ask for ("name an actor" → film-criticism closing narration).
+OVERPERFORMANCE — spending intelligence the interaction didn't ask for ("name an actor" → film-criticism closing narration; rhetorical how-come → invented causal theory).
 
 RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
 
@@ -1894,9 +1918,12 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         getattr(plan, "interaction_shape", None) == "pick_one"
         or getattr(plan, "social_mode", None) == "direct_participation"
     )
+    awe = getattr(plan, "interaction_shape", None) == "awe" or "rhetorical" in (
+        getattr(plan, "social_mode_signals", None) or []
+    )
     cap = getattr(plan, "primary_capability", None)
     if not cap:
-        cap = "none" if pick_one else "Everyday Preference Analysis"
+        cap = "none" if (pick_one or awe) else "Everyday Preference Analysis"
     domain_block = domain_mechanism_guidance(domain, lens=lens, capability=cap)
     lens_voice = lens_voice_guidance(lens)
     q = getattr(plan, "lens_question", None) or lens_internal_question(lens)
@@ -1932,13 +1959,34 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
+    elif awe:
+        extra = (
+            "\nRHETORICAL AWE CONTRACT: \"How come nobody told me?\" means holy shit, "
+            "this is good — not construct a causal theory. "
+            "/cinema may color the reply. One image. Stop at the spear. SNAP. "
+            "Do not explain the how-come.\n"
+            "PASS: \"The Sopranos doesn't announce itself. It just sits there like "
+            "a loaded gun on the kitchen table until you finally pick it up.\"\n"
+            "FAIL: that image, then \"That's why nobody told you…\"\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
     pipeline_bit = (
         "Pipeline: interaction shape → social mode → SNAP. capability=none. "
         "Do not discover a mechanism.\n"
         if pick_one
         else (
-            "Pipeline: claim type → lens → question → capability → mechanism → "
-            "Depth × Shape → Gold.\n"
+            "Pipeline: interaction shape → /cinema may color → SNAP. "
+            "Do not explain the rhetorical how-come.\n"
+            if awe
+            else (
+                "Pipeline: claim type → lens → question → capability → mechanism → "
+                "Depth × Shape → Gold.\n"
+            )
         )
     )
     return (
@@ -1951,7 +1999,7 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         + pipeline_bit
         + (
             ""
-            if pick_one
+            if pick_one or awe
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "

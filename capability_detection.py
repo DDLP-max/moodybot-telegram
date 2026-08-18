@@ -97,7 +97,7 @@ class SocialModeAnalysis:
     signals: List[str] = field(default_factory=list)
     # Natural resolution of a question: name | explain | reason | ""
     resolution: str = ""
-    # pick_one | why | how_to | open — decided before topical tone
+    # pick_one | why | how_to | awe | open — decided before topical tone
     interaction_shape: str = "open"
 
     @property
@@ -114,13 +114,21 @@ class SocialModeAnalysis:
         )
 
     @property
+    def rhetorical_question(self) -> bool:
+        """Awe / holy-shit, not a request for a causal theory."""
+        return (
+            self.interaction_shape == "awe"
+            or "rhetorical" in self.signals
+        )
+
+    @property
     def blocks_topical_auto_route(self) -> bool:
         """Topic keywords (/cinema, movie, actor) must not beat pick-one."""
         return self.participation
 
     @property
     def depth_earned(self) -> bool:
-        if self.participation:
+        if self.participation or self.rhetorical_question:
             return False
         return self.mode in {"vulnerability", "provocation"} or (
             self.mode == "question" and self.resolution in {"explain", "reason"}
@@ -305,6 +313,17 @@ _PARTICIPATION_ASK = re.compile(
     r")\b",
     re.I,
 )
+# "How come nobody told me?" after discovering a show = holy shit, not a why-question.
+_RHETORICAL_HOW_COME = re.compile(
+    r"(?i)("
+    r"how\s+come\s+no(?:body|\s+one)\s+(?:ever\s+)?(?:told|mentioned|said)"
+    r"|"
+    r"why\s+(?:didn'?t|hasn'?t|wouldn'?t)\s+"
+    r"(?:anyone|anybody|somebody|no(?:body|\s+one))\s+(?:ever\s+)?(?:tell|mention)"
+    r"|"
+    r"(?:wow|holy|damn|can'?t believe).{0,60}how\s+come"
+    r")"
+)
 # Known failure mode: curing the joke with therapist aphorism
 _PREMISE_CURE = re.compile(
     r"(?i)("
@@ -470,6 +489,14 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.signals = ["participation", "pick_one"]
         out.resolution = "name"
         out.interaction_shape = "pick_one"
+        return out
+
+    if _RHETORICAL_HOW_COME.search(text):
+        out.mode = "open"
+        out.confidence = 0.9
+        out.signals = ["rhetorical", "awe"]
+        out.resolution = ""
+        out.interaction_shape = "awe"
         return out
 
     comic = detect_comic_premise(text)
@@ -808,6 +835,20 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "PASS: \"Adam Sandler. I can already hear the Netflix menu loading.\"\n"
             "FAIL: naming the actor, then writing the closing narration to "
             "Cinema Paradiso (\"the frame forgets its own heartbeat\").\n"
+        )
+    if mode.rhetorical_question or mode.interaction_shape == "awe":
+        return (
+            "\nSOCIAL MODE: rhetorical awe (holy shit, not a why-question).\n"
+            "Rhetorical questions do not create an explanatory obligation.\n"
+            "\"How come nobody told me?\" means this is good — not construct a "
+            "causal theory about their recommendation network.\n"
+            "/cinema may color the reply if cinema is the object. "
+            "Permission ≠ unlimited prose. Natural resolution still governs. SNAP.\n"
+            "One image. Stop at the spear. Do not explain the how-come.\n"
+            "PASS: \"The Sopranos doesn't announce itself. It just sits there like "
+            "a loaded gun on the kitchen table until you finally pick it up.\"\n"
+            "FAIL: that image, then \"That's why nobody told you, the ones who know "
+            "are too busy living inside it to bother selling it.\"\n"
         )
     if m == "question":
         if mode.resolution == "explain":

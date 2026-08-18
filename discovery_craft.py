@@ -760,6 +760,37 @@ def overperformance(user_message: str, response: str) -> bool:
     return False
 
 
+_INVENTED_RHETORICAL_CAUSE = re.compile(
+    r"(?i)("
+    r"that'?s why no(?:body|\s+one)\s+told|"
+    r"that'?s why nobody|"
+    r"the ones who know|"
+    r"too busy living inside|"
+    r"bother selling|"
+    r"didn'?t tell you because|"
+    r"no(?:body|\s+one) told you because|"
+    r"because (?:no one|nobody) (?:wanted|bothered)"
+    r")"
+)
+
+
+def rhetorical_explained(user_message: str, response: str) -> bool:
+    """Answered a rhetorical how-come as if it were a real why-question.
+
+    \"How come nobody told me?\" after discovering a show is awe, not a
+    request for a causal theory about the user's recommendation network.
+    """
+    from capability_detection import classify_social_mode
+
+    social = classify_social_mode(user_message or "")
+    if not social.rhetorical_question:
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_INVENTED_RHETORICAL_CAUSE.search(body))
+
+
 def classify_discovery_type(line: str, lens: str = "") -> str:
     """Tag stealable lines: Craft / Projection / Intensity / … (training signal)."""
     text = line or ""
