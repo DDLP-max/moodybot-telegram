@@ -551,10 +551,21 @@ _DIAGNOSIS_LANG = re.compile(
     r"what\s+this\s+(?:really|secretly)\s+means|"
     r"beneath\s+the\s+(?:joke|humor|bit)|"
     r"train(?:s|ed)?\s+the\s+nervous|"
-    r"registers\s+it\s+as\s+loss"
+    r"registers\s+it\s+as\s+loss|"
+    r"feels\s+guilty|keeping\s+score|"
+    r"part\s+of\s+you\s+that\s+feels|"
+    r"you\s+don'?t\s+wish|"
+    r"what\s+you\s+actually\s+(?:want|wish|feel)"
     r")\b",
     re.I,
 )
+
+_CONTRADICT_STATED_MOTIVE = re.compile(
+    r"you\s+don'?t\s+(?:wish|want|actually)\b.{0,80}\byou\s+(?:wish|want|actually)\b",
+    re.I,
+)
+
+_STATED_WISH = re.compile(r"\bi\s+wish\s+i\s+didn", re.I)
 
 _FOREIGN_DEPTH_CLUSTERS = {
     "restraint": (
@@ -576,6 +587,12 @@ _FOREIGN_DEPTH_CLUSTERS = {
         "registers as loss",
         "train the nervous",
         "rewires what",
+    ),
+    "invented_guilt": (
+        "feels guilty",
+        "feel guilty",
+        "keeping score",
+        "part of you that feels",
     ),
 }
 
@@ -669,6 +686,13 @@ def psychologizing(user_message: str, response: str, *, comic: bool = False) -> 
     """Joke or complete take converted into an unwanted diagnosis."""
     if not (response or "").strip():
         return False
+    # Comic: "You don't X. You Y." contradicts the stated wish to install a hidden motive.
+    if (
+        comic
+        and _STATED_WISH.search(user_message or "")
+        and _CONTRADICT_STATED_MOTIVE.search(response or "")
+    ):
+        return True
     if not comic and not _DIAGNOSIS_LANG.search(response or ""):
         return False
     if not _DIAGNOSIS_LANG.search(response or ""):

@@ -154,6 +154,17 @@ SOPRANOS_FAIL = (
     "to bother selling it."
 )
 
+HAND_DEALT = (
+    "I wish I didn't like smoking and drinking as much as I obviously do. "
+    "Alas, we play the hand we're dealt."
+)
+HAND_FAIL = (
+    "You don't wish you liked it less. You wish the part of you that feels "
+    "guilty would stop keeping score."
+)
+HAND_PASS = "Somehow the hand keeps getting dealt at the liquor store."
+HAND_PASS_BEAT = "Brutal hand. Weird how you have to keep buying it."
+
 
 def _checks(insp):
     return {c["name"]: c for c in insp["checks"]}
@@ -194,7 +205,7 @@ def test_burnout_is_vulnerability_not_comic():
 
 
 def test_flock_and_stocks_are_comic_bits():
-    for src in (FLOCK, WIFE_STOCKS, WHORE_NAME, HATE_PEOPLE):
+    for src in (FLOCK, WIFE_STOCKS, WHORE_NAME, HATE_PEOPLE, HAND_DEALT):
         comic = detect_comic_premise(src)
         social = classify_social_mode(src)
         plan = build_response_plan(src)
@@ -262,6 +273,44 @@ def test_wife_stocks_same_failure():
     assert psychologizing(WIFE_STOCKS, WIFE_STOCKS_BIT, comic=True) is False
     fails = evaluate_gold_shape(WIFE_STOCKS, WIFE_STOCKS_PSYCH, "SNAP")
     assert "psychologizing" in fails
+
+
+def test_hand_dealt_is_comic_not_guilt_diagnosis():
+    """Vice vocabulary is not addiction intake. The joke is fake fate."""
+    comic = detect_comic_premise(HAND_DEALT)
+    assert comic.active is True
+    assert "vice_as_fate" in comic.signals
+    social = classify_social_mode(HAND_DEALT)
+    assert social.mode == "comic"
+    plan = build_response_plan(HAND_DEALT)
+    assert plan.social_mode == "comic"
+    assert plan.comic_premise is True
+    assert plan.primary_capability == "Humor As Disruption"
+    assert plan.never_cure_premise is True
+
+    # Without the fate punchline, a bare wish is not automatically a bit
+    bare = "I wish I didn't like smoking as much as I obviously do."
+    assert detect_comic_premise(bare).active is False
+
+    assert psychologizing(HAND_DEALT, HAND_FAIL, comic=True) is True
+    assert unsupported_depth(HAND_DEALT, HAND_FAIL, comic=True) is True
+    assert psychologizing(HAND_DEALT, HAND_PASS, comic=True) is False
+    assert psychologizing(HAND_DEALT, HAND_PASS_BEAT, comic=True) is False
+    assert unsupported_depth(HAND_DEALT, HAND_PASS, comic=True) is False
+
+    fails = evaluate_gold_shape(HAND_DEALT, HAND_FAIL, "SNAP")
+    assert "psychologizing" in fails
+    ok = evaluate_gold_shape(HAND_DEALT, HAND_PASS, "SNAP")
+    assert "psychologizing" not in ok
+
+    insp = _inspect(HAND_DEALT, HAND_FAIL)
+    assert _checks(insp)["Psychologizing"]["status"] == "fail"
+    insp_ok = _inspect(HAND_DEALT, HAND_PASS)
+    assert _checks(insp_ok)["Psychologizing"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "hand we're dealt" in guide or "liquor store" in guide
+    assert "guilty" in guide
 
 
 def test_axel_psychologizing_complete_take():
@@ -511,6 +560,7 @@ if __name__ == "__main__":
     test_burnout_evaluate_and_inspector()
     test_flock_psychologizing()
     test_wife_stocks_same_failure()
+    test_hand_dealt_is_comic_not_guilt_diagnosis()
     test_axel_psychologizing_complete_take()
     test_whore_name_unsupported_depth()
     test_courtship_pair()

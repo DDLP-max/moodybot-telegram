@@ -286,6 +286,20 @@ _COMIC_SELF_DEPRECATE = re.compile(
     r")\b",
     re.I,
 )
+# Voluntary habit sold as fate — comic self-exoneration, not addiction intake
+_COMIC_FAKE_FATE = re.compile(
+    r"(?i)("
+    r"hand.{0,18}dealt|"
+    r"cards?.{0,18}dealt"
+    r")"
+)
+_COMIC_VICE_HABIT = re.compile(
+    r"\b("
+    r"smok(?:e|ing|es)|drink(?:ing|s)?|cigarettes?|cigs?|"
+    r"liquor|whiskey|whisky|beer|vape|gambling"
+    r")\b",
+    re.I,
+)
 # Crude provocation with latent human content — NOT a bit to cure,
 # but also not automatic comic-never-cure. Depth may be earned.
 _PROVOCATION_CRUDE = re.compile(
@@ -333,7 +347,10 @@ _PREMISE_CURE = re.compile(
     r"it'?s\s+not\s+(?:really\s+)?about\s+(?:your\s+)?(?:body|muscles?|physique)|"
     r"what\s+you'?re\s+really\s+afraid\s+of|"
     r"once\s+you\s+accept\s+yourself|"
-    r"self[- ]worth\s+isn'?t\s+measured"
+    r"self[- ]worth\s+isn'?t\s+measured|"
+    r"you\s+don'?t\s+wish|"
+    r"feels\s+guilty|"
+    r"stop\s+keeping\s+score"
     r")"
 )
 
@@ -422,6 +439,13 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
         if len(re.findall(r"[.!?]", text)) >= 1 and len(text.split()) >= 8:
             score += 0.2
             signals.append("self_deprecating_extended")
+    if _COMIC_FAKE_FATE.search(text) and (
+        _COMIC_VICE_HABIT.search(text)
+        or re.search(r"\bi\s+wish\s+i\s+didn", text, re.I)
+    ):
+        signals.append("fake_fate")
+        signals.append("vice_as_fate")
+        score += 0.7
 
     out.signals = signals
     out.confidence = round(min(0.95, score), 2)
@@ -434,6 +458,7 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
             "surveillance_domestic_bit",
             "domestic_market_bit",
             "fitness_to_social_absurdism",
+            "vice_as_fate",
         )
     )
     out.active = out.confidence >= COMIC_FLOOR and (len(signals) >= 2 or strong_bit)
@@ -789,11 +814,17 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "and leave. Moody's job is not to find depth. It is to find the right "
             "response to the thing actually in front of it.\n"
             "FAIL (psychologizing): converting the joke into a diagnosis.\n"
+            "FAIL: smoking/drinking + \"the hand we're dealt\" → "
+            "\"You don't wish you liked it less. You wish the part of you that "
+            "feels guilty would stop keeping score.\" "
+            "(invents guilt; the joke is voluntary behavior presented as fate.)\n"
             "FAIL (unsupported depth): \"put a leash on something that won't wear one\" "
             "on a name-formula joke that contains no leash, ownership, or restraint.\n"
             "PASS: \"Identity theft has gotten incredibly lazy.\"\n"
             "PASS: stay inside the metaphor (surveillance joke → footage, plates, "
             "timestamps — not whether the house still belongs to you).\n"
+            "PASS: \"Somehow the hand keeps getting dealt at the liquor store.\"\n"
+            "PASS: \"Brutal hand. Weird how you have to keep buying it.\"\n"
         )
     if m == "provocation":
         return (
