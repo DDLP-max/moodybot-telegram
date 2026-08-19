@@ -5,7 +5,7 @@ from __future__ import annotations
 from capability_detection import classify_comic_bit_shape, classify_social_mode, detect_comic_premise
 from discovery_craft import insight_after_payoff, sidesteps_forced_choice
 from gold_shape import evaluate_gold_shape
-from response_finalization import build_response_plan, plan_runtime_instruction
+from response_finalization import build_response_plan, plan_runtime_instruction, is_deliverable_response, is_valid_terminal_ack
 
 ENERGY_DRINK = """An energy drink is $2.50 a day.
 
@@ -83,6 +83,19 @@ def test_energy_drink_is_terminal_bit():
     assert "insight_after_payoff" in fails
     ok = evaluate_gold_shape(ENERGY_DRINK, ENERGY_PASS, "SNAP")
     assert "insight_after_payoff" not in ok
+
+
+def test_terminal_bit_whiskey_ack_passes_delivery_gate():
+    plan = build_response_plan(ENERGY_DRINK)
+    assert plan.interaction_shape == "terminal_bit"
+    assert plan.landing == "silence"
+    assert is_valid_terminal_ack(ENERGY_SILENCE, plan) is True
+    assert is_deliverable_response(ENERGY_SILENCE, plan) is True
+
+    open_plan = build_response_plan("Why did Game of Thrones season 8 fail?")
+    assert is_valid_terminal_ack(ENERGY_SILENCE, open_plan) is False
+    assert is_deliverable_response(ENERGY_SILENCE, open_plan) is False
+    assert is_deliverable_response("k", open_plan) is False
 
 
 def test_data_center_girl_is_taggable_not_terminal():

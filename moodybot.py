@@ -31,6 +31,8 @@ from message_utils import send_message, send_simple_message, resolve_mode, maybe
 from response_finalization import (
     build_response_plan,
     finalize_response,
+    is_deliverable_response,
+    is_valid_terminal_ack,
 )
 from gold_shape import paragraph_count
 from telegram_lifecycle import (
@@ -1159,7 +1161,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             content = safe_emoji(content)
 
             # Send response using new message utilities
-            if not content or len(content.strip()) < 10:
+            if not is_deliverable_response(content, response_plan):
                 logger.error("[update %s] Response too short or empty", update_id)
                 await send_simple_message(update, "MoodyBot couldn't generate a proper response. Try again.")
                 return

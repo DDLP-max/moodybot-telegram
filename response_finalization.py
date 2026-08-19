@@ -2593,6 +2593,28 @@ def _normalize_compare(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
+TERMINAL_BIT_ACK = "🥃"
+_MIN_DELIVERABLE_CHARS = 10
+
+
+def is_valid_terminal_ack(text: str, plan: object) -> bool:
+    """Whiskey-only acknowledgment is valid for terminal comic payoffs."""
+    return (
+        getattr(plan, "interaction_shape", None) == "terminal_bit"
+        and (text or "").strip() == TERMINAL_BIT_ACK
+    )
+
+
+def is_deliverable_response(text: str, plan: object) -> bool:
+    """Telegram send gate — terminal_bit may legally return whiskey-only."""
+    body = (text or "").strip()
+    if not body:
+        return False
+    if is_valid_terminal_ack(body, plan):
+        return True
+    return len(body) >= _MIN_DELIVERABLE_CHARS
+
+
 def finalize_response(
     draft: str,
     user_message: str,
