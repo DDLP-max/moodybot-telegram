@@ -1143,6 +1143,20 @@ def build_response_plan(
         landing = "silence"
         insight = False
         domain = "general"
+    elif social.interaction_shape == "pick_and_defend":
+        intent = "explore"
+        confidence = "high"
+        primary = "Evidence / Contradiction Analysis"
+        supporting = "Power / Incentive Analysis"
+        lens = "Pattern Recognition"
+        voice = None
+        preferred_structure = "KNIFE"
+        mechanism_hint = "pick_and_defend"
+        topic_mode = "neutral"
+        response_budget = "medium"
+        landing = "body_ends_response"
+        insight = False
+        domain = "general"
     elif social.participation or social.interaction_shape == "pick_one":
         # Pick-one / name-one: answer, don't explore. Topic keywords do not earn /cinema.
         intent = "answer"
@@ -1329,6 +1343,12 @@ def build_response_plan(
         topic_mode = "compress"
         landing = "body_ends_response"
         mechanism_hint = "participation_name"
+    elif social.interaction_shape == "pick_and_defend":
+        preferred_structure = "KNIFE"
+        response_budget = "medium"
+        topic_mode = "neutral"
+        landing = "body_ends_response"
+        mechanism_hint = "pick_and_defend"
     elif social.rhetorical_question or social.interaction_shape == "awe":
         preferred_structure = "SNAP"
         response_budget = "low"
@@ -2006,6 +2026,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
     )
     handoff = getattr(plan, "interaction_shape", None) == "comic_handoff"
     terminal = getattr(plan, "interaction_shape", None) == "terminal_bit"
+    pick_defend = getattr(plan, "interaction_shape", None) == "pick_and_defend"
     premise_guard = bool(getattr(plan, "premise_guards", None))
     provoc_gen = getattr(plan, "social_mode", None) == "provocative_generalization"
     cap = getattr(plan, "primary_capability", None)
@@ -2092,6 +2113,21 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
+    elif pick_defend:
+        extra = (
+            "\nPICK-AND-DEFEND CONTRACT: Nominate decisively. Then earn the nomination. "
+            "2–4 sentences. No hedging preamble. No essay. No trivia collapse. KNIFE.\n"
+            "Name first, then a contestable case for why the judgment holds.\n"
+            "PASS: \"Killmonger. He wasn't wrong about the diagnosis — only the prescription. "
+            "The world broke him first.\"\n"
+            "FAIL: \"Thanos. The numbers never lied. 🥃\"\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
     elif premise_guard:
         guards = ", ".join(getattr(plan, "premise_guards", None) or [])
         extra = (
@@ -2144,6 +2180,8 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         pipeline_bit = (
             "Pipeline: terminal bit → leave payoff alone → silence or one tag → SNAP.\n"
         )
+    elif pick_defend:
+        pipeline_bit = "Pipeline: pick-and-defend → nominate → earn it → KNIFE.\n"
     elif premise_guard:
         pipeline_bit = (
             "Pipeline: premise guards → inherit stated frame → value proposition → SNAP.\n"
@@ -2166,7 +2204,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + pipeline_bit
         + (
             ""
-            if pick_one or awe or handoff or terminal or premise_guard or provoc_gen
+            if pick_one or awe or handoff or terminal or pick_defend or premise_guard or provoc_gen
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "

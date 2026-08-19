@@ -19,6 +19,7 @@ Use this to recognize systemic problems in MoodyBot replies.
 - **Corrective analysis**: Casual provocative generalization treated as thesis defense — "the payoff in calling…", motive prosecution, Bench mode without invitation.
 - **Runway restatement**: Summarizes the thesis the user already built before contributing. Start where the post stops.
 - **Overperformance**: Spent intelligence the interaction didn't ask for. Topic routing beat social routing: "actor" + "movie" → `/cinema` → Everyday Preference Analysis → explore, when the contract was pick-one / answer / SNAP. Distinct from unsupported depth — the premise might support analysis; the contract didn't require it.
+- **Pick-and-defend trivia collapse**: Provocative nomination (`name a villain who was 100% right`) answered with a one-line SNAP instead of nominate + 2–4 sentence case. `/thoughts` breaks the tie toward argument when defense is plausible.
 - **Rhetorical obligation**: Treated a rhetorical how-come as a real why and invented causality. Sopranos: cinema is the object (`/cinema` may participate) but "how come nobody told me?" means holy shit, not a theory about their recommendation network. `/cinema` permission ≠ unlimited prose.
 
 Each detected pattern → prompts model retraining or stack adjustment.

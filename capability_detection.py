@@ -113,12 +113,11 @@ class SocialModeAnalysis:
 
     @property
     def participation(self) -> bool:
-        return (
-            self.mode == "direct_participation"
-            or self.resolution == "name"
-            or "participation" in self.signals
-            or self.interaction_shape == "pick_one"
-        )
+        return self.interaction_shape == "pick_one"
+
+    @property
+    def pick_and_defend(self) -> bool:
+        return self.interaction_shape == "pick_and_defend"
 
     @property
     def comic_handoff(self) -> bool:
@@ -135,8 +134,8 @@ class SocialModeAnalysis:
 
     @property
     def blocks_topical_auto_route(self) -> bool:
-        """Topic keywords (/cinema, movie, actor) must not beat pick-one."""
-        return self.participation
+        """Topic keywords (/cinema, movie, actor) must not beat interaction shape."""
+        return self.participation or self.pick_and_defend
 
     @property
     def terminal_bit(self) -> bool:
@@ -409,6 +408,47 @@ _PARTICIPATION_ASK = re.compile(
     r")\b",
     re.I,
 )
+_NOMINATION_ASK = re.compile(
+    r"(?i)\b(?:name\s+(?:a|an|one|your)|pick\s+(?:a|an|one))\b"
+)
+_CONTESTABLE_JUDGMENT = re.compile(
+    r"(?i)(?:"
+    r"100\s*%\s*(?:right|wrong|correct)|"
+    r"\bmost\s+(?:overrated|underrated|misunderstood)\b|"
+    r"(?:everyone|people)\s+(?:misunderstands?|gets?\s+(?:it\s+)?wrong)|"
+    r"(?:was|is)\s+(?:actually\s+)?(?:right|wrong)\b|"
+    r"got\s+(?:screwed|wronged)|"
+    r"terrible\s+idea\s+that\s+(?:actually\s+)?works|"
+    r"unpopular\s+opinion|"
+    r"taboo\s+(?:take|opinion|truth)|"
+    r"nobody\s+(?:talks\s+about|appreciates|gets)|"
+    r"misunderstood|overrated|underrated|"
+    r"who\s+(?:was|is)\s+100\s*%\s*right|"
+    r"who(?:'s|\s+is)\s+(?:the\s+)?most\s+(?:overrated|underrated|misunderstood)"
+    r")"
+)
+
+
+def _strip_slash_command(text: str) -> str:
+    return re.sub(r"^\s*/\w+\s*", "", (text or "").strip()).strip()
+
+
+def is_provocative_nomination(text: str) -> bool:
+    """Nomination where the value is defending a contestable judgment."""
+    raw = (text or "").strip()
+    body = _strip_slash_command(raw)
+    if not body:
+        return False
+    has_thoughts = bool(re.match(r"^\s*/thoughts\b", raw, re.I))
+    asks_to_name = bool(
+        _NOMINATION_ASK.search(body)
+        or re.search(r"(?i)\bwho(?:'s|\s+is)\b", body)
+    )
+    if asks_to_name and _CONTESTABLE_JUDGMENT.search(body):
+        return True
+    if has_thoughts and _NOMINATION_ASK.search(body) and _CONTESTABLE_JUDGMENT.search(body):
+        return True
+    return False
 # "How come nobody told me?" after discovering a show = holy shit, not a why-question.
 _RHETORICAL_HOW_COME = re.compile(
     r"(?i)("
@@ -656,6 +696,16 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.mode = "vulnerability"
         out.confidence = 0.85
         out.signals = ["genuine_distress"]
+        return out
+
+    if is_provocative_nomination(text):
+        out.mode = "open"
+        out.confidence = 0.9
+        out.signals = ["provocative_nomination", "pick_and_defend"]
+        out.resolution = "defend"
+        out.interaction_shape = "pick_and_defend"
+        if re.match(r"^\s*/thoughts\b", text, re.I):
+            out.signals.append("thoughts_command")
         return out
 
     if _PARTICIPATION_ASK.search(text):
@@ -1110,7 +1160,18 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "like themselves before re-entering, when some of that self only returns "
             "through participation.\n"
         )
-    if m == "direct_participation" or mode.participation or (mode.resolution == "name"):
+    if mode.pick_and_defend or mode.interaction_shape == "pick_and_defend":
+        return (
+            "\nSOCIAL MODE: provocative nomination — pick-and-defend.\n"
+            "PRECEDENCE: contestable judgment beats bare pick-one. "
+            "/thoughts breaks the tie toward argument when defense is plausible.\n"
+            "PICK-AND-DEFEND CONTRACT: Nominate decisively. Then earn the nomination. "
+            "2–4 sentences. No hedging preamble. No essay. No trivia collapse. KNIFE.\n"
+            "PASS: \"Killmonger. He wasn't wrong about the diagnosis — only the prescription. "
+            "The world broke him first.\"\n"
+            "FAIL: \"Thanos. The numbers never lied. 🥃\" (trivia SNAP without a case)\n"
+        )
+    if m == "direct_participation" or mode.participation:
         return (
             "\nSOCIAL MODE: direct participation (pick-one / name-one).\n"
             "PRECEDENCE: interaction shape → social mode → capability → topical tone. "
