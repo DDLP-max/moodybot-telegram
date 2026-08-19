@@ -861,6 +861,41 @@ def missed_comic_handoff(user_message: str, response: str) -> bool:
     return bool(_INDEPENDENT_JOKE_OPEN.search(body))
 
 
+_INSIGHT_AFTER_PAYOFF = re.compile(
+    r"(?i)(?:"
+    r"what\s+(?:the\s+joke|this|it)\s+really\s+(?:means|about|is)|"
+    r"isn'?t\s+really\s+about|"
+    r"hidden\s+transaction|"
+    r"daily\s+bribe|"
+    r"checking\s+out\s+completely|"
+    r"beneath\s+the\s+(?:joke|humor)|"
+    r"the\s+math\s+works\s+until|"
+    r"version\s+of\s+you\s+who\s+still\s+thinks"
+    r")"
+)
+
+
+def insight_after_payoff(user_message: str, response: str) -> bool:
+    """Terminal comic payoff already landed — reply adds philosophical/psychological layer."""
+    from capability_detection import classify_comic_bit_shape
+
+    if classify_comic_bit_shape(user_message or "") != "terminal":
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    words = len(body.split())
+    if words <= 12:
+        return False
+    if _INSIGHT_AFTER_PAYOFF.search(body):
+        return True
+    if psychologizing(user_message, body, comic=True):
+        return True
+    if unsupported_depth(user_message, body, comic=True):
+        return True
+    return words > 30
+
+
 def restates_runway(user_message: str, response: str) -> bool:
     """First sentence restates the already-articulated thesis (then maybe advances)."""
     ss = _sentences(response or "")

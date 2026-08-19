@@ -1047,6 +1047,7 @@ def build_response_plan(
 ) -> ResponsePlan:
     from capability_detection import (
         TOPICAL_AUTO_TONES,
+        classify_comic_bit_shape,
         classify_social_mode,
         detect_comic_premise,
         detect_escalation_payoff,
@@ -1128,6 +1129,20 @@ def build_response_plan(
         mechanism_hint = "clarification"
         topic_mode = "compress"
         response_budget = "low"
+    elif social.interaction_shape == "terminal_bit":
+        intent = "respond"
+        confidence = "high"
+        primary = "Humor As Disruption"
+        supporting = None
+        lens = "Hank Moody"
+        voice = None
+        preferred_structure = "SNAP"
+        mechanism_hint = "terminal_bit_leave_payoff"
+        topic_mode = "compress"
+        response_budget = "low"
+        landing = "silence"
+        insight = False
+        domain = "general"
     elif social.participation or social.interaction_shape == "pick_one":
         # Pick-one / name-one: answer, don't explore. Topic keywords do not earn /cinema.
         intent = "answer"
@@ -1237,6 +1252,12 @@ def build_response_plan(
         comic.confidence = max(comic.confidence, social.confidence or 0.7)
         comic.signals = comic.signals or list(social.signals)
         comic.never_cure = True
+    if social.interaction_shape == "terminal_bit":
+        comic.active = True
+        comic.never_cure = True
+        comic.confidence = max(comic.confidence, social.confidence or 0.9)
+        if "terminal_bit" not in (comic.signals or []):
+            comic.signals = list(comic.signals or []) + ["terminal_bit"]
     log_capability_trace(ht, ep, comic, social)
     if social.premise_guards:
         mechanism_hint = "premise_guard_inherit"
@@ -1248,6 +1269,7 @@ def build_response_plan(
         and social.mode != "provocative_generalization"
         and not social.participation
         and not social.premise_guards
+        and social.interaction_shape != "terminal_bit"
     ):
         # Prefer as supporting (or primary when incentives are the claim)
         if primary in {
@@ -1271,8 +1293,22 @@ def build_response_plan(
         supporting = "Bit Continuation"
         mechanism_hint = "comic_premise_continuation"
         # Keep SNAP/low fine for tags — guidance forbids curing the premise
-        if social.comic_handoff:
+        if social.interaction_shape == "terminal_bit":
+            supporting = None
+            mechanism_hint = "terminal_bit_leave_payoff"
+            preferred_structure = "SNAP"
+            response_budget = "low"
+            topic_mode = "compress"
+            landing = "silence"
+            insight = False
+        elif social.comic_handoff:
             mechanism_hint = "comic_handoff_complete"
+            preferred_structure = "SNAP"
+            response_budget = "low"
+            topic_mode = "compress"
+            landing = "body_ends_response"
+        elif social.interaction_shape == "taggable_bit":
+            mechanism_hint = "taggable_bit_one_tag"
             preferred_structure = "SNAP"
             response_budget = "low"
             topic_mode = "compress"
@@ -1349,7 +1385,10 @@ def build_response_plan(
         comic_premise=comic.active,
         comic_premise_confidence=comic.confidence,
         never_cure_premise=bool(comic.active and comic.never_cure),
-        comic_payoff_is_terminal=bool(comic.active),
+        comic_payoff_is_terminal=bool(
+            social.interaction_shape == "terminal_bit"
+            or classify_comic_bit_shape(user_message) == "terminal"
+        ),
         social_mode=social.mode,
         social_mode_confidence=social.confidence,
         social_mode_signals=list(social.signals),
@@ -1966,6 +2005,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         getattr(plan, "social_mode_signals", None) or []
     )
     handoff = getattr(plan, "interaction_shape", None) == "comic_handoff"
+    terminal = getattr(plan, "interaction_shape", None) == "terminal_bit"
     premise_guard = bool(getattr(plan, "premise_guards", None))
     provoc_gen = getattr(plan, "social_mode", None) == "provocative_generalization"
     cap = getattr(plan, "primary_capability", None)
@@ -2037,6 +2077,21 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
+    elif terminal:
+        extra = (
+            "\nTERMINAL BIT CONTRACT: Setup and punchline are complete. "
+            "Insight is not additive. Do not explain what the joke is really about. "
+            "Do not import hidden transaction, bribe, or existential upgrade. "
+            "Silence-equivalent: 🥃 alone, or one tiny reinforcing tag at most. SNAP.\n"
+            "FAIL: \"The math works until you notice the $2.50 isn't really about the car…\"\n"
+            "PASS: \"🥃\" or \"Fair. 🥃\"\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
     elif premise_guard:
         guards = ", ".join(getattr(plan, "premise_guards", None) or [])
         extra = (
@@ -2071,32 +2126,37 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
-    pipeline_bit = (
-        "Pipeline: interaction shape → social mode → SNAP. capability=none. "
-        "Do not discover a mechanism.\n"
-            if pick_one
-        else (
+    if pick_one:
+        pipeline_bit = (
+            "Pipeline: interaction shape → social mode → SNAP. capability=none. "
+            "Do not discover a mechanism.\n"
+        )
+    elif awe:
+        pipeline_bit = (
             "Pipeline: interaction shape → /cinema may color → SNAP. "
             "Do not explain the rhetorical how-come.\n"
-            if awe
-            else (
-                "Pipeline: comic handoff → inherit premise → complete unresolved beat → SNAP.\n"
-                if handoff
-                else (
-                    "Pipeline: premise guards → inherit stated frame → value proposition → SNAP.\n"
-                    if premise_guard
-                    else (
-                    "Pipeline: provocative generalization → social banter → tease framing → SNAP.\n"
-                    if provoc_gen
-                    else (
-                    "Pipeline: claim type → lens → question → capability → mechanism → "
-                    "Depth × Shape → Gold.\n"
-                    )
-                    )
-                )
-            )
         )
-    )
+    elif handoff:
+        pipeline_bit = (
+            "Pipeline: comic handoff → inherit premise → complete unresolved beat → SNAP.\n"
+        )
+    elif terminal:
+        pipeline_bit = (
+            "Pipeline: terminal bit → leave payoff alone → silence or one tag → SNAP.\n"
+        )
+    elif premise_guard:
+        pipeline_bit = (
+            "Pipeline: premise guards → inherit stated frame → value proposition → SNAP.\n"
+        )
+    elif provoc_gen:
+        pipeline_bit = (
+            "Pipeline: provocative generalization → social banter → tease framing → SNAP.\n"
+        )
+    else:
+        pipeline_bit = (
+            "Pipeline: claim type → lens → question → capability → mechanism → "
+            "Depth × Shape → Gold.\n"
+        )
     return (
         f"RUNTIME TURN (this reply only):\n"
         f"Interpretive lens (Identity, locked): {lens}. Capability (Intelligence): {cap}."
@@ -2106,7 +2166,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + pipeline_bit
         + (
             ""
-            if pick_one or awe or handoff or premise_guard or provoc_gen
+            if pick_one or awe or handoff or terminal or premise_guard or provoc_gen
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
@@ -2327,7 +2387,23 @@ def _apply_closing_strategy(
             )
             return cleaned2, mod or moral_stripped, False
 
-    if getattr(plan, "comic_premise", False) or getattr(plan, "comic_payoff_is_terminal", False):
+    if getattr(plan, "interaction_shape", None) == "terminal_bit" or getattr(
+        plan, "comic_payoff_is_terminal", False
+    ):
+        cleaned, punch_stripped = strip_post_comic_punchline(before)
+        cleaned2, mod = protective_cleanup(cleaned)
+        plan.comic_payoff_is_terminal = True
+        plan.landing = "silence"
+        plan.closing_strategy = "silence"
+        plan.allow_question = False
+        logger.info(
+            "FINALIZER_TRACE comic_payoff_terminal=1 recognition_landing=0 "
+            "second_beat_stripped=%s",
+            1 if punch_stripped else 0,
+        )
+        return cleaned2, mod or punch_stripped, False
+
+    if getattr(plan, "comic_premise", False):
         cleaned, punch_stripped = strip_post_comic_punchline(before)
         cleaned2, mod = protective_cleanup(cleaned)
         plan.comic_payoff_is_terminal = True

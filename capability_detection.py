@@ -98,7 +98,7 @@ class SocialModeAnalysis:
     signals: List[str] = field(default_factory=list)
     # Natural resolution of a question: name | explain | reason | ""
     resolution: str = ""
-    # pick_one | why | how_to | awe | comic_handoff | open — decided before topical tone
+    # pick_one | pick_and_defend | why | how_to | awe | comic_handoff | taggable_bit | terminal_bit | open
     interaction_shape: str = "open"
     # Explicit negations the user ruled out — e.g. "Not bitter. Not lonely."
     premise_guards: List[str] = field(default_factory=list)
@@ -139,8 +139,17 @@ class SocialModeAnalysis:
         return self.participation
 
     @property
+    def terminal_bit(self) -> bool:
+        return self.interaction_shape == "terminal_bit" or "terminal_bit" in self.signals
+
+    @property
     def depth_earned(self) -> bool:
-        if self.participation or self.rhetorical_question or self.comic_handoff:
+        if (
+            self.participation
+            or self.rhetorical_question
+            or self.comic_handoff
+            or self.terminal_bit
+        ):
             return False
         return self.mode in {"vulnerability", "provocation"} or (
             self.mode == "question" and self.resolution in {"explain", "reason"}
@@ -323,6 +332,35 @@ _COMIC_HANDOFF = re.compile(
     r"\balas(?:\s*\.{2,}|\s*…)\s*$"
     r")"
 )
+# Joke-formula with room for one reinforcing tag — not a finished anti-climax landing.
+_COMIC_TAGGABLE_FORMULA = re.compile(
+    r"(?i)(?:"
+    r"that'?s\s+not\s+(?:your|my)\s+\w+\s*,?\s*that'?s\s+(?:a|an|the)\s+[\w\s'-]+|"
+    r"that'?s\s+not\s+\w+\s*,?\s*that'?s\s+[\w\s'-]+"
+    r")"
+)
+# Setup already paid off — insight after this is noise.
+_COMIC_TERMINAL_LANDING = re.compile(
+    r"(?i)(?:"
+    r"^so\s+just\s+(?:enjoy|have|drink|eat|do|accept)|"
+    r"^just\s+enjoy\s+(?:the|it|your|that)|"
+    r"^might\s+as\s+well\b|"
+    r"^anyway\.?\s*$|"
+    r"so\s+just\s+enjoy|"
+    r"just\s+enjoy\s+the\s+|"
+    r"still\s+not\s+enough.{0,80}(?:so|just)\s+(?:enjoy|have|forget|accept)"
+    r")"
+)
+_COMIC_SETUP_CHAIN = re.compile(
+    r"(?i)(?:"
+    r"\$\d|"
+    r"\d+\s+years?|"
+    r"if\s+you\s+(?:quit|stopped)|"
+    r"that'?s\s+\$\d|"
+    r"you'?ll\s+save|"
+    r"\d+\s+a\s+(?:day|week|month|year)"
+    r")"
+)
 _COMIC_INVENT_WISH = re.compile(
     r"\bthey\s+should\s+invent\b",
     re.I,
@@ -427,6 +465,31 @@ _COMIC_STRONG_PUNCH = re.compile(
     r"body[- ]?fat\s+percentage|phase\s+two|advanced\s+compound"
     r")\b"
 )
+
+
+def classify_comic_bit_shape(user_message: str) -> str:
+    """Classify comic interaction grammar: open | taggable | terminal | \"\"."""
+    text = (user_message or "").strip()
+    if not text:
+        return ""
+    if _COMIC_HANDOFF.search(text):
+        return "open"
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    last = sentences[-1] if sentences else text
+    list_lines = [ln.strip() for ln in re.split(r"[\n\r]+", text) if ln.strip()]
+    has_list_setup = len(list_lines) >= 3 and any(
+        re.match(r"^[-•*]\s+", ln) for ln in list_lines
+    )
+    if _COMIC_TAGGABLE_FORMULA.search(text) and (len(sentences) >= 2 or has_list_setup):
+        if not _COMIC_TERMINAL_LANDING.search(last):
+            return "taggable"
+    if len(sentences) >= 2 and _COMIC_TERMINAL_LANDING.search(last):
+        if len(sentences) >= 3 or _COMIC_SETUP_CHAIN.search(text):
+            return "terminal"
+    if len(sentences) >= 2 and _COMIC_SETUP_CHAIN.search(text):
+        if _COMIC_TERMINAL_LANDING.search(text):
+            return "terminal"
+    return ""
 
 
 def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
@@ -611,15 +674,38 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.interaction_shape = "awe"
         return out
 
+    bit_shape = classify_comic_bit_shape(text)
+    if bit_shape == "terminal":
+        out.mode = "comic"
+        out.interaction_shape = "terminal_bit"
+        out.confidence = 0.9
+        out.signals = ["terminal_bit", "comic_payoff_terminal"]
+        return out
+
+    if bit_shape == "taggable":
+        out.mode = "comic"
+        out.interaction_shape = "taggable_bit"
+        out.confidence = 0.85
+        out.signals = ["taggable_bit", "joke_formula"]
+        return out
+
     comic = detect_comic_premise(text)
     if comic.active:
         out.mode = "comic"
         out.confidence = comic.confidence
         out.signals = list(comic.signals)
-        if "comic_handoff" in comic.signals or _COMIC_HANDOFF.search(text):
+        if bit_shape == "open" or "comic_handoff" in comic.signals or _COMIC_HANDOFF.search(text):
             out.interaction_shape = "comic_handoff"
             if "comic_handoff" not in out.signals:
                 out.signals.append("comic_handoff")
+        elif bit_shape == "taggable" or _COMIC_TAGGABLE_FORMULA.search(text):
+            out.interaction_shape = "taggable_bit"
+            if "taggable_bit" not in out.signals:
+                out.signals.append("taggable_bit")
+        elif bit_shape == "terminal":
+            out.interaction_shape = "terminal_bit"
+            if "terminal_bit" not in out.signals:
+                out.signals.append("terminal_bit")
         return out
 
     # Joke-formula / crude name riff that didn't quite hit comic floor
@@ -908,6 +994,15 @@ def draft_has_terminal_payoff(text: str) -> bool:
 def social_mode_guidance(mode: SocialModeAnalysis) -> str:
     """Generation gate: identify the human moment before deploying intelligence."""
     m = (mode.mode or "open").lower()
+    if mode.terminal_bit or mode.interaction_shape == "terminal_bit":
+        return (
+            "\nSOCIAL MODE: terminal comic bit — setup and punchline are complete.\n"
+            "TERMINAL BIT: insight is not additive. Do not explain what the joke is "
+            "really about. No hidden transaction, daily bribe, or existential upgrade.\n"
+            "Silence-equivalent: 🥃 alone, or one tiny reinforcing tag at most. SNAP.\n"
+            "FAIL: energy-drink math → \"The $2.50 isn't really about the car… daily bribe…\"\n"
+            "PASS: \"🥃\" or \"Fair. 🥃\"\n"
+        )
     if mode.comic_handoff:
         return (
             "\nSOCIAL MODE: comic handoff. The user left an unresolved contrast slot.\n"

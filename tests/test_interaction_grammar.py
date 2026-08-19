@@ -1,0 +1,91 @@
+# -*- coding: utf-8 -*-
+"""Cross-case regression: open vs taggable vs terminal comic bits."""
+from __future__ import annotations
+
+from capability_detection import classify_comic_bit_shape, classify_social_mode, detect_comic_premise
+from discovery_craft import insight_after_payoff
+from gold_shape import evaluate_gold_shape
+from response_finalization import build_response_plan, plan_runtime_instruction
+
+ENERGY_DRINK = """An energy drink is $2.50 a day.
+
+That's $17.50 a week, $75 a month, and $900 a year.
+
+If you quit drinking them for 10 years, you'll save $9,000.
+
+That's still not enough for your dream car.
+
+So just enjoy the energy drink."""
+
+ENERGY_FAIL = (
+    "The math works until you notice the $2.50 isn't really about the car. "
+    "It's the daily bribe that keeps the version of you who still thinks the car is possible "
+    "from checking out completely. 🥃"
+)
+ENERGY_PASS = "Fair. 🥃"
+ENERGY_SILENCE = "🥃"
+
+DATA_CENTER_GIRL = (
+    "if your girl: \n"
+    "- drinks a lot of water \n"
+    "- causes drama \n"
+    "- remembers everything \n"
+    "that's not your girl, that's a data center"
+)
+DATA_CENTER_TAG = "That's a data center with better uptime than your last three relationships. 🥃"
+
+BOWLING_ALAS = (
+    "they should invent a woman who wants to go bowling and enjoy a bucket of beer but alas"
+)
+
+
+def test_energy_drink_is_terminal_bit():
+    assert classify_comic_bit_shape(ENERGY_DRINK) == "terminal"
+    social = classify_social_mode(ENERGY_DRINK)
+    assert social.mode == "comic"
+    assert social.interaction_shape == "terminal_bit"
+    assert social.terminal_bit is True
+    assert social.depth_earned is False
+
+    plan = build_response_plan(ENERGY_DRINK)
+    assert plan.interaction_shape == "terminal_bit"
+    assert plan.primary_capability == "Humor As Disruption"
+    assert plan.mechanism_hint == "terminal_bit_leave_payoff"
+    assert plan.preferred_structure == "SNAP"
+    assert plan.response_budget == "low"
+    assert plan.comic_payoff_is_terminal is True
+    assert plan.landing == "silence"
+    assert plan.primary_capability != "Emotional State Recognition"
+
+    guide = plan_runtime_instruction(plan).lower()
+    assert "terminal bit" in guide
+    assert "insight is not additive" in guide
+
+    assert insight_after_payoff(ENERGY_DRINK, ENERGY_FAIL) is True
+    assert insight_after_payoff(ENERGY_DRINK, ENERGY_PASS) is False
+    assert insight_after_payoff(ENERGY_DRINK, ENERGY_SILENCE) is False
+    fails = evaluate_gold_shape(ENERGY_DRINK, ENERGY_FAIL, "SNAP")
+    assert "insight_after_payoff" in fails
+    ok = evaluate_gold_shape(ENERGY_DRINK, ENERGY_PASS, "SNAP")
+    assert "insight_after_payoff" not in ok
+
+
+def test_data_center_girl_is_taggable_not_terminal():
+    assert classify_comic_bit_shape(DATA_CENTER_GIRL) == "taggable"
+    social = classify_social_mode(DATA_CENTER_GIRL)
+    assert social.interaction_shape == "taggable_bit"
+    assert social.interaction_shape != "terminal_bit"
+
+    plan = build_response_plan(DATA_CENTER_GIRL)
+    assert plan.interaction_shape == "taggable_bit"
+    assert plan.mechanism_hint == "taggable_bit_one_tag"
+    assert plan.comic_payoff_is_terminal is False
+
+
+def test_bowling_alas_stays_open_handoff():
+    assert classify_comic_bit_shape(BOWLING_ALAS) == "open"
+    social = classify_social_mode(BOWLING_ALAS)
+    assert social.interaction_shape == "comic_handoff"
+    assert social.interaction_shape != "terminal_bit"
+    plan = build_response_plan(BOWLING_ALAS)
+    assert plan.mechanism_hint == "comic_handoff_complete"

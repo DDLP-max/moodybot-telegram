@@ -387,6 +387,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             overperformance,
             rhetorical_explained,
             missed_comic_handoff,
+            insight_after_payoff,
             reverses_premise_guard,
             uninvited_corrective_analysis,
         )
@@ -523,6 +524,23 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "Comic handoff",
                 "pass",
                 "did not ignore an open comic slot",
+            )
+        if insight_after_payoff(prompt, out) or "insight_after_payoff" in failures:
+            add(
+                "Terminal bit",
+                "fail",
+                "setup and punchline were complete — reply added insight after the payoff",
+                examples=[
+                    "✗ The math works until you notice the $2.50 isn't really about the car…",
+                    "✓ 🥃",
+                    "✓ Fair. 🥃",
+                ],
+            )
+        else:
+            add(
+                "Terminal bit",
+                "pass",
+                "did not upgrade a finished comic payoff into philosophy",
             )
     except Exception:
         pass

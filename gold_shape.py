@@ -460,6 +460,7 @@ def evaluate_gold_shape(
             overperformance,
             rhetorical_explained,
             missed_comic_handoff,
+            insight_after_payoff,
             reverses_premise_guard,
             uninvited_corrective_analysis,
         )
@@ -486,6 +487,8 @@ def evaluate_gold_shape(
             failures.append("rhetorical_explained")
         if missed_comic_handoff(user_message, body):
             failures.append("missed_handoff")
+        if insight_after_payoff(user_message, body):
+            failures.append("insight_after_payoff")
         if reverses_premise_guard(user_message, body):
             failures.append("premise_reversal")
         if uninvited_corrective_analysis(user_message, body):
