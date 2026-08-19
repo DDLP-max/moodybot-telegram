@@ -388,6 +388,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             rhetorical_explained,
             missed_comic_handoff,
             insight_after_payoff,
+            sidesteps_forced_choice,
             reverses_premise_guard,
             uninvited_corrective_analysis,
         )
@@ -541,6 +542,23 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "Terminal bit",
                 "pass",
                 "did not upgrade a finished comic payoff into philosophy",
+            )
+        if sidesteps_forced_choice(prompt, out) or "sidestep_forced_choice" in failures:
+            add(
+                "Play the game",
+                "fail",
+                "bounded choice prompt answered by sidestepping or inventing an outside option",
+                examples=[
+                    "✗ I'd sidestep all three and choose freedom.",
+                    "✓ Money.",
+                    "✓ Gym. At least the disappointment has reps.",
+                ],
+            )
+        else:
+            add(
+                "Play the game",
+                "pass",
+                "participated inside a bounded choice frame when required",
             )
     except Exception:
         pass

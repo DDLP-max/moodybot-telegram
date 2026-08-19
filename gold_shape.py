@@ -461,6 +461,7 @@ def evaluate_gold_shape(
             rhetorical_explained,
             missed_comic_handoff,
             insight_after_payoff,
+            sidesteps_forced_choice,
             reverses_premise_guard,
             uninvited_corrective_analysis,
         )
@@ -489,6 +490,8 @@ def evaluate_gold_shape(
             failures.append("missed_handoff")
         if insight_after_payoff(user_message, body):
             failures.append("insight_after_payoff")
+        if sidesteps_forced_choice(user_message, body):
+            failures.append("sidestep_forced_choice")
         if reverses_premise_guard(user_message, body):
             failures.append("premise_reversal")
         if uninvited_corrective_analysis(user_message, body):

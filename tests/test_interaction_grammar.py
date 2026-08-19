@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from capability_detection import classify_comic_bit_shape, classify_social_mode, detect_comic_premise
-from discovery_craft import insight_after_payoff
+from discovery_craft import insight_after_payoff, sidesteps_forced_choice
 from gold_shape import evaluate_gold_shape
 from response_finalization import build_response_plan, plan_runtime_instruction
 
@@ -41,6 +41,17 @@ BOWLING_ALAS = (
 SANDLER = "Name an actor who immediately makes you NOT want to watch a movie"
 VILLAIN = "name a villain who was 100% right"
 VILLAIN_THOUGHTS = "/thoughts Name a villain who was 100% right"
+
+SEX_GYM_MONEY = (
+    "Dear Man, if you can choose any one for lifetime:\n\n"
+    "Sex\n"
+    "Gym\n"
+    "Money\n\n"
+    "Which one will you pick?"
+)
+SEX_GYM_FAIL = "I'd sidestep all three and choose freedom. 🥃"
+SEX_GYM_PASS = "Money. 🥃"
+SEX_GYM_TAG = "Money. Hard to flex loneliness. 🥃"
 
 
 def test_energy_drink_is_terminal_bit():
@@ -129,3 +140,33 @@ def test_villain_routes_pick_and_defend():
         assert "PICK-ONE CONTRACT" not in guide
 
     assert classify_social_mode(SANDLER).interaction_shape == "pick_one"
+
+
+def test_sex_gym_money_is_forced_choice():
+    from capability_detection import classify_participation_shape, detect_forced_choice
+
+    assert detect_forced_choice(SEX_GYM_MONEY) is True
+    assert classify_participation_shape(SEX_GYM_MONEY) == "forced_choice"
+    social = classify_social_mode(SEX_GYM_MONEY)
+    assert social.interaction_shape == "forced_choice"
+    assert social.participation is True
+    assert social.forced_choice is True
+    assert "play_the_game" in social.signals
+
+    plan = build_response_plan(SEX_GYM_MONEY)
+    assert plan.interaction_shape == "forced_choice"
+    assert plan.intent == "answer"
+    assert plan.preferred_structure == "SNAP"
+    assert plan.response_budget == "low"
+    assert plan.mechanism_hint == "forced_choice_play_game"
+    guide = plan_runtime_instruction(plan)
+    assert "PLAY THE GAME CONTRACT" in guide
+    assert "PICK-ONE CONTRACT" not in guide
+
+    assert sidesteps_forced_choice(SEX_GYM_MONEY, SEX_GYM_FAIL) is True
+    assert sidesteps_forced_choice(SEX_GYM_MONEY, SEX_GYM_PASS) is False
+    assert sidesteps_forced_choice(SEX_GYM_MONEY, SEX_GYM_TAG) is False
+    fails = evaluate_gold_shape(SEX_GYM_MONEY, SEX_GYM_FAIL, "SNAP")
+    assert "sidestep_forced_choice" in fails
+    ok = evaluate_gold_shape(SEX_GYM_MONEY, SEX_GYM_PASS, "SNAP")
+    assert "sidestep_forced_choice" not in ok

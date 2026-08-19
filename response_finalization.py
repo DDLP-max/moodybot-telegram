@@ -1157,6 +1157,25 @@ def build_response_plan(
         landing = "body_ends_response"
         insight = False
         domain = "general"
+        domain = "general"
+    elif social.interaction_shape == "forced_choice":
+        intent = "answer"
+        confidence = "high"
+        primary = None
+        supporting = None
+        lens = "Hank Moody"
+        voice = None
+        preferred_structure = "SNAP"
+        mechanism_hint = "forced_choice_play_game"
+        topic_mode = "compress"
+        response_budget = "low"
+        landing = "body_ends_response"
+        insight = False
+        domain = "general"
+        if not tone_source or tone_source == "auto-route":
+            tone_source = "social-first"
+        if (selected_command or "") in TOPICAL_AUTO_TONES:
+            selected_command = "/thoughts"
     elif social.participation or social.interaction_shape == "pick_one":
         # Pick-one / name-one: answer, don't explore. Topic keywords do not earn /cinema.
         intent = "answer"
@@ -1342,7 +1361,11 @@ def build_response_plan(
         response_budget = "low"
         topic_mode = "compress"
         landing = "body_ends_response"
-        mechanism_hint = "participation_name"
+        mechanism_hint = (
+            "forced_choice_play_game"
+            if social.interaction_shape == "forced_choice"
+            else "participation_name"
+        )
     elif social.interaction_shape == "pick_and_defend":
         preferred_structure = "KNIFE"
         response_budget = "medium"
@@ -2019,8 +2042,12 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
     lens = getattr(plan, "lens", None) or select_interpretive_lens(domain).get("lens", "")
     pick_one = (
         getattr(plan, "interaction_shape", None) == "pick_one"
-        or getattr(plan, "social_mode", None) == "direct_participation"
+        or (
+            getattr(plan, "social_mode", None) == "direct_participation"
+            and getattr(plan, "interaction_shape", None) not in {"forced_choice", "pick_and_defend"}
+        )
     )
+    forced = getattr(plan, "interaction_shape", None) == "forced_choice"
     awe = getattr(plan, "interaction_shape", None) == "awe" or "rhetorical" in (
         getattr(plan, "social_mode_signals", None) or []
     )
@@ -2031,7 +2058,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
     provoc_gen = getattr(plan, "social_mode", None) == "provocative_generalization"
     cap = getattr(plan, "primary_capability", None)
     if not cap:
-        cap = "none" if (pick_one or awe) else "Everyday Preference Analysis"
+        cap = "none" if (pick_one or forced or awe) else "Everyday Preference Analysis"
     domain_block = domain_mechanism_guidance(domain, lens=lens, capability=cap)
     lens_voice = lens_voice_guidance(lens)
     q = getattr(plan, "lens_question", None) or lens_internal_question(lens)
@@ -2060,6 +2087,21 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "One item is sufficient. At most one short comic or opinionated tag. "
             "Do not explain unless asked why. capability=none. SNAP. "
             "Do not write film criticism, mythic framing, or closing narration.\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
+    elif forced:
+        extra = (
+            "\nPLAY THE GAME CONTRACT: The user supplied a bounded choice. "
+            "Pick one of the offered options before adding interpretation. "
+            "Do not sidestep, broaden, or invent an outside option unless the user "
+            "explicitly invited rejection or challenge. capability=none. SNAP.\n"
+            "PASS: \"Money.\" / \"Money. Hard to flex loneliness.\"\n"
+            "FAIL: \"I'd sidestep all three and choose freedom.\"\n"
         )
         family_bit = ""
         q_bit = "\n"
@@ -2167,6 +2209,10 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "Pipeline: interaction shape → social mode → SNAP. capability=none. "
             "Do not discover a mechanism.\n"
         )
+    elif forced:
+        pipeline_bit = (
+            "Pipeline: forced choice → pick from offered options → SNAP. capability=none.\n"
+        )
     elif awe:
         pipeline_bit = (
             "Pipeline: interaction shape → /cinema may color → SNAP. "
@@ -2204,7 +2250,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + pipeline_bit
         + (
             ""
-            if pick_one or awe or handoff or terminal or pick_defend or premise_guard or provoc_gen
+            if pick_one or forced or awe or handoff or terminal or pick_defend or premise_guard or provoc_gen
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "

@@ -106,6 +106,7 @@ INTERACTION_SHAPE_MODULES: dict[str, str] = {
     "terminal_bit": "10_testing-quality/failure-patterns.md",
     "taggable_bit": "10_testing-quality/failure-patterns.md",
     "pick_and_defend": "10_testing-quality/failure-patterns.md",
+    "forced_choice": "10_testing-quality/failure-patterns.md",
     "awe": "9_response-engine/dynamic-intelligence-routing.md",
 }
 
@@ -283,6 +284,7 @@ def select_guidance_modules(
     if is_analytical and shape not in {
         "pick_one",
         "pick_and_defend",
+        "forced_choice",
         "awe",
         "comic_handoff",
         "terminal_bit",
@@ -370,7 +372,7 @@ def build_openrouter_messages(
 def is_snap_social_plan(plan: "ResponsePlan") -> bool:
     shape = getattr(plan, "interaction_shape", None) or "open"
     budget = getattr(plan, "response_budget", None) or "medium"
-    if shape in {"pick_one", "pick_and_defend", "awe", "comic_handoff", "terminal_bit", "taggable_bit"}:
+    if shape in {"pick_one", "pick_and_defend", "forced_choice", "awe", "comic_handoff", "terminal_bit", "taggable_bit"}:
         return True
     if getattr(plan, "social_mode", None) in {"comic", "direct_participation"}:
         return True

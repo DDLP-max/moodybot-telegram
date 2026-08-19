@@ -98,7 +98,7 @@ class SocialModeAnalysis:
     signals: List[str] = field(default_factory=list)
     # Natural resolution of a question: name | explain | reason | ""
     resolution: str = ""
-    # pick_one | pick_and_defend | why | how_to | awe | comic_handoff | taggable_bit | terminal_bit | open
+    # pick_one | pick_and_defend | forced_choice | why | how_to | awe | comic_handoff | taggable_bit | terminal_bit | open
     interaction_shape: str = "open"
     # Explicit negations the user ruled out — e.g. "Not bitter. Not lonely."
     premise_guards: List[str] = field(default_factory=list)
@@ -113,7 +113,11 @@ class SocialModeAnalysis:
 
     @property
     def participation(self) -> bool:
-        return self.interaction_shape == "pick_one"
+        return self.interaction_shape in {"pick_one", "forced_choice"}
+
+    @property
+    def forced_choice(self) -> bool:
+        return self.interaction_shape == "forced_choice"
 
     @property
     def pick_and_defend(self) -> bool:
@@ -145,6 +149,7 @@ class SocialModeAnalysis:
     def depth_earned(self) -> bool:
         if (
             self.participation
+            or self.forced_choice
             or self.rhetorical_question
             or self.comic_handoff
             or self.terminal_bit
@@ -449,6 +454,105 @@ def is_provocative_nomination(text: str) -> bool:
     if has_thoughts and _NOMINATION_ASK.search(body) and _CONTESTABLE_JUDGMENT.search(body):
         return True
     return False
+
+
+_FORCED_CHOICE_CUE = re.compile(
+    r"(?i)(?:"
+    r"which\s+one(?:\s+(?:will|would|do)\s+you\s+(?:pick|choose)|\s+do\s+you|\?|$)|"
+    r"which\s+(?:will|would|do)\s+you\s+(?:pick|choose|take)|"
+    r"choose\s+(?:any\s+)?one\b|"
+    r"pick\s+one(?:\s+of|\?|$|\b)|"
+    r"what\s+would\s+you\s+(?:pick|choose)|"
+    r"which\s+(?:one|option)\s+(?:do|would)\s+you"
+    r")"
+)
+_FORCED_CHOICE_PROMPT = re.compile(
+    r"(?i)(?:"
+    r"^\s*(?:dear\s+\w+,?\s*)?(?:if\s+you\s+can\s+)?(?:choose|pick)\s+(?:any\s+)?one\b|"
+    r"\bchoose\s+any\s+one\b"
+    r")"
+)
+_USER_INVITES_CHOICE_REJECTION = re.compile(
+    r"(?i)(?:"
+    r"none\s+of\s+(?:these|them|the\s+above|the\s+options?)|"
+    r"or\s+(?:something|anything)\s+else|"
+    r"reject\s+(?:the\s+)?(?:choices|options|premise|frame)|"
+    r"feel\s+free\s+to\s+(?:reject|challenge|ignore)"
+    r")"
+)
+
+
+def _normalize_option_label(label: str) -> str:
+    return re.sub(r"\s+", " ", (label or "").strip().lower())
+
+
+def extract_bounded_options(text: str) -> List[str]:
+    """Short listed options from a bounded-choice prompt."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    options: List[str] = []
+    seen: set[str] = set()
+    for ln in re.split(r"[\n\r]+", raw):
+        line = ln.strip()
+        if not line:
+            continue
+        if _FORCED_CHOICE_CUE.search(line):
+            continue
+        if _FORCED_CHOICE_PROMPT.search(line):
+            continue
+        if re.match(r"^\s*dear\s+\w+,?\s*$", line, re.I):
+            continue
+        m = re.match(r"^\s*(?:[-•*]\s*)?([A-Za-z][\w\s'/&-]{0,40})\.?\s*$", line)
+        if not m:
+            continue
+        opt = m.group(1).strip()
+        if len(opt.split()) > 5 or "?" in opt:
+            continue
+        key = _normalize_option_label(opt)
+        if key and key not in seen:
+            seen.add(key)
+            options.append(opt)
+    if len(options) >= 2:
+        return options
+    inline = re.search(
+        r"(?i)(?:pick\s+one|choose\s+(?:any\s+)?one|which\s+one).{0,80}?\bof\b\s+(.+)$",
+        raw,
+    )
+    if inline:
+        chunk = inline.group(1).strip().rstrip("?.!")
+        for part in re.split(r",\s*(?:or\s+)?|\s+or\s+", chunk):
+            opt = part.strip()
+            if opt and len(opt.split()) <= 5:
+                key = _normalize_option_label(opt)
+                if key and key not in seen:
+                    seen.add(key)
+                    options.append(opt)
+    return options
+
+
+def detect_forced_choice(text: str) -> bool:
+    """Bounded option set plus an answering cue — structural, not lexical-only."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if not _FORCED_CHOICE_CUE.search(raw) and not _FORCED_CHOICE_PROMPT.search(raw):
+        return False
+    options = extract_bounded_options(raw)
+    return 2 <= len(options) <= 6
+
+
+def classify_participation_shape(text: str) -> str:
+    """Participation grammar: pick_and_defend | forced_choice | pick_one | \"\"."""
+    if is_provocative_nomination(text):
+        return "pick_and_defend"
+    if detect_forced_choice(text):
+        return "forced_choice"
+    if _PARTICIPATION_ASK.search(text):
+        return "pick_one"
+    return ""
+
+
 # "How come nobody told me?" after discovering a show = holy shit, not a why-question.
 _RHETORICAL_HOW_COME = re.compile(
     r"(?i)("
@@ -698,7 +802,8 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.signals = ["genuine_distress"]
         return out
 
-    if is_provocative_nomination(text):
+    part_shape = classify_participation_shape(text)
+    if part_shape == "pick_and_defend":
         out.mode = "open"
         out.confidence = 0.9
         out.signals = ["provocative_nomination", "pick_and_defend"]
@@ -708,7 +813,17 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
             out.signals.append("thoughts_command")
         return out
 
-    if _PARTICIPATION_ASK.search(text):
+    if part_shape == "forced_choice":
+        out.mode = "direct_participation"
+        out.confidence = 0.9
+        out.signals = ["participation", "forced_choice", "play_the_game"]
+        out.resolution = "choose"
+        out.interaction_shape = "forced_choice"
+        if _USER_INVITES_CHOICE_REJECTION.search(text):
+            out.signals.append("user_invites_rejection")
+        return out
+
+    if part_shape == "pick_one":
         out.mode = "direct_participation"
         out.confidence = 0.95
         out.signals = ["participation", "pick_one"]
@@ -1159,6 +1274,18 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "what they described is resource allocation. Or: they are waiting to feel "
             "like themselves before re-entering, when some of that self only returns "
             "through participation.\n"
+        )
+    if mode.forced_choice or mode.interaction_shape == "forced_choice":
+        return (
+            "\nSOCIAL MODE: forced choice — bounded option set.\n"
+            "PLAY THE GAME: When the user supplies a bounded choice, answer inside that "
+            "frame before adding interpretation. Pick one of the offered options.\n"
+            "Do not sidestep, broaden, or philosophize away the rules of the game. "
+            "Never invent an outside option unless the user explicitly invites rejection "
+            "or challenge.\n"
+            "intent=answer. capability=none. SNAP.\n"
+            "PASS: \"Money.\" / \"Money. Hard to flex loneliness.\"\n"
+            "FAIL: \"I'd sidestep all three and choose freedom.\"\n"
         )
     if mode.pick_and_defend or mode.interaction_shape == "pick_and_defend":
         return (

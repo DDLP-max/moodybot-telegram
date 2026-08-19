@@ -896,6 +896,40 @@ def insight_after_payoff(user_message: str, response: str) -> bool:
     return words > 30
 
 
+_SIDESTEP_FORCED_CHOICE = re.compile(
+    r"(?i)(?:"
+    r"\b(?:sidestep|skip)\s+(?:all\s+three|the\s+options|these)\b|"
+    r"\bchoose\s+freedom\b|"
+    r"\bfreedom\b.{0,40}\b(?:instead|over|rather|than)\b|"
+    r"\b(?:none\s+of\s+(?:these|them)|all\s+three)\b|"
+    r"\b(?:neither|none)\s+(?:of\s+)?(?:them|those|these)\b|"
+    r"\bsomething\s+else\b|\boutside\s+(?:the\s+)?(?:frame|options|choices)\b"
+    r")"
+)
+
+
+def sidesteps_forced_choice(user_message: str, response: str) -> bool:
+    """Bounded choice prompt answered by inventing an outside option."""
+    from capability_detection import (
+        _USER_INVITES_CHOICE_REJECTION,
+        classify_participation_shape,
+        extract_bounded_options,
+    )
+
+    if classify_participation_shape(user_message or "") != "forced_choice":
+        return False
+    if _USER_INVITES_CHOICE_REJECTION.search(user_message or ""):
+        return False
+    options = extract_bounded_options(user_message or "")
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    body_l = body.lower()
+    if options and any(opt.lower() in body_l for opt in options):
+        return False
+    return bool(_SIDESTEP_FORCED_CHOICE.search(body))
+
+
 def restates_runway(user_message: str, response: str) -> bool:
     """First sentence restates the already-articulated thesis (then maybe advances)."""
     ss = _sentences(response or "")
