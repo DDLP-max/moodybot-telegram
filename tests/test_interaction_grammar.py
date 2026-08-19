@@ -5,7 +5,14 @@ from __future__ import annotations
 from capability_detection import classify_comic_bit_shape, classify_social_mode, detect_comic_premise
 from discovery_craft import insight_after_payoff, sidesteps_forced_choice
 from gold_shape import evaluate_gold_shape
-from response_finalization import build_response_plan, plan_runtime_instruction, is_deliverable_response, is_valid_terminal_ack
+from response_finalization import (
+    build_response_plan,
+    plan_runtime_instruction,
+    is_deliverable_response,
+    is_valid_terminal_response,
+    normalize_terminal_response,
+    finalize_response,
+)
 
 ENERGY_DRINK = """An energy drink is $2.50 a day.
 
@@ -85,16 +92,32 @@ def test_energy_drink_is_terminal_bit():
     assert "insight_after_payoff" not in ok
 
 
-def test_terminal_bit_whiskey_ack_passes_delivery_gate():
+def test_terminal_bit_bounded_ack_passes_delivery_gate():
     plan = build_response_plan(ENERGY_DRINK)
     assert plan.interaction_shape == "terminal_bit"
     assert plan.landing == "silence"
-    assert is_valid_terminal_ack(ENERGY_SILENCE, plan) is True
-    assert is_deliverable_response(ENERGY_SILENCE, plan) is True
+
+    for ack in (ENERGY_SILENCE, ENERGY_PASS, "Exactly. 🥃", "Case closed. 🥃"):
+        assert is_valid_terminal_response(ack, plan) is True, ack
+        assert is_deliverable_response(ack, plan) is True, ack
+
+    long_insight = (
+        "Actually, the energy drink represents your inability to surrender hope. 🥃"
+    )
+    assert is_valid_terminal_response(long_insight, plan) is False
+    normalized, collapsed = normalize_terminal_response(long_insight, plan)
+    assert collapsed is True
+    assert normalized == "🥃"
+
+    result = finalize_response(long_insight, ENERGY_DRINK, plan=plan)
+    assert result.text.strip() == "🥃"
+    assert is_deliverable_response(result.text, plan) is True
 
     open_plan = build_response_plan("Why did Game of Thrones season 8 fail?")
-    assert is_valid_terminal_ack(ENERGY_SILENCE, open_plan) is False
+    assert is_valid_terminal_response(ENERGY_SILENCE, open_plan) is False
+    assert is_valid_terminal_response(ENERGY_PASS, open_plan) is False
     assert is_deliverable_response(ENERGY_SILENCE, open_plan) is False
+    assert is_deliverable_response(ENERGY_PASS, open_plan) is False
     assert is_deliverable_response("k", open_plan) is False
 
 

@@ -2595,22 +2595,56 @@ def _normalize_compare(text: str) -> str:
 
 TERMINAL_BIT_ACK = "🥃"
 _MIN_DELIVERABLE_CHARS = 10
+_MAX_TERMINAL_TAG_CHARS = 30
+_MAX_TERMINAL_TAG_WORDS = 3
 
 
-def is_valid_terminal_ack(text: str, plan: object) -> bool:
-    """Whiskey-only acknowledgment is valid for terminal comic payoffs."""
+def is_valid_terminal_response(text: str, plan: object) -> bool:
+    """Whiskey-only or one tiny terminal tag — bounded terminal comic acknowledgment."""
+    if getattr(plan, "interaction_shape", None) != "terminal_bit":
+        return False
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    if cleaned == TERMINAL_BIT_ACK:
+        return True
+    prose = cleaned.replace(TERMINAL_BIT_ACK, "").strip()
+    words = prose.split()
     return (
-        getattr(plan, "interaction_shape", None) == "terminal_bit"
-        and (text or "").strip() == TERMINAL_BIT_ACK
+        cleaned.endswith(TERMINAL_BIT_ACK)
+        and 1 <= len(words) <= _MAX_TERMINAL_TAG_WORDS
+        and len(cleaned) <= _MAX_TERMINAL_TAG_CHARS
+        and "\n" not in cleaned
     )
 
 
+def is_valid_terminal_ack(text: str, plan: object) -> bool:
+    """Backward-compatible alias — prefer is_valid_terminal_response."""
+    return is_valid_terminal_response(text, plan)
+
+
+def normalize_terminal_response(text: str, plan: object) -> Tuple[str, bool]:
+    """Finalizer: valid tiny tags survive; invalid elaborations collapse to whiskey."""
+    if getattr(plan, "interaction_shape", None) != "terminal_bit":
+        return (text or "").strip(), False
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return TERMINAL_BIT_ACK, True
+    if is_valid_terminal_response(cleaned, plan):
+        if cleaned == TERMINAL_BIT_ACK:
+            return TERMINAL_BIT_ACK, False
+        if not cleaned.endswith(TERMINAL_BIT_ACK):
+            return f"{cleaned.rstrip()} {TERMINAL_BIT_ACK}".strip(), False
+        return cleaned, False
+    return TERMINAL_BIT_ACK, True
+
+
 def is_deliverable_response(text: str, plan: object) -> bool:
-    """Telegram send gate — terminal_bit may legally return whiskey-only."""
+    """Telegram send gate — terminal_bit may deliver bounded acknowledgment forms."""
     body = (text or "").strip()
     if not body:
         return False
-    if is_valid_terminal_ack(body, plan):
+    if is_valid_terminal_response(body, plan):
         return True
     return len(body) >= _MIN_DELIVERABLE_CHARS
 
@@ -2797,6 +2831,11 @@ def finalize_response(
 
     if surface_cleaned:
         post_reasons.append("surface_typography")
+
+    if getattr(plan, "interaction_shape", None) == "terminal_bit":
+        text, terminal_collapsed = normalize_terminal_response(text, plan)
+        if terminal_collapsed:
+            post_reasons.append("terminal_ack_collapsed")
 
     post_finalizer_changed = _normalize_compare(body_generated) != _normalize_compare(
         re.sub(r"\s*🥃\s*", " ", text)
