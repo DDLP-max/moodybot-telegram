@@ -249,6 +249,7 @@ class ResponsePlan:
     social_resolution: str = ""  # name | explain | reason | ""
     interaction_shape: str = "open"  # pick_one | why | how_to | open
     tone_source: str = ""  # explicit | social-first | auto-route | classifier
+    premise_guards: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1237,7 +1238,11 @@ def build_response_plan(
         comic.signals = comic.signals or list(social.signals)
         comic.never_cure = True
     log_capability_trace(ht, ep, comic, social)
-    if ht.active and social.mode != "comic" and not social.participation:
+    if social.premise_guards:
+        mechanism_hint = "premise_guard_inherit"
+        if ht.active:
+            ht.confidence = min(ht.confidence, 0.45)
+    if ht.active and social.mode != "comic" and not social.participation and not social.premise_guards:
         # Prefer as supporting (or primary when incentives are the claim)
         if primary in {
             "Hidden Incentive Analysis",
@@ -1335,6 +1340,7 @@ def build_response_plan(
         social_resolution=social.resolution,
         interaction_shape=social.interaction_shape or "open",
         tone_source=tone_source or "",
+        premise_guards=list(social.premise_guards or []),
     )
 
 
@@ -1944,6 +1950,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         getattr(plan, "social_mode_signals", None) or []
     )
     handoff = getattr(plan, "interaction_shape", None) == "comic_handoff"
+    premise_guard = bool(getattr(plan, "premise_guards", None))
     cap = getattr(plan, "primary_capability", None)
     if not cap:
         cap = "none" if (pick_one or awe) else "Everyday Preference Analysis"
@@ -2013,6 +2020,24 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
+    elif premise_guard:
+        guards = ", ".join(getattr(plan, "premise_guards", None) or [])
+        extra = (
+            "\nPREMISE GUARD CONTRACT: User explicitly ruled out: "
+            f"{guards}. Do NOT smuggle those interpretations back under prettier language.\n"
+            "Take the premise seriously. Investigate what changed in the value proposition — "
+            "consumer behavior, cost/benefit, menu vs restaurant — not hidden wound.\n"
+            "Do not introduce wins/losses or scorekeeping frames the user did not use.\n"
+            "FAIL: \"aren't tallying wins and losses\" / \"quiet starts charging interest\" "
+            "when user said Not bitter. Not lonely.\n"
+            "PASS: \"You don't have to hate the restaurant to decide the menu isn't worth the prices anymore.\"\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
     pipeline_bit = (
         "Pipeline: interaction shape → social mode → SNAP. capability=none. "
         "Do not discover a mechanism.\n"
@@ -2025,8 +2050,12 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
                 "Pipeline: comic handoff → inherit premise → complete unresolved beat → SNAP.\n"
                 if handoff
                 else (
+                    "Pipeline: premise guards → inherit stated frame → value proposition → SNAP.\n"
+                    if premise_guard
+                    else (
                     "Pipeline: claim type → lens → question → capability → mechanism → "
                     "Depth × Shape → Gold.\n"
+                    )
                 )
             )
         )
@@ -2040,7 +2069,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + pipeline_bit
         + (
             ""
-            if pick_one or awe or handoff
+            if pick_one or awe or handoff or premise_guard
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "

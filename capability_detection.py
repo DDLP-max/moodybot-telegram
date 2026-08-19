@@ -99,6 +99,12 @@ class SocialModeAnalysis:
     resolution: str = ""
     # pick_one | why | how_to | awe | comic_handoff | open — decided before topical tone
     interaction_shape: str = "open"
+    # Explicit negations the user ruled out — e.g. "Not bitter. Not lonely."
+    premise_guards: List[str] = field(default_factory=list)
+
+    @property
+    def guarded_observation(self) -> bool:
+        return bool(self.premise_guards) or "premise_guards" in self.signals
 
     @property
     def comic(self) -> bool:
@@ -504,6 +510,33 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
     return out
 
 
+_PREMISE_GUARD_LINE = re.compile(
+    r"(?im)^\s*not\s+(?P<guard>[a-z][a-z\s'-]{0,24})\.?\s*$"
+)
+_PREMISE_GUARD_INLINE = re.compile(
+    r"(?i)\bnot\s+(bitter|lonely|angry|hurt|broken|sad|depressed|desperate|scared|afraid)\b"
+)
+
+
+def extract_premise_guards(user_message: str) -> List[str]:
+    """Explicit negations the user ruled out — Not bitter. Not lonely."""
+    text = (user_message or "").strip()
+    if not text:
+        return []
+    guards: List[str] = []
+    for line in re.split(r"[\n\r]+", text):
+        m = _PREMISE_GUARD_LINE.match(line.strip())
+        if m:
+            g = m.group("guard").strip().lower()
+            if g and g not in guards:
+                guards.append(g)
+    for m in _PREMISE_GUARD_INLINE.finditer(text):
+        g = m.group(1).lower()
+        if g not in guards:
+            guards.append(g)
+    return guards
+
+
 def classify_social_mode(user_message: str) -> SocialModeAnalysis:
     """First routing question: what kind of human moment is this?
 
@@ -514,6 +547,11 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
     out = SocialModeAnalysis()
     if not text:
         return out
+
+    premise_guards = extract_premise_guards(text)
+    if premise_guards:
+        out.premise_guards = premise_guards
+        out.signals.append("premise_guards")
 
     signals: List[str] = []
 
@@ -608,6 +646,12 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.mode = "observation"
         out.confidence = 0.7
         out.signals = ["articulated_thesis"]
+        return out
+
+    if premise_guards and len(sentences) >= 2:
+        out.mode = "observation"
+        out.confidence = 0.85
+        out.signals = list(dict.fromkeys(out.signals + ["guarded_observation"]))
         return out
 
     out.mode = "open"
@@ -861,6 +905,22 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "PASS: \"They mapped the human genome before solving this.\"\n"
             "FAIL: \"That's like saying the ideal woman is the one who still thinks "
             "Friday night doesn't need a second act.\" (abstraction; ignored the open slot)\n"
+        )
+    guards = list(getattr(mode, "premise_guards", None) or [])
+    if guards or "premise_guards" in (mode.signals or []):
+        guard_list = ", ".join(guards) if guards else "stated negations"
+        return (
+            "\nSOCIAL MODE: guarded observation — user explicitly ruled out interpretations.\n"
+            f"Premise guards (do NOT smuggle back): {guard_list}.\n"
+            "DON'T SECRETLY REVERSE THE PREMISE. Take the stated frame seriously. "
+            "Investigate what changed in the perceived value proposition — "
+            "not hidden wound, loneliness, or bitterness unless the user invites challenge.\n"
+            "Do not introduce game/scorekeeping frames the user did not use "
+            "(wins and losses, tallying, charging interest on quiet).\n"
+            "FAIL: user says Not bitter. Not lonely. → "
+            "\"aren't tallying wins and losses\" / \"quiet starts charging interest.\"\n"
+            "PASS: \"You don't have to hate the restaurant to decide the menu isn't worth the prices anymore. "
+            "Opting out stops being a cry for help and becomes consumer behavior.\"\n"
         )
     if m == "comic":
         return (

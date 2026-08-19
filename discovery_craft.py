@@ -758,6 +758,70 @@ def rejects_absurd_premise(user_message: str, response: str) -> bool:
     return bool(_PREMISE_REJECTION.search(body))
 
 
+_GUARD_SMUGGLE: dict[str, tuple[str, ...]] = {
+    "bitter": (
+        r"\bwins?\s+and\s+losses\b",
+        r"\btally(?:ing)?\b",
+        r"\bscorekeeping\b",
+        r"\bresentment\b",
+        r"\bbitter\b",
+    ),
+    "lonely": (
+        r"\blonely\b",
+        r"\balone\b",
+        r"\bisolation\b",
+        r"\bquiet\b.{0,48}\b(charg(?:e|es|ing)|interest|collects)\b",
+        r"\blet\s+down\b",
+        r"\blanded\s+so\s+hard\b",
+        r"\bvoid\b",
+        r"\bemptiness\b",
+    ),
+    "angry": (r"\brage\b", r"\bfury\b", r"\bresentment\b"),
+    "hurt": (r"\bwound(?:ed)?\b", r"\bhurt\b", r"\bache\b", r"\bpain\b"),
+    "sad": (r"\bsad\b", r"\bgrief\b", r"\bmelanchol\b"),
+    "depressed": (r"\bdepress", r"\bdespair\b"),
+}
+
+_PREMISE_WOUND_REFRAME = re.compile(
+    r"\b("
+    r"refusing\s+to\s+keep\s+offering|"
+    r"right\s+to\s+be\s+let\s+down|"
+    r"offering\s+the\s+last\s+thing|"
+    r"protect(?:ing)?\s+(?:themselves|yourself)|"
+    r"without\s+having\s+to\s+explain\s+why\s+it\s+landed"
+    r")\b",
+    re.I,
+)
+
+
+def reverses_premise_guard(user_message: str, response: str) -> bool:
+    """Smuggled back an interpretation the user explicitly ruled out."""
+    from capability_detection import extract_premise_guards
+
+    guards = extract_premise_guards(user_message or "")
+    if not guards:
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    rl = body.lower()
+    for guard in guards:
+        for pat in _GUARD_SMUGGLE.get(guard, (rf"\b{re.escape(guard)}\b",)):
+            if re.search(pat, body, re.I):
+                return True
+    if re.search(r"\bnot\s+worth\s+it\b", user_message or "", re.I):
+        if _PREMISE_WOUND_REFRAME.search(body):
+            return True
+        if re.search(r"\bwins?\s+and\s+losses\b", body, re.I):
+            return True
+        # Smuggles loneliness only when affirming cry-for-help framing, not negating it
+        if re.search(r"\bcry\s+for\s+help\b", body, re.I) and not re.search(
+            r"\b(not|n't|stops?\s+being)\s+(?:a\s+)?cry\s+for\s+help\b", body, re.I
+        ):
+            return True
+    return False
+
+
 def missed_comic_handoff(user_message: str, response: str) -> bool:
     """User opened a slot (but alas…) and Moody started a separate observation."""
     from capability_detection import classify_social_mode

@@ -387,6 +387,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             overperformance,
             rhetorical_explained,
             missed_comic_handoff,
+            reverses_premise_guard,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -432,6 +433,18 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             )
         else:
             add("Unsupported depth", "pass", "no foreign concept cluster on a comic premise")
+        if reverses_premise_guard(prompt, out) or "premise_reversal" in failures:
+            add(
+                "Premise guard",
+                "fail",
+                "smuggled back an interpretation the user explicitly ruled out — don't secretly reverse the premise",
+                examples=[
+                    "✗ Not bitter. Not lonely. → quiet starts charging interest",
+                    "✓ menu isn't worth the prices anymore — consumer behavior, not hidden wound",
+                ],
+            )
+        else:
+            add("Premise guard", "pass", "respected explicit premise negations")
         if restates_runway(prompt, out) or "runway_restatement" in failures:
             add(
                 "Start where the post stops",

@@ -14,7 +14,7 @@ Paired with:
 """
 from __future__ import annotations
 
-from capability_detection import classify_social_mode, detect_comic_premise
+from capability_detection import classify_social_mode, detect_comic_premise, extract_premise_guards
 from discovery_craft import (
     parroting,
     psychologizing,
@@ -26,6 +26,7 @@ from discovery_craft import (
     rhetorical_explained,
     missed_comic_handoff,
     rejects_absurd_premise,
+    reverses_premise_guard,
 )
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
@@ -636,6 +637,54 @@ def test_bowling_alas_is_comic_handoff():
     assert "that's like saying" in guide
 
 
+DATING_MEN = (
+    "The number of MEN done with dating right now is insane.\n\n"
+    "Not bitter. Not lonely.\n\n"
+    "They just realized.. it's not worth it."
+)
+DATING_FAIL = (
+    "The men stepping away aren't tallying wins and losses. They're just refusing to keep "
+    "offering the last thing that still feels like theirs, the right to be let down without "
+    "having to explain why it landed so hard. It starts as a clean break from the whole game. "
+    "Then the quiet starts charging interest. 🥃"
+)
+DATING_PASS = (
+    "Maybe that's the part people keep missing. You don't have to hate the restaurant to decide "
+    "the menu isn't worth the prices anymore. At some point opting out stops being a cry for "
+    "help and becomes consumer behavior. 🥃"
+)
+
+
+def test_dating_men_respects_premise_guards():
+    """Not bitter. Not lonely. → don't smuggle wound/loneliness back in."""
+    guards = extract_premise_guards(DATING_MEN)
+    assert "bitter" in guards
+    assert "lonely" in guards
+    social = classify_social_mode(DATING_MEN)
+    assert social.premise_guards
+    assert "premise_guards" in social.signals
+    assert social.mode == "observation"
+    plan = build_response_plan(DATING_MEN)
+    assert plan.premise_guards
+    assert plan.mechanism_hint == "premise_guard_inherit"
+
+    assert reverses_premise_guard(DATING_MEN, DATING_FAIL) is True
+    assert reverses_premise_guard(DATING_MEN, DATING_PASS) is False
+    fails = evaluate_gold_shape(DATING_MEN, DATING_FAIL, "SNAP")
+    assert "premise_reversal" in fails
+    ok = evaluate_gold_shape(DATING_MEN, DATING_PASS, "SNAP")
+    assert "premise_reversal" not in ok
+
+    insp = _inspect(DATING_MEN, DATING_FAIL)
+    assert _checks(insp)["Premise guard"]["status"] == "fail"
+    insp_ok = _inspect(DATING_MEN, DATING_PASS)
+    assert _checks(insp_ok)["Premise guard"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "premise guard" in guide or "don't secretly reverse" in guide
+    assert "bitter" in guide or "lonely" in guide
+
+
 if __name__ == "__main__":
     test_burnout_is_vulnerability_not_comic()
     test_flock_and_stocks_are_comic_bits()
@@ -659,4 +708,5 @@ if __name__ == "__main__":
     test_got_season_8_is_a_real_why_not_awe()
     test_hvac_ocean_inherits_the_absurd_premise()
     test_bowling_alas_is_comic_handoff()
+    test_dating_men_respects_premise_guards()
     print("ok")

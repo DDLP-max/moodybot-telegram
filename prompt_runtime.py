@@ -240,6 +240,9 @@ def select_guidance_modules(
     paths: List[str] = []
     signals = list(signals or getattr(plan, "social_mode_signals", None) or [])
 
+    if getattr(plan, "premise_guards", None) or "premise_guards" in signals:
+        paths.append("10_testing-quality/failure-patterns.md")
+
     shape = getattr(plan, "interaction_shape", None) or "open"
     if shape in INTERACTION_SHAPE_MODULES:
         paths.append(INTERACTION_SHAPE_MODULES[shape])
