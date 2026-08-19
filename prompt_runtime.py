@@ -204,6 +204,20 @@ def runtime_core_hash() -> str:
     return hashlib.sha256(core.encode("utf-8")).hexdigest()[:16]
 
 
+def format_module_names(module_paths: Sequence[str]) -> str:
+    """Short corpus filenames for production logs — e.g. [failure-patterns, humor-as-disruption]."""
+    names: List[str] = []
+    for rel in module_paths:
+        if not rel:
+            continue
+        stem = Path(rel).stem
+        if stem and stem not in names:
+            names.append(stem)
+    if not names:
+        return "modules=[]"
+    return "modules=[" + ", ".join(names) + "]"
+
+
 def _dedupe_paths(paths: Iterable[str]) -> List[str]:
     seen: set[str] = set()
     out: List[str] = []

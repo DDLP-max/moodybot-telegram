@@ -107,6 +107,17 @@ def test_plan_runtime_instruction_slimmer_than_legacy_closer():
     assert runtime_len < 8_000
 
 
+def test_format_module_names():
+    from prompt_runtime import format_module_names
+
+    label = format_module_names([
+        "10_testing-quality/failure-patterns.md",
+        "2_intelligence-engine/capabilities/humor-as-disruption.md",
+    ])
+    assert label == "modules=[failure-patterns, humor-as-disruption]"
+    assert format_module_names([]) == "modules=[]"
+
+
 if __name__ == "__main__":
     test_runtime_core_is_stable_and_smaller_than_full_corpus()
     test_full_compiled_corpus_never_used_in_runtime_payload()

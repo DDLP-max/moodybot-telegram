@@ -885,7 +885,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         source,
     )
 
-    from prompt_runtime import build_openrouter_messages, build_runtime_prompt
+    from prompt_runtime import (
+        build_openrouter_messages,
+        build_runtime_prompt,
+        format_module_names,
+    )
 
     response_plan = build_response_plan(
         user_input,
@@ -921,13 +925,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         structure_prompt=inject_prompt or "",
     )
     p_hash = runtime.prompt_hash
+    module_label = format_module_names(runtime.module_paths)
     logger.info(
-        "[update %s] Prompt runtime: core_hash=%s prompt_hash=%s modules=%s "
+        "[update %s] Prompt runtime: core_hash=%s prompt_hash=%s %s "
         "est_input_tokens=%s",
         update_id,
         runtime.core_hash,
         p_hash,
-        runtime.module_paths,
+        module_label,
         runtime.estimated_input_tokens(user_input),
     )
     messages = build_openrouter_messages(runtime, user_input)
@@ -949,7 +954,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "[update %s] OpenRouter payload model=%s model_call=%s/%s "
             "core_chars=%s modules_chars=%s guidance_chars=%s structure_chars=%s "
             "history_chars=%s current_message_chars=%s history_messages=%s "
-            "system_messages=%s examples=%s module_count=%s total_payload_chars=%s "
+            "system_messages=%s examples=%s %s total_payload_chars=%s "
             "est_input_tokens=%s core_hash=%s prompt_hash=%s",
             update_id,
             OPENROUTER_MODEL,
@@ -964,7 +969,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             payload_diag["number_of_history_messages"],
             payload_diag["number_of_system_messages"],
             payload_diag["number_of_examples"],
-            len(runtime.module_paths),
+            module_label,
             payload_diag["total_payload_chars"],
             runtime.estimated_input_tokens(user_input),
             runtime.core_hash,
