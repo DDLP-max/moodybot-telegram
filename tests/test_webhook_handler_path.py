@@ -188,6 +188,41 @@ def test_sanitize_openrouter_keeps_error():
     assert fields["request_id"] == "gen-abc"
 
 
+def test_payload_diagnostics_static_corpus():
+    diag = moodybot._payload_diagnostics(
+        core="A" * 1000,
+        modules="B" * 200,
+        guidance="C" * 50,
+        structure_prompt="D" * 25,
+        user_input="hello",
+    )
+    assert diag["core_chars"] == 1000
+    assert diag["modules_chars"] == 200
+    assert diag["guidance_chars"] == 50
+    assert diag["structure_chars"] == 25
+    assert diag["current_message_chars"] == 5
+    assert diag["number_of_history_messages"] == 0
+    assert diag["number_of_system_messages"] == 4
+    assert diag["total_payload_chars"] == 1280
+
+
+def test_openrouter_usage_fields():
+    usage = moodybot._openrouter_usage_fields(
+        {
+            "usage": {
+                "prompt_tokens": 72000,
+                "completion_tokens": 120,
+                "total_tokens": 72120,
+                "prompt_tokens_details": {"cached_tokens": 5000},
+            }
+        }
+    )
+    assert usage["input_tokens"] == 72000
+    assert usage["cached_tokens"] == 5000
+    assert usage["output_tokens"] == 120
+    assert usage["total_tokens"] == 72120
+
+
 if __name__ == "__main__":
     test_openrouter_error_sends_scrambled_and_logs_status()
     print("ok scramble")

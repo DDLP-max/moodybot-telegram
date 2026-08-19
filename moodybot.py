@@ -31,8 +31,6 @@ from message_utils import send_message, send_simple_message, resolve_mode, maybe
 from response_finalization import (
     build_response_plan,
     finalize_response,
-    plan_closer_instruction,
-    prompt_content_hash,
 )
 from gold_shape import paragraph_count
 from telegram_lifecycle import (
@@ -737,6 +735,88 @@ def _sanitize_openrouter_payload(payload: object) -> object:
     return out
 
 
+def _openrouter_usage_fields(payload: object) -> dict:
+    """Extract token usage from an OpenRouter chat completion response."""
+    empty = {
+        "input_tokens": None,
+        "cached_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+    }
+    if not isinstance(payload, dict):
+        return empty
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return empty
+    prompt_details = usage.get("prompt_tokens_details")
+    cached = None
+    if isinstance(prompt_details, dict):
+        cached = prompt_details.get("cached_tokens")
+    return {
+        "input_tokens": usage.get("prompt_tokens"),
+        "cached_tokens": cached,
+        "output_tokens": usage.get("completion_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+    }
+
+
+def _count_pass_fail_examples(text: str) -> int:
+    import re
+
+    if not text:
+        return 0
+    return len(re.findall(r"\bPASS:", text)) + len(re.findall(r"\bFAIL:", text))
+
+
+def _payload_diagnostics(
+    *,
+    core: str,
+    modules: str = "",
+    guidance: str,
+    structure_prompt: str = "",
+    user_input: str = "",
+    history_messages: list | None = None,
+) -> dict:
+    """Measure OpenRouter request payload before send (no secrets)."""
+    history_messages = history_messages or []
+    history_chars = sum(len(m.get("content") or "") for m in history_messages)
+    core_text = core or ""
+    modules_text = modules or ""
+    guidance_text = guidance or ""
+    structure_text = structure_prompt or ""
+    current_message_chars = len(user_input or "")
+    guidance_examples = _count_pass_fail_examples(guidance_text)
+    structure_examples = _count_pass_fail_examples(structure_text)
+    modules_examples = _count_pass_fail_examples(modules_text)
+    core_examples = _count_pass_fail_examples(core_text)
+    system_message_count = 2 + (1 if modules_text else 0) + (1 if structure_text else 0)
+    return {
+        "core_chars": len(core_text),
+        "system_prompt_chars": len(core_text),
+        "modules_chars": len(modules_text),
+        "guidance_chars": len(guidance_text),
+        "structure_chars": len(structure_text),
+        "history_chars": history_chars,
+        "current_message_chars": current_message_chars,
+        "number_of_history_messages": len(history_messages),
+        "number_of_system_messages": system_message_count,
+        "number_of_examples": (
+            guidance_examples + structure_examples + modules_examples + core_examples
+        ),
+        "guidance_examples": guidance_examples,
+        "structure_examples": structure_examples,
+        "system_prompt_examples": core_examples,
+        "total_payload_chars": (
+            len(core_text)
+            + len(modules_text)
+            + len(guidance_text)
+            + len(structure_text)
+            + history_chars
+            + current_message_chars
+        ),
+    }
+
+
 OPENROUTER_MODEL = "x-ai/grok-4.3"
 
 
@@ -805,8 +885,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         source,
     )
 
-    system_prompt = load_system_prompt()
-    p_hash = prompt_content_hash(system_prompt)
+    from prompt_runtime import build_openrouter_messages, build_runtime_prompt
+
     response_plan = build_response_plan(
         user_input,
         selected_command=selected_command,
@@ -816,8 +896,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     logger.info(
         "[update %s] Response plan: social_mode=%s interaction_shape=%s intent=%s "
-        "capability=%s tone=%s tone_source=%s response_budget=%s structure=%s "
-        "prompt_hash=%s",
+        "capability=%s tone=%s tone_source=%s response_budget=%s structure=%s",
         update_id,
         response_plan.social_mode,
         getattr(response_plan, "interaction_shape", None) or "open",
@@ -827,39 +906,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         getattr(response_plan, "tone_source", None) or source,
         getattr(response_plan, "response_budget", None) or "",
         response_plan.routed_structure or response_plan.preferred_structure,
-        p_hash,
     )
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_input},
-    ]
 
     inject_prompt = None
     if not (social.blocks_topical_auto_route and not typed_slash):
         inject_prompt = structure_prompt_for(
             selected_command, social=social, plan=response_plan
         )
-    if inject_prompt:
-        messages.insert(0, {
-            "role": "system",
-            "content": inject_prompt
-        })
 
-    # Closing strategy is an explicit runtime decision (enforced again after generation).
-    messages.insert(
-        0,
-        {"role": "system", "content": plan_closer_instruction(response_plan)},
+    runtime = build_runtime_prompt(
+        response_plan,
+        social=social,
+        selected_command=selected_command,
+        structure_prompt=inject_prompt or "",
     )
+    p_hash = runtime.prompt_hash
+    logger.info(
+        "[update %s] Prompt runtime: core_hash=%s prompt_hash=%s modules=%s "
+        "est_input_tokens=%s",
+        update_id,
+        runtime.core_hash,
+        p_hash,
+        runtime.module_paths,
+        runtime.estimated_input_tokens(user_input),
+    )
+    messages = build_openrouter_messages(runtime, user_input)
 
     stage = "before_openrouter"
+    model_calls_for_update = 0
     try:
         stage = "openrouter_request"
+        model_calls_for_update += 1
+        payload_diag = _payload_diagnostics(
+            core=runtime.core,
+            modules=runtime.modules_text,
+            guidance=runtime.runtime_instruction,
+            structure_prompt=runtime.structure_prompt,
+            user_input=user_input,
+        )
         t0 = time.monotonic()
         logger.info(
-            "[update %s] OpenRouter request started model=%s",
+            "[update %s] OpenRouter payload model=%s model_call=%s/%s "
+            "core_chars=%s modules_chars=%s guidance_chars=%s structure_chars=%s "
+            "history_chars=%s current_message_chars=%s history_messages=%s "
+            "system_messages=%s examples=%s module_count=%s total_payload_chars=%s "
+            "est_input_tokens=%s core_hash=%s prompt_hash=%s",
             update_id,
             OPENROUTER_MODEL,
+            model_calls_for_update,
+            model_calls_for_update,
+            payload_diag["core_chars"],
+            payload_diag["modules_chars"],
+            payload_diag["guidance_chars"],
+            payload_diag["structure_chars"],
+            payload_diag["history_chars"],
+            payload_diag["current_message_chars"],
+            payload_diag["number_of_history_messages"],
+            payload_diag["number_of_system_messages"],
+            payload_diag["number_of_examples"],
+            len(runtime.module_paths),
+            payload_diag["total_payload_chars"],
+            runtime.estimated_input_tokens(user_input),
+            runtime.core_hash,
+            p_hash,
         )
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -903,14 +1012,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 and bool(result["choices"])
             )
             if response.status_code < 400 and has_choices:
+                usage = _openrouter_usage_fields(result)
                 logger.info(
                     "[update %s] OpenRouter response received status=%s latency_ms=%.0f "
-                    "model=%s choices=%s",
+                    "model=%s choices=%s model_calls=%s input_tokens=%s cached_tokens=%s "
+                    "output_tokens=%s total_tokens=%s",
                     update_id,
                     response.status_code,
                     latency_ms,
                     OPENROUTER_MODEL,
                     len(result["choices"]),
+                    model_calls_for_update,
+                    usage["input_tokens"],
+                    usage["cached_tokens"],
+                    usage["output_tokens"],
+                    usage["total_tokens"],
                 )
             else:
                 logger.error(

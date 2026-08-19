@@ -1260,6 +1260,12 @@ def build_response_plan(
         supporting = "Bit Continuation"
         mechanism_hint = "comic_premise_continuation"
         # Keep SNAP/low fine for tags — guidance forbids curing the premise
+        if social.comic_handoff:
+            mechanism_hint = "comic_handoff_complete"
+            preferred_structure = "SNAP"
+            response_budget = "low"
+            topic_mode = "compress"
+            landing = "body_ends_response"
     if social.participation:
         preferred_structure = "SNAP"
         response_budget = "low"
@@ -1449,7 +1455,9 @@ PASS: premise already established → new inference → payoff → exit.
 Three failures of "every input deserves an insight":
 PARROTING — prettier restatement of what the user already said (burnout → "survival mode is the only operating system left").
 PSYCHOLOGIZING — converting a joke into an unwanted diagnosis (Flock-camera joke → "whether the house still belongs to you"; fake-fate vice joke → invented guilt).
-UNSUPPORTED DEPTH — manufacturing profundity with no textual basis (name-formula joke → "put a leash on something that won't wear one").
+UNSUPPORTED DEPTH — manufacturing profundity with no textual basis (name-formula joke → "put a leash on something that won't wear one"; HVAC hum = ocean → "The hum isn't the ocean").
+DON'T CORRECT THE ABSURD PREMISE. INHERIT IT. When HVAC is the ocean, the ocean gets uptime.
+COMIC HANDOFF — "but alas…" / "and yet…" / trailing ellipsis is an unfinished slot. Complete the implied beat. Do not start a separate "That's like saying…" observation.
 OVERPERFORMANCE — spending intelligence the interaction didn't ask for ("name an actor" → film-criticism closing narration; rhetorical how-come → invented causal theory).
 
 RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
@@ -1900,8 +1908,22 @@ def lens_voice_guidance(lens: str) -> str:
     return ""
 
 
+def plan_runtime_instruction(plan: ResponsePlan) -> str:
+    """Per-turn runtime contract — assumes Moody core + selected modules are already loaded."""
+    return _plan_turn_instruction(plan)
+
+
 def plan_closer_instruction(plan: ResponsePlan) -> str:
-    """Generation guidance — perspective → capability → mechanism → Gold."""
+    """Legacy full guidance (core write + turn). Not used in Prompt Runtime v1 production."""
+    return (
+        CORE_WRITE_DIRECTIVE
+        + f"\n{LENS_PERSISTENCE_INVARIANT}\n"
+        + _plan_turn_instruction(plan)
+    )
+
+
+def _plan_turn_instruction(plan: ResponsePlan) -> str:
+    """Dynamic turn routing — perspective → capability → mechanism → shape."""
     extra = ""
     if plan.needs_practical_action:
         extra = "\nUser asked for action — include a concrete next step before 🥃. No quiz question."
@@ -1921,6 +1943,7 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
     awe = getattr(plan, "interaction_shape", None) == "awe" or "rhetorical" in (
         getattr(plan, "social_mode_signals", None) or []
     )
+    handoff = getattr(plan, "interaction_shape", None) == "comic_handoff"
     cap = getattr(plan, "primary_capability", None)
     if not cap:
         cap = "none" if (pick_one or awe) else "Everyday Preference Analysis"
@@ -1975,31 +1998,49 @@ def plan_closer_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
+    elif handoff:
+        extra = (
+            "\nCOMIC HANDOFF CONTRACT: inherit the sentence and complete the implied beat. "
+            "Do not start a separate observation. Do not open with \"That's like saying…\". "
+            "The tag should click before it needs explaining.\n"
+            "PASS: \"…we apparently spent all the R&D money on AI girlfriends.\"\n"
+            "FAIL: \"That's like saying the ideal woman is the one who still thinks "
+            "Friday night doesn't need a second act.\"\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
     pipeline_bit = (
         "Pipeline: interaction shape → social mode → SNAP. capability=none. "
         "Do not discover a mechanism.\n"
-        if pick_one
+            if pick_one
         else (
             "Pipeline: interaction shape → /cinema may color → SNAP. "
             "Do not explain the rhetorical how-come.\n"
             if awe
             else (
-                "Pipeline: claim type → lens → question → capability → mechanism → "
-                "Depth × Shape → Gold.\n"
+                "Pipeline: comic handoff → inherit premise → complete unresolved beat → SNAP.\n"
+                if handoff
+                else (
+                    "Pipeline: claim type → lens → question → capability → mechanism → "
+                    "Depth × Shape → Gold.\n"
+                )
             )
         )
     )
     return (
-        CORE_WRITE_DIRECTIVE
-        + f"\n{LENS_PERSISTENCE_INVARIANT}\n"
-        + f"Interpretive lens (Identity, locked): {lens}. Capability (Intelligence): {cap}."
+        f"RUNTIME TURN (this reply only):\n"
+        f"Interpretive lens (Identity, locked): {lens}. Capability (Intelligence): {cap}."
         + f"{voice_bit}{struct_bit}{mech_bit}{budget_bit} Claim type: {domain}."
         + q_bit
         + family_bit
         + pipeline_bit
         + (
             ""
-            if pick_one or awe
+            if pick_one or awe or handoff
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
