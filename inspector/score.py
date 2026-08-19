@@ -388,6 +388,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             rhetorical_explained,
             missed_comic_handoff,
             reverses_premise_guard,
+            uninvited_corrective_analysis,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -445,6 +446,18 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             )
         else:
             add("Premise guard", "pass", "respected explicit premise negations")
+        if uninvited_corrective_analysis(prompt, out) or "corrective_analysis" in failures:
+            add(
+                "Social before correction",
+                "fail",
+                "uninvited Bench-mode motive prosecution on a casual throwaway generalization",
+                examples=[
+                    "✗ The payoff in calling most women batshit crazy is that it turns every bad outcome into evidence…",
+                    "✓ Most is doing enough work in that sentence to qualify for overtime.",
+                ],
+            )
+        else:
+            add("Social before correction", "pass", "did not default to corrective analysis")
         if restates_runway(prompt, out) or "runway_restatement" in failures:
             add(
                 "Start where the post stops",

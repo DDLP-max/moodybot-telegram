@@ -461,6 +461,7 @@ def evaluate_gold_shape(
             rhetorical_explained,
             missed_comic_handoff,
             reverses_premise_guard,
+            uninvited_corrective_analysis,
         )
         from capability_detection import detect_comic_premise
 
@@ -487,6 +488,8 @@ def evaluate_gold_shape(
             failures.append("missed_handoff")
         if reverses_premise_guard(user_message, body):
             failures.append("premise_reversal")
+        if uninvited_corrective_analysis(user_message, body):
+            failures.append("corrective_analysis")
     except Exception:
         pass
 

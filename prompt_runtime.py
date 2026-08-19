@@ -97,6 +97,7 @@ COMMAND_MODULES: dict[str, str] = {
 SOCIAL_MODE_MODULES: dict[str, str] = {
     "comic": "10_testing-quality/failure-patterns.md",
     "provocation": "9_response-engine/insight-first.md",
+    "provocative_generalization": "10_testing-quality/failure-patterns.md",
     "vulnerability": "9_response-engine/recognition-callbacks.md",
 }
 

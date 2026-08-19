@@ -67,6 +67,7 @@ class ComicPremiseAnalysis:
 SOCIAL_MODES = (
     "comic",
     "provocation",
+    "provocative_generalization",
     "vulnerability",
     "question",
     "direct_participation",
@@ -342,6 +343,16 @@ _PROVOCATION_CRUDE = re.compile(
     r"whores?|sluts?"
     r")\b",
     re.I,
+)
+# Casual throwaway demographic generalization — social banter, not bench/analysis.
+_PROVOCATIVE_GENERALIZATION = re.compile(
+    r"(?i)("
+    r"i'?ve\s+come\s+to\s+the\s+conclusion|"
+    r"i'?m\s+convinced\s+(?:that\s+)?|"
+    r"most\s+(?:women|men|people|guys|girls|dudes|chicks)\s+(?:are|is)\b|"
+    r"(?:women|men|people|guys|girls)\s+are\s+(?:all\s+)?(?:batshit|crazy|insane|the\s+worst)|"
+    r"batshit\s+crazy"
+    r")"
 )
 _QUESTION_SHAPE = re.compile(
     r"^\s*(?:how|what|why|when|where|should|do|does|can|is|are)\b|[?]\s*$",
@@ -623,6 +634,12 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.mode = "provocation"
         out.confidence = 0.7
         out.signals = ["crude_provocation"]
+        return out
+
+    if _PROVOCATIVE_GENERALIZATION.search(text) and "?" not in text:
+        out.mode = "provocative_generalization"
+        out.confidence = 0.85
+        out.signals = ["provocative_generalization", "casual_throwaway"]
         return out
 
     # Complete observational take — already built the runway
@@ -962,6 +979,23 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "when the crude surface actually contains a body, a risk, a want.\n"
             "PASS: \"…two people admit the body is a liability they can't outrun "
             "and still want the night anyway.\"\n"
+        )
+    if m == "provocative_generalization":
+        return (
+            "\nSOCIAL MODE: provocative generalization — casual throwaway, not thesis defense.\n"
+            "SOCIAL HANDLING BEFORE EPISTEMIC CORRECTION. Do not default to Bench mode.\n"
+            "Do not adjudicate whether the proposition is epistemically sound unless invited.\n"
+            "Do not impute motive: no \"the payoff in calling/believing…\", "
+            "\"you tell yourself…\", \"what this lets you do…\", "
+            "\"turns every bad outcome into evidence\".\n"
+            "Better moves: tease the framing, play with the exaggeration, lightly qualify "
+            "\"most\", ask what pushed them over the edge — stay conversational. SNAP.\n"
+            "Neither endorse the generalization as fact nor become Matt's therapist.\n"
+            "FAIL: \"The payoff in calling most women batshit crazy is that it turns "
+            "every bad outcome into evidence and every good one into an exception…\"\n"
+            "PASS: \"Most is doing enough work in that sentence to qualify for overtime.\"\n"
+            "PASS: \"I like that you're presenting this as the sober conclusion of a "
+            "longitudinal study.\"\n"
         )
     if m == "vulnerability":
         return (

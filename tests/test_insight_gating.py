@@ -27,6 +27,7 @@ from discovery_craft import (
     missed_comic_handoff,
     rejects_absurd_premise,
     reverses_premise_guard,
+    uninvited_corrective_analysis,
 )
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
@@ -685,6 +686,50 @@ def test_dating_men_respects_premise_guards():
     assert "bitter" in guide or "lonely" in guide
 
 
+BATSHIT_GENERALIZATION = (
+    "I've come to the conclusion that most women are batshit crazy."
+)
+BATSHIT_FAIL = (
+    "The payoff in calling most women batshit crazy is that it turns every bad outcome "
+    "into evidence and every good one into an exception you don't have to explain. 🥃"
+)
+BATSHIT_PASS_OVERTIME = (
+    "Most is doing enough work in that sentence to qualify for overtime. 🥃"
+)
+BATSHIT_PASS_STUDY = (
+    "I like that you're presenting this as the sober conclusion of a longitudinal study. 🥃"
+)
+
+
+def test_batshit_generalization_social_before_correction():
+    """Provocative throwaway → tease framing, not Bench-mode motive prosecution."""
+    social = classify_social_mode(BATSHIT_GENERALIZATION)
+    assert social.mode == "provocative_generalization"
+    assert "provocative_generalization" in social.signals
+    plan = build_response_plan(BATSHIT_GENERALIZATION)
+    assert plan.social_mode == "provocative_generalization"
+    assert plan.primary_capability == "Humor As Disruption"
+    assert plan.mechanism_hint == "social_banter_not_bench"
+    assert plan.preferred_structure == "SNAP"
+
+    assert uninvited_corrective_analysis(BATSHIT_GENERALIZATION, BATSHIT_FAIL) is True
+    assert uninvited_corrective_analysis(BATSHIT_GENERALIZATION, BATSHIT_PASS_OVERTIME) is False
+    assert uninvited_corrective_analysis(BATSHIT_GENERALIZATION, BATSHIT_PASS_STUDY) is False
+    fails = evaluate_gold_shape(BATSHIT_GENERALIZATION, BATSHIT_FAIL, "SNAP")
+    assert "corrective_analysis" in fails
+    ok = evaluate_gold_shape(BATSHIT_GENERALIZATION, BATSHIT_PASS_STUDY, "SNAP")
+    assert "corrective_analysis" not in ok
+
+    insp = _inspect(BATSHIT_GENERALIZATION, BATSHIT_FAIL)
+    assert _checks(insp)["Social before correction"]["status"] == "fail"
+    insp_ok = _inspect(BATSHIT_GENERALIZATION, BATSHIT_PASS_OVERTIME)
+    assert _checks(insp_ok)["Social before correction"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "social handling" in guide or "epistemic correction" in guide
+    assert "payoff in calling" in guide
+
+
 if __name__ == "__main__":
     test_burnout_is_vulnerability_not_comic()
     test_flock_and_stocks_are_comic_bits()
@@ -709,4 +754,5 @@ if __name__ == "__main__":
     test_hvac_ocean_inherits_the_absurd_premise()
     test_bowling_alas_is_comic_handoff()
     test_dating_men_respects_premise_guards()
+    test_batshit_generalization_social_before_correction()
     print("ok")

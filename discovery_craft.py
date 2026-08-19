@@ -822,6 +822,32 @@ def reverses_premise_guard(user_message: str, response: str) -> bool:
     return False
 
 
+_CORRECTIVE_PROSECUTION = re.compile(
+    r"(?i)("
+    r"the\s+payoff\s+in\s+(?:calling|believing|saying|thinking|claiming)|"
+    r"what\s+this\s+(?:lets|allows)\s+you\s+(?:do|avoid)|"
+    r"you\s+tell\s+yourself|"
+    r"turns?\s+every\s+bad\s+outcome\s+into\s+evidence|"
+    r"every\s+good\s+one\s+into\s+an\s+exception|"
+    r"what\s+function\s+that\s+belief\s+serves|"
+    r"cognitive\s+function\s+of"
+    r")"
+)
+
+
+def uninvited_corrective_analysis(user_message: str, response: str) -> bool:
+    """Bench-mode motive prosecution on a casual throwaway generalization."""
+    from capability_detection import classify_social_mode
+
+    social = classify_social_mode(user_message or "")
+    if social.mode != "provocative_generalization":
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_CORRECTIVE_PROSECUTION.search(body))
+
+
 def missed_comic_handoff(user_message: str, response: str) -> bool:
     """User opened a slot (but alas…) and Moody started a separate observation."""
     from capability_detection import classify_social_mode

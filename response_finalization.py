@@ -1242,7 +1242,13 @@ def build_response_plan(
         mechanism_hint = "premise_guard_inherit"
         if ht.active:
             ht.confidence = min(ht.confidence, 0.45)
-    if ht.active and social.mode != "comic" and not social.participation and not social.premise_guards:
+    if (
+        ht.active
+        and social.mode != "comic"
+        and social.mode != "provocative_generalization"
+        and not social.participation
+        and not social.premise_guards
+    ):
         # Prefer as supporting (or primary when incentives are the claim)
         if primary in {
             "Hidden Incentive Analysis",
@@ -1271,6 +1277,16 @@ def build_response_plan(
             response_budget = "low"
             topic_mode = "compress"
             landing = "body_ends_response"
+    if social.mode == "provocative_generalization":
+        primary = "Humor As Disruption"
+        supporting = None
+        mechanism_hint = "social_banter_not_bench"
+        preferred_structure = "SNAP"
+        response_budget = "low"
+        topic_mode = "compress"
+        landing = "body_ends_response"
+        lens = "Hank Moody"
+        intent = "respond"
     if social.participation:
         preferred_structure = "SNAP"
         response_budget = "low"
@@ -1951,6 +1967,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
     )
     handoff = getattr(plan, "interaction_shape", None) == "comic_handoff"
     premise_guard = bool(getattr(plan, "premise_guards", None))
+    provoc_gen = getattr(plan, "social_mode", None) == "provocative_generalization"
     cap = getattr(plan, "primary_capability", None)
     if not cap:
         cap = "none" if (pick_one or awe) else "Everyday Preference Analysis"
@@ -2038,6 +2055,22 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         domain_block = ""
         mech_bit = ""
         voice_bit = ""
+    elif provoc_gen:
+        extra = (
+            "\nPROVOCATIVE GENERALIZATION CONTRACT: casual throwaway — social handling "
+            "before epistemic correction. Do not default to Bench mode.\n"
+            "Do not impute motive or explain what the belief \"lets them do.\" "
+            "Tease the framing, play the exaggeration, or lightly qualify \"most.\" SNAP.\n"
+            "FAIL: \"The payoff in calling most women batshit crazy is that it turns "
+            "every bad outcome into evidence…\"\n"
+            "PASS: \"Most is doing enough work in that sentence to qualify for overtime.\"\n"
+        )
+        family_bit = ""
+        q_bit = "\n"
+        lens_voice = ""
+        domain_block = ""
+        mech_bit = ""
+        voice_bit = ""
     pipeline_bit = (
         "Pipeline: interaction shape → social mode → SNAP. capability=none. "
         "Do not discover a mechanism.\n"
@@ -2053,8 +2086,12 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
                     "Pipeline: premise guards → inherit stated frame → value proposition → SNAP.\n"
                     if premise_guard
                     else (
+                    "Pipeline: provocative generalization → social banter → tease framing → SNAP.\n"
+                    if provoc_gen
+                    else (
                     "Pipeline: claim type → lens → question → capability → mechanism → "
                     "Depth × Shape → Gold.\n"
+                    )
                     )
                 )
             )
@@ -2069,7 +2106,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + pipeline_bit
         + (
             ""
-            if pick_one or awe or handoff or premise_guard
+            if pick_one or awe or handoff or premise_guard or provoc_gen
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
                 "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
