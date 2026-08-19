@@ -97,7 +97,7 @@ class SocialModeAnalysis:
     signals: List[str] = field(default_factory=list)
     # Natural resolution of a question: name | explain | reason | ""
     resolution: str = ""
-    # pick_one | why | how_to | awe | open — decided before topical tone
+    # pick_one | why | how_to | awe | comic_handoff | open — decided before topical tone
     interaction_shape: str = "open"
 
     @property
@@ -114,6 +114,11 @@ class SocialModeAnalysis:
         )
 
     @property
+    def comic_handoff(self) -> bool:
+        """User left an unresolved contrast slot for Moody to complete."""
+        return self.interaction_shape == "comic_handoff" or "comic_handoff" in self.signals
+
+    @property
     def rhetorical_question(self) -> bool:
         """Awe / holy-shit, not a request for a causal theory."""
         return (
@@ -128,7 +133,7 @@ class SocialModeAnalysis:
 
     @property
     def depth_earned(self) -> bool:
-        if self.participation or self.rhetorical_question:
+        if self.participation or self.rhetorical_question or self.comic_handoff:
             return False
         return self.mode in {"vulnerability", "provocation"} or (
             self.mode == "question" and self.resolution in {"explain", "reason"}
@@ -300,6 +305,28 @@ _COMIC_VICE_HABIT = re.compile(
     r")\b",
     re.I,
 )
+# Trailing contrast that hands Moody the next beat. Completed "Alas, we play…" is not this.
+_COMIC_HANDOFF = re.compile(
+    r"(?i)("
+    r",?\s*but\s+alas(?:\s*\.{2,}|\s*…)?\s*$|"
+    r",?\s*and\s+yet(?:\s*\.{2,}|\s*…)?\s*$|"
+    r"\bif\s+only(?:\s*\.{2,}|\s*…)?\s*$|"
+    r",?\s*but\s+apparently(?:\s*\.{2,}|\s*…)?\s*$|"
+    r"\bunfortunately(?:\s*\.{2,}|\s*…)\s*$|"
+    r"\balas(?:\s*\.{2,}|\s*…)\s*$"
+    r")"
+)
+_COMIC_INVENT_WISH = re.compile(
+    r"\bthey\s+should\s+invent\b",
+    re.I,
+)
+# Absurd domain mash (HVAC hum = ocean). Inherit it; do not correct it.
+_COMIC_ABSURD_EQUIVALENCE = re.compile(
+    r"(?i)("
+    r"(?:hvac|data\s*center|industrial).{0,80}ocean|"
+    r"ocean.{0,80}(?:hvac|data\s*center|hum)"
+    r")"
+)
 # Crude provocation with latent human content — NOT a bit to cure,
 # but also not automatic comic-never-cure. Depth may be earned.
 _PROVOCATION_CRUDE = re.compile(
@@ -446,6 +473,15 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
         signals.append("fake_fate")
         signals.append("vice_as_fate")
         score += 0.7
+    if _COMIC_HANDOFF.search(text):
+        signals.append("comic_handoff")
+        score += 0.55
+    if _COMIC_INVENT_WISH.search(text):
+        signals.append("invent_wish")
+        score += 0.35
+    if _COMIC_ABSURD_EQUIVALENCE.search(text):
+        signals.append("absurd_equivalence")
+        score += 0.6
 
     out.signals = signals
     out.confidence = round(min(0.95, score), 2)
@@ -459,6 +495,8 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
             "domestic_market_bit",
             "fitness_to_social_absurdism",
             "vice_as_fate",
+            "comic_handoff",
+            "absurd_equivalence",
         )
     )
     out.active = out.confidence >= COMIC_FLOOR and (len(signals) >= 2 or strong_bit)
@@ -529,6 +567,10 @@ def classify_social_mode(user_message: str) -> SocialModeAnalysis:
         out.mode = "comic"
         out.confidence = comic.confidence
         out.signals = list(comic.signals)
+        if "comic_handoff" in comic.signals or _COMIC_HANDOFF.search(text):
+            out.interaction_shape = "comic_handoff"
+            if "comic_handoff" not in out.signals:
+                out.signals.append("comic_handoff")
         return out
 
     # Joke-formula / crude name riff that didn't quite hit comic floor
@@ -805,9 +847,32 @@ def draft_has_terminal_payoff(text: str) -> bool:
 def social_mode_guidance(mode: SocialModeAnalysis) -> str:
     """Generation gate: identify the human moment before deploying intelligence."""
     m = (mode.mode or "open").lower()
+    if mode.comic_handoff:
+        return (
+            "\nSOCIAL MODE: comic handoff. The user left an unresolved contrast slot.\n"
+            "COMIC HANDOFF: inherit the sentence and complete the implied beat. "
+            "Do not start a separate observation.\n"
+            "Markers: but alas… / and yet… / if only… / but apparently… / trailing ellipsis.\n"
+            "Do not open with \"That's like saying…\" — they passed the ball; "
+            "do not describe the stadium.\n"
+            "The tag should click before it needs explaining. Stay in the concrete objects.\n"
+            "PASS: \"they should invent a woman who wants to go bowling… but alas\" → "
+            "\"…we apparently spent all the R&D money on AI girlfriends.\"\n"
+            "PASS: \"They mapped the human genome before solving this.\"\n"
+            "FAIL: \"That's like saying the ideal woman is the one who still thinks "
+            "Friday night doesn't need a second act.\" (abstraction; ignored the open slot)\n"
+        )
     if m == "comic":
         return (
             "\nSOCIAL MODE: comic premise. Play inside it. Do not excavate trauma.\n"
+            "DON'T CORRECT THE ABSURD PREMISE. INHERIT IT.\n"
+            "When someone says toothpaste is food, brushing is reheating leftovers. "
+            "When falling is flying, landing cancels the ticket. "
+            "When HVAC is the ocean, the ocean gets uptime.\n"
+            "Unless contradiction is itself the joke, \"Actually, your ridiculous "
+            "premise is wrong\" kills the game. Live in the world they built for one sentence.\n"
+            "The tag should click before it needs explaining. Do not abandon concrete "
+            "comic material for a vaguely profound metaphor.\n"
             "DEPTH MUST BE EARNED BY THE PREMISE — a joke did not earn depth.\n"
             "If explaining the reply requires a concept the premise does not contain, "
             "you have left the bit. Sometimes the correct intelligence is eight words "
@@ -818,6 +883,8 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "\"You don't wish you liked it less. You wish the part of you that "
             "feels guilty would stop keeping score.\" "
             "(invents guilt; the joke is voluntary behavior presented as fate.)\n"
+            "FAIL (premise rejection → unsupported depth): HVAC hum = ocean → "
+            "\"The hum isn't the ocean. It's the opposite.\" then mortality/feeling.\n"
             "FAIL (unsupported depth): \"put a leash on something that won't wear one\" "
             "on a name-formula joke that contains no leash, ownership, or restraint.\n"
             "PASS: \"Identity theft has gotten incredibly lazy.\"\n"
@@ -825,6 +892,8 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "timestamps — not whether the house still belongs to you).\n"
             "PASS: \"Somehow the hand keeps getting dealt at the liquor store.\"\n"
             "PASS: \"Brutal hand. Weird how you have to keep buying it.\"\n"
+            "PASS: \"Oceanfront living for people who think the ocean needs better uptime.\"\n"
+            "PASS: \"All the tranquility of beachfront property without the inconvenience of nature.\"\n"
         )
     if m == "provocation":
         return (

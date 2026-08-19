@@ -594,6 +594,11 @@ _FOREIGN_DEPTH_CLUSTERS = {
         "keeping score",
         "part of you that feels",
     ),
+    "unearned_constancy": (
+        "no matter what you're feeling",
+        "no matter what you are feeling",
+        "emotional constancy",
+    ),
 }
 
 _RESTATEMENT_OPEN = re.compile(
@@ -715,6 +720,8 @@ def unsupported_depth(user_message: str, response: str, *, comic: bool = False) 
     """
     if not comic:
         return False
+    if rejects_absurd_premise(user_message, response):
+        return True
     ul = (user_message or "").lower()
     rl = (response or "").lower()
     if not rl.strip():
@@ -723,6 +730,45 @@ def unsupported_depth(user_message: str, response: str, *, comic: bool = False) 
         if any(t in rl for t in terms) and not any(t in ul for t in terms):
             return True
     return False
+
+
+_PREMISE_REJECTION = re.compile(
+    r"(?i)("
+    r"isn'?t\s+the\s+\w+|"
+    r"it'?s\s+the\s+opposite|"
+    r"not\s+(?:actually\s+)?the\s+ocean|"
+    r"the\s+hum\s+isn'?t"
+    r")"
+)
+
+_INDEPENDENT_JOKE_OPEN = re.compile(
+    r"(?i)^\s*(that'?s\s+like\s+saying|it'?s\s+like\s+saying)\b"
+)
+
+
+def rejects_absurd_premise(user_message: str, response: str) -> bool:
+    """Corrected the bit's world model instead of inheriting it."""
+    from capability_detection import detect_comic_premise
+
+    if not detect_comic_premise(user_message or "").active:
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_PREMISE_REJECTION.search(body))
+
+
+def missed_comic_handoff(user_message: str, response: str) -> bool:
+    """User opened a slot (but alas…) and Moody started a separate observation."""
+    from capability_detection import classify_social_mode
+
+    social = classify_social_mode(user_message or "")
+    if not social.comic_handoff:
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_INDEPENDENT_JOKE_OPEN.search(body))
 
 
 def restates_runway(user_message: str, response: str) -> bool:

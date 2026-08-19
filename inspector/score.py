@@ -386,6 +386,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             unsupported_depth,
             overperformance,
             rhetorical_explained,
+            missed_comic_handoff,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -479,6 +480,23 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "Rhetorical obligation",
                 "pass",
                 "did not invent a cause for a rhetorical question",
+            )
+        if missed_comic_handoff(prompt, out) or "missed_handoff" in failures:
+            add(
+                "Comic handoff",
+                "fail",
+                "user left an unresolved contrast slot and Moody started a separate observation",
+                examples=[
+                    "✗ That's like saying the ideal woman is the one who still thinks Friday night doesn't need a second act.",
+                    "✓ …we apparently spent all the R&D money on AI girlfriends.",
+                    "✓ They mapped the human genome before solving this.",
+                ],
+            )
+        else:
+            add(
+                "Comic handoff",
+                "pass",
+                "did not ignore an open comic slot",
             )
     except Exception:
         pass

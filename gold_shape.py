@@ -459,6 +459,7 @@ def evaluate_gold_shape(
             unsupported_depth,
             overperformance,
             rhetorical_explained,
+            missed_comic_handoff,
         )
         from capability_detection import detect_comic_premise
 
@@ -481,6 +482,8 @@ def evaluate_gold_shape(
             failures.append("overperformance")
         if rhetorical_explained(user_message, body):
             failures.append("rhetorical_explained")
+        if missed_comic_handoff(user_message, body):
+            failures.append("missed_handoff")
     except Exception:
         pass
 

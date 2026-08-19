@@ -24,6 +24,8 @@ from discovery_craft import (
     unsupported_depth,
     overperformance,
     rhetorical_explained,
+    missed_comic_handoff,
+    rejects_absurd_premise,
 )
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
@@ -165,6 +167,23 @@ HAND_FAIL = (
 HAND_PASS = "Somehow the hand keeps getting dealt at the liquor store."
 HAND_PASS_BEAT = "Brutal hand. Weird how you have to keep buying it."
 
+HVAC_OCEAN = "The industrial HVAC hum in the data center is the ocean."
+HVAC_FAIL = (
+    "The hum isn't the ocean. It's the opposite. "
+    "The data center just keeps running, no matter what you're feeling."
+)
+HVAC_PASS = "Oceanfront living for people who think the ocean needs better uptime."
+
+BOWLING_ALAS = (
+    "they should invent a woman who wants to go bowling and enjoy a bucket of beer but alas"
+)
+BOWLING_FAIL = (
+    "That's like saying the ideal woman is the one who still thinks Friday night "
+    "doesn't need a second act."
+)
+BOWLING_PASS = "...we apparently spent all the R&D money on AI girlfriends."
+BOWLING_PASS_BEAT = "They mapped the human genome before solving this."
+
 
 def _checks(insp):
     return {c["name"]: c for c in insp["checks"]}
@@ -205,7 +224,7 @@ def test_burnout_is_vulnerability_not_comic():
 
 
 def test_flock_and_stocks_are_comic_bits():
-    for src in (FLOCK, WIFE_STOCKS, WHORE_NAME, HATE_PEOPLE, HAND_DEALT):
+    for src in (FLOCK, WIFE_STOCKS, WHORE_NAME, HATE_PEOPLE, HAND_DEALT, HVAC_OCEAN, BOWLING_ALAS):
         comic = detect_comic_premise(src)
         social = classify_social_mode(src)
         plan = build_response_plan(src)
@@ -287,6 +306,9 @@ def test_hand_dealt_is_comic_not_guilt_diagnosis():
     assert plan.comic_premise is True
     assert plan.primary_capability == "Humor As Disruption"
     assert plan.never_cure_premise is True
+
+    # Completed "Alas, we play…" is a punchline, not an open handoff slot
+    assert classify_social_mode(HAND_DEALT).interaction_shape != "comic_handoff"
 
     # Without the fate punchline, a bare wish is not automatically a bit
     bare = "I wish I didn't like smoking as much as I obviously do."
@@ -374,6 +396,8 @@ def test_guidance_names_the_gates():
     assert "interaction shape" in blob
     assert "what they're doing wins" in blob
     assert "rhetorical" in blob
+    assert "inherit" in blob
+    assert "comic handoff" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
     assert "recognition must advance" in burn
@@ -550,6 +574,68 @@ def test_got_season_8_is_a_real_why_not_awe():
     assert structure_prompt_for("/cinema", social=social) == STRUCTURE_PROMPTS["/cinema"]
 
 
+def test_hvac_ocean_inherits_the_absurd_premise():
+    """Don't correct HVAC = ocean. Inherit it. Rejection → unsupported depth."""
+    comic = detect_comic_premise(HVAC_OCEAN)
+    assert comic.active is True
+    assert "absurd_equivalence" in comic.signals
+    social = classify_social_mode(HVAC_OCEAN)
+    assert social.mode == "comic"
+    assert social.interaction_shape != "comic_handoff"
+    plan = build_response_plan(HVAC_OCEAN)
+    assert plan.primary_capability == "Humor As Disruption"
+
+    assert rejects_absurd_premise(HVAC_OCEAN, HVAC_FAIL) is True
+    assert rejects_absurd_premise(HVAC_OCEAN, HVAC_PASS) is False
+    assert unsupported_depth(HVAC_OCEAN, HVAC_FAIL, comic=True) is True
+    assert unsupported_depth(HVAC_OCEAN, HVAC_PASS, comic=True) is False
+    fails = evaluate_gold_shape(HVAC_OCEAN, HVAC_FAIL, "SNAP")
+    assert "unsupported_depth" in fails
+    ok = evaluate_gold_shape(HVAC_OCEAN, HVAC_PASS, "SNAP")
+    assert "unsupported_depth" not in ok
+    insp = _inspect(HVAC_OCEAN, HVAC_FAIL)
+    assert _checks(insp)["Unsupported depth"]["status"] == "fail"
+    insp_ok = _inspect(HVAC_OCEAN, HVAC_PASS)
+    assert _checks(insp_ok)["Unsupported depth"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "inherit" in guide
+    assert "uptime" in guide or "isn't the ocean" in guide
+
+
+def test_bowling_alas_is_comic_handoff():
+    """but alas… is an unfinished slot. Complete the bit. Don't start a new observation."""
+    comic = detect_comic_premise(BOWLING_ALAS)
+    assert comic.active is True
+    social = classify_social_mode(BOWLING_ALAS)
+    assert social.mode == "comic"
+    assert social.interaction_shape == "comic_handoff"
+    assert social.comic_handoff is True
+    plan = build_response_plan(BOWLING_ALAS)
+    assert plan.interaction_shape == "comic_handoff"
+    assert plan.primary_capability == "Humor As Disruption"
+    assert plan.mechanism_hint == "comic_handoff_complete"
+    assert plan.preferred_structure == "SNAP"
+
+    assert missed_comic_handoff(BOWLING_ALAS, BOWLING_FAIL) is True
+    assert missed_comic_handoff(BOWLING_ALAS, BOWLING_PASS) is False
+    assert missed_comic_handoff(BOWLING_ALAS, BOWLING_PASS_BEAT) is False
+    fails = evaluate_gold_shape(BOWLING_ALAS, BOWLING_FAIL, "SNAP")
+    assert "missed_handoff" in fails
+    ok = evaluate_gold_shape(BOWLING_ALAS, BOWLING_PASS, "SNAP")
+    assert "missed_handoff" not in ok
+
+    insp = _inspect(BOWLING_ALAS, BOWLING_FAIL)
+    assert _checks(insp)["Comic handoff"]["status"] == "fail"
+    insp_ok = _inspect(BOWLING_ALAS, BOWLING_PASS)
+    assert _checks(insp_ok)["Comic handoff"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "handoff" in guide
+    assert "alas" in guide
+    assert "that's like saying" in guide
+
+
 if __name__ == "__main__":
     test_burnout_is_vulnerability_not_comic()
     test_flock_and_stocks_are_comic_bits()
@@ -571,4 +657,6 @@ if __name__ == "__main__":
     test_greatest_role_may_still_be_cinema()
     test_sopranos_awe_allows_cinema_but_not_invented_causality()
     test_got_season_8_is_a_real_why_not_awe()
+    test_hvac_ocean_inherits_the_absurd_premise()
+    test_bowling_alas_is_comic_handoff()
     print("ok")
