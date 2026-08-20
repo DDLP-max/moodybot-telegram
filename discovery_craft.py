@@ -1337,15 +1337,7 @@ _USER_SUPPLIED_INTERIOR = re.compile(
     r"they were hiding|caught them|"
     r"saw (?:straight )?through|"
     r"exposed (?:them|her|him)|"
-    r"lying to my face|they lied|"
-    r"what were they thinking|why (?:did|would) they"
-    r")"
-)
-_INVITES_INTERIOR = re.compile(
-    r"(?i)("
-    r"why (?:did|would|does) (?:they|she|he|people)|"
-    r"what were they thinking|"
-    r"what'?s going on in (?:their|her|his) head"
+    r"lying to my face|they lied"
     r")"
 )
 _AUTHORED_INTERIOR = re.compile(
@@ -1368,7 +1360,13 @@ _AUTHORED_INTERIOR = re.compile(
     r"need time to rewrite|"
     r"rewrite the story|"
     r"so they were never wrong|"
-    r"reach for when they need"
+    r"reach for when they need|"
+    r"permanent receipt|"
+    r"someone else is still below|"
+    r"still below them|"
+    r"people beneath them|"
+    r"the bunker is just the final scoreboard|"
+    r"numbers on the screen aren'?t a future currency"
     r")"
 )
 # Causal explanation that depends on an unestablished interior state —
@@ -1412,9 +1410,7 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
         "taggable_bit",
     }:
         return False
-    if _USER_SUPPLIED_INTERIOR.search(user_message or "") or _INVITES_INTERIOR.search(
-        user_message or ""
-    ):
+    if _USER_SUPPLIED_INTERIOR.search(user_message or ""):
         return False
     body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
     if not body:

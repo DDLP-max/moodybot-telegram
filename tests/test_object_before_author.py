@@ -57,6 +57,24 @@ LAUNCHPAD = (
 )
 CRAZY_EVIDENCE = "Everybody loves calling it crazy before it turns into evidence. 🥃"
 SHELF_LIFE = "Crazy has a remarkably short shelf life once the receipts show up. 🥃"
+ENDGAME = (
+    "I genuinely don't get the endgame. If the plan ends with a ruined planet, "
+    "collapsed economies, and no working class left to spend money... what are "
+    "billionaires actually hoarding wealth for? To sit in a bunker with numbers "
+    "on a screen that don't mean anything anymore? What is the actual point?"
+)
+ENDGAME_FAIL = (
+    "The numbers on the screen aren't a future currency. They're the permanent "
+    "receipt that someone else is still below them, even after the air turns "
+    "toxic and the markets stop moving. The bunker is just the final scoreboard. 🥃"
+)
+ENDGAME_PASS = (
+    "Turns out infinite money still requires a functioning planet to spend it on. 🥃"
+)
+ENDGAME_PASS_2 = (
+    "That's the part nobody can put on the balance sheet: wealth only works "
+    "while there's still a world willing to honor it. 🥃"
+)
 TEXTS = "He texts you every night but somehow never has time to see you."
 TEXTS_INFERENCE = "Funny how interest always finds time until time requires effort. 🥃"
 TEXTS_AUTHORED = "He likes knowing you're waiting for him. 🥃"
@@ -123,10 +141,14 @@ def test_inference_is_not_authored_interior():
     assert _checks(insp_fail)["Object before author"]["status"] == "fail"
 
 
-def test_skips_when_user_supplied_or_invited_interior():
+def test_skips_when_user_supplied_interior():
     assert authors_unobserved_interior(USER_SUPPLIED, USER_SUPPLIED_REPLY) is False
+
+
+def test_question_does_not_license_interior():
+    """A why-question is not permission to state an unknowable motive as fact."""
     invited = "Why did they call me crazy after I turned out to be right?"
-    assert authors_unobserved_interior(invited, INVENTED_GUILT) is False
+    assert authors_unobserved_interior(invited, INVENTED_GUILT) is True
 
 
 def test_skips_comic_and_pick_and_defend():
@@ -158,6 +180,23 @@ def test_matt_gold_and_inspector():
     assert _checks(insp_shelf)["Object before author"]["status"] == "pass"
 
 
+def test_endgame_does_not_author_status_hunger():
+    """Rhetorical what's-the-point is the contradiction, not a license to mind-read."""
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_FAIL) is True
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_PASS) is False
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_PASS_2) is False
+    assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_FAIL, "SNAP")
+    assert "authored_interior" not in evaluate_gold_shape(ENDGAME, ENDGAME_PASS, "SNAP")
+    assert "authored_interior" not in evaluate_gold_shape(ENDGAME, ENDGAME_PASS_2, "SNAP")
+    insp_fail = _inspect(ENDGAME, ENDGAME_FAIL)
+    assert _checks(insp_fail)["Object before author"]["status"] == "fail"
+    insp_ok = _inspect(ENDGAME, ENDGAME_PASS)
+    assert _checks(insp_ok)["Object before author"]["status"] == "pass"
+    guide = plan_runtime_instruction(build_response_plan(ENDGAME)).lower()
+    assert "licensed interior" in guide
+    assert "permanent receipt" in guide
+
+
 def test_killmonger_heat_does_not_false_positive():
     ok = evaluate_gold_shape(VILLAIN, KILLMONGER_HEAT, "KNIFE")
     assert "authored_interior" not in ok
@@ -176,12 +215,15 @@ def test_core_write_and_energy_name_the_contract():
     assert "contribution budget" in blob
     assert "rewrite the story" in blob
     assert "shelf life" in blob
+    assert "licensed interior" in blob
+    assert "permanent receipt" in blob
 
     closer = plan_closer_instruction(build_response_plan(MATT)).lower()
     assert "object before author" in closer
     turn = plan_runtime_instruction(build_response_plan(MATT)).lower()
     assert "object before author" in turn
     assert "rewrite the story" in turn
+    assert "licensed interior" in turn
 
     villain = build_response_plan(VILLAIN, selected_command="/thoughts")
     guide = plan_runtime_instruction(villain).lower()
@@ -196,8 +238,12 @@ if __name__ == "__main__":
     print("ok detector")
     test_inference_is_not_authored_interior()
     print("ok inference")
-    test_skips_when_user_supplied_or_invited_interior()
+    test_skips_when_user_supplied_interior()
     print("ok skip supplied")
+    test_question_does_not_license_interior()
+    print("ok question not license")
+    test_endgame_does_not_author_status_hunger()
+    print("ok endgame")
     test_skips_comic_and_pick_and_defend()
     print("ok skip shapes")
     test_matt_gold_and_inspector()

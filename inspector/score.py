@@ -648,7 +648,8 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                     "✗ The crazy label is just what people reach for when they need time to rewrite the story so they were never wrong.",
                     "✓ Everybody loves calling it crazy before it turns into evidence.",
                     "✓ Crazy has a remarkably short shelf life once the receipts show up.",
-                    "✓ Everybody hates assumptions right up until the receipts arrive.",
+                    "✗ They're the permanent receipt that someone else is still below them.",
+                    "✓ Turns out infinite money still requires a functioning planet to spend it on.",
                 ],
             )
         else:

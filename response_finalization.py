@@ -952,20 +952,22 @@ def contribution_budget_guidance(budget: str) -> str:
 
 
 def object_before_author_guidance() -> str:
-    """Always-on generation contract — not gated on engagement energy."""
+    """Turn-level contract for open/argument prompts. Comic/SNAP-social skip this
+    (token ceiling); the evaluator and Law 5e still apply.
+    """
     return (
         "\nOBJECT BEFORE AUTHOR: Make the established truth hotter. Do not manufacture "
-        "a hidden truth just because it hits harder. Referencing the object then launching "
-        "into unestablished interior is still authored interior.\n"
-        "Do not explain why they called you crazy. Heat the reversal (crazy → evidence), "
-        "not their private strategy.\n"
-        "FAIL: \"The crazy label is just what people reach for when they need time to "
+        "a hidden truth just because it hits harder. Object setup + authored-interior "
+        "payoff is still authored interior.\n"
+        "QUESTION ≠ LICENSED INTERIOR. \"Why do they?\" / \"what's the point?\" does not "
+        "authorize stating an unknowable motive as fact. Heat the contradiction. "
+        "A hypothesis must be marked as one. Do not convert the question into mind-reading.\n"
+        "FAIL: \"They're the permanent receipt that someone else is still below them.\" "
+        "/ \"The bunker is just the final scoreboard.\" / "
+        "\"The crazy label is just what people reach for when they need time to "
         "rewrite the story so they were never wrong.\"\n"
-        "FAIL: assumed → called crazy → later right becomes \"they called you crazy "
-        "because you saw straight through them.\"\n"
-        "PASS: \"Everybody loves calling it crazy before it turns into evidence.\"\n"
-        "PASS: \"Crazy has a remarkably short shelf life once the receipts show up.\"\n"
-        "PASS: \"Everybody hates assumptions right up until the receipts arrive.\"\n"
+        "PASS: \"Turns out infinite money still requires a functioning planet to spend it on.\" "
+        "/ \"Everybody loves calling it crazy before it turns into evidence.\"\n"
     )
 
 
@@ -1676,6 +1678,10 @@ PASS: "Everybody hates assumptions right up until the receipts arrive."
 PASS: "The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up."
 PASS (inference from observable pattern): He texts every night but never has time to see you → "Funny how interest always finds time until time requires effort."
 FAIL (authored interior): "He likes knowing you're waiting for him."
+QUESTION ≠ LICENSED INTERIOR. "Why do they?" / "what's the point?" does not authorize stating an unknowable motive as fact. Heat the contradiction. A hypothesis must be marked as one.
+FAIL: "They're the permanent receipt that someone else is still below them." / "The bunker is just the final scoreboard."
+PASS: "Turns out infinite money still requires a functioning planet to spend it on."
+PASS: "Wealth only works while there's still a world willing to honor it."
 
 CONTRIBUTION BUDGET (permission to add — not a new shape; distinct from response budget / length):
 What kind of intelligence applies = capability. What form = interaction shape. How much you may add = contribution budget.
@@ -2426,7 +2432,20 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + contribution_budget_guidance(
             getattr(plan, "contribution_budget", None) or "one_beat"
         )
-        + object_before_author_guidance()
+        + (
+            ""
+            if (
+                pick_one
+                or forced
+                or awe
+                or handoff
+                or terminal
+                or pick_defend
+                or provoc_gen
+                or getattr(plan, "social_mode", None) == "comic"
+            )
+            else object_before_author_guidance()
+        )
         + lens_voice
         + domain_block
         + extra

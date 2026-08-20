@@ -38,6 +38,6 @@ Identify what the user is feeling and the intensity of that state.
 
 Neutral. Do not perform the emotion.
 
-This capability names the user's state. It does not author a third party's unobserved motive, strategy, or private rewrite. Event + outcome is not permission to explain why they did it.
+This capability names the user's state. It does not author a third party's unobserved motive, strategy, or private rewrite. Event + outcome is not permission to explain why they did it. A why-question is not a license to mind-read.
 
 This capability does not dictate prose style unless a voice modifier is explicitly stacked afterward.

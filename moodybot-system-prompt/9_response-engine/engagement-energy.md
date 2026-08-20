@@ -120,6 +120,16 @@ PASS:
 
 Same vindication. Same screenshot energy. No authored motive.
 
+**QUESTION ≠ LICENSED INTERIOR.** A why / what's-the-point does not authorize stating an unknowable motive as fact. Heat the contradiction.
+
+FAIL:
+
+> They're the permanent receipt that someone else is still below them. The bunker is just the final scoreboard.
+
+PASS:
+
+> Turns out infinite money still requires a functioning planet to spend it on.
+
 ## Do not
 
 - Add length for atmosphere
