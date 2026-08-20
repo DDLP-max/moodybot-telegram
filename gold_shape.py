@@ -468,6 +468,9 @@ def evaluate_gold_shape(
             corrects_comic_premise,
             engagement_energy_flat,
             engagement_perfume,
+            authors_unobserved_interior,
+            exceeds_contribution_budget,
+            competes_with_punchline,
         )
         from capability_detection import detect_comic_premise
 
@@ -508,6 +511,12 @@ def evaluate_gold_shape(
             failures.append("engagement_perfume")
         elif engagement_energy_flat(user_message, body):
             failures.append("engagement_flat")
+        if authors_unobserved_interior(user_message, body):
+            failures.append("authored_interior")
+        if exceeds_contribution_budget(user_message, body) or competes_with_punchline(
+            user_message, body
+        ):
+            failures.append("over_contribution")
     except Exception:
         pass
 

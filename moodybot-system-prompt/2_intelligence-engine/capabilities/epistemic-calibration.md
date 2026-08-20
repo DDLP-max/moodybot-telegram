@@ -86,6 +86,9 @@ Examples:
 - "He used the lockout kit as a pretext to obtain her number."
 - "He planned this from the beginning."
 - "He deliberately engineered the situation."
+- "They called you crazy because you saw straight through them." (prompt only proved: assumed → called crazy → later right)
+
+Heat the established object. Don't manufacture a hidden scheme just because it hits harder.
 
 ## Doorman Example
 

@@ -165,6 +165,7 @@ def test_killmonger_gold_and_inspector():
     ok = evaluate_gold_shape(VILLAIN, KILLMONGER_HEAT, "KNIFE")
     assert "engagement_flat" not in ok
     assert "engagement_perfume" not in ok
+    assert "authored_interior" not in ok
     perfume_fails = evaluate_gold_shape(VILLAIN, KILLMONGER_PERFUME, "KNIFE")
     assert "engagement_perfume" in perfume_fails
 
@@ -172,6 +173,7 @@ def test_killmonger_gold_and_inspector():
     assert _checks(insp)["Engagement energy"]["status"] == "fail"
     insp_ok = _inspect(VILLAIN, KILLMONGER_HEAT)
     assert _checks(insp_ok)["Engagement energy"]["status"] == "pass"
+    assert _checks(insp_ok)["Object before author"]["status"] == "pass"
     insp_perfume = _inspect(VILLAIN, KILLMONGER_PERFUME)
     assert _checks(insp_perfume)["Engagement energy"]["status"] == "fail"
 
@@ -184,6 +186,7 @@ def test_core_write_gates_engagement_energy():
     assert "perfume" in blob
     assert "terminal bits" in blob
     assert "visceral hues" in blob
+    assert "object before author" in blob
 
 
 if __name__ == "__main__":

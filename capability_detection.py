@@ -365,6 +365,19 @@ _COMIC_SETUP_CHAIN = re.compile(
     r"\d+\s+a\s+(?:day|week|month|year)"
     r")"
 )
+# Complaint → absurdist instruction. The joke is already finished.
+_COMIC_COMPLAINT_OPEN = re.compile(
+    r"(?i)("
+    r"why am i still|"
+    r"why (?:are|do) (?:we|i|they) still|"
+    r"i'?m so sick of|"
+    r"still hearing|"
+    r"if i hear .{0,60} one more time"
+    r")"
+)
+_COMIC_IMPERATIVE_PUNCH = re.compile(
+    r"(?i)^\s*(?:invite|send|add|give|put|tell|just)\b"
+)
 _COMIC_INVENT_WISH = re.compile(
     r"\bthey\s+should\s+invent\b",
     re.I,
@@ -637,6 +650,21 @@ def inverted_comic_premise(user_message: str) -> bool:
     return bool(_COMIC_MISASSIGNED_FAILURE.search(text) and _COMIC_SELF_AS_PAYLOAD.search(text))
 
 
+def completed_comic_escalation(user_message: str) -> bool:
+    """Complaint already paid off with an absurdist instruction. Don't add another."""
+    text = (user_message or "").strip()
+    if not text or _COMIC_GENUINE_DISTRESS.search(text) or _COMIC_HANDOFF.search(text):
+        return False
+    if not _COMIC_COMPLAINT_OPEN.search(text):
+        return False
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    if not (2 <= len(sentences) <= 5):
+        return False
+    return any(
+        _COMIC_IMPERATIVE_PUNCH.search(s) and len(s.split()) <= 12 for s in sentences[1:]
+    )
+
+
 def classify_comic_bit_shape(user_message: str) -> str:
     """Classify comic interaction grammar: open | taggable | terminal | \"\"."""
     text = (user_message or "").strip()
@@ -647,6 +675,8 @@ def classify_comic_bit_shape(user_message: str) -> str:
     if _COMIC_HANDOFF.search(text):
         return "open"
     if inverted_comic_premise(text):
+        return "terminal"
+    if completed_comic_escalation(text):
         return "terminal"
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
     last = sentences[-1] if sentences else text
@@ -1203,8 +1233,12 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "explain why the premise is funny. Correcting the premise is curing it.\n"
             "Add one micro-tag that compresses or heightens the existing joke — same frame, "
             "new punch. Not a reaction button. SNAP.\n"
+            "DON'T COMPETE WITH THE PUNCHLINE. A completed escalation does not require "
+            "another escalation. Silence is allowed.\n"
             "FAIL (insight): energy-drink math → \"The $2.50 isn't really about the car…\"\n"
             "FAIL (inert): \"Fair. 🥃\" / \"Exactly. 🥃\" / \"Agreed. 🥃\"\n"
+            "FAIL (second joke): \"invite him. send claude the google meet.\" → "
+            "\"At this point Claude deserves equity and a parking spot.\"\n"
             "FAIL (premise correction): dropped-while-carried → \"Three drops and you're "
             "still blaming their tolerance instead of the fact that nobody left standing "
             "was sober enough to drive.\"\n"
@@ -1359,6 +1393,8 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "made him dangerous. The prescription made him the villain. 🥃\"\n"
             "HEAT: \"He was right about Wakanda's hypocrisy; he just confused justice with vengeance.\"\n"
             "PERFUME: \"Justice wears the mask of vengeance in the messy visceral hues of reality.\"\n"
+            "OBJECT BEFORE AUTHOR: Make the established truth hotter. Do not manufacture a "
+            "hidden truth just because it hits harder.\n"
         )
     if m == "direct_participation" or mode.participation:
         return (

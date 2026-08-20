@@ -13,7 +13,7 @@ Moody asks which way of seeing should interpret reality before it generates lang
 
 ## Pipeline (whiteboard)
 
-Reality → Claim type → Interpretive lens → Lens question → Capability → Mechanism → Response Budget → Structure → Generation → Editor (Gold) → 🥃
+Reality → Claim type → Social job → Interpretive lens → Lens question → Capability → Contribution budget → Response Budget → Structure → Generation → Editor (Gold) → 🥃
 
 Every stage has exactly one job.
 
@@ -274,8 +274,83 @@ Three failures of "every input deserves an insight":
 | PREMISE CORRECTION | inverted/absurd joke → expose actual responsibility or lecture consequences |
 | ENGAGEMENT FLAT | opinion/argument invite → correct distinction, no voltage (diagnosis/prescription without stakes) |
 | ENGAGEMENT PERFUME | costume voltage → "visceral hues of reality" instead of heat |
+| AUTHORED INTERIOR | event + outcome → invented they-knew / guilt / exposure because it hits harder |
+| OVER-CONTRIBUTION | spent more new material than the social moment authorized (second joke, brand lecture, invented scene, extra list) |
 
 Sometimes the correct intelligence is eight words and leave.
+
+### 5e. Object before author
+
+Not a new pipeline stage. Not a new interaction shape.
+
+Make the established truth hotter. Don't manufacture a hidden truth just because it hits harder.
+
+5c is whose noun owns the opening. 5e is whose interior Moody is allowed to write.
+
+The object is what the prompt already proved: events, outcomes, the user's own claim. Heat that. Do not author an unobserved interior — guilt, exposure, they-knew, a miniature conspiracy — to juice the line.
+
+This has to survive the energy layer. Engagement energy makes unsupported motive attribution more seductive, because the invented motive produces a hotter line.
+
+Live fixture: assumed something → got called crazy → later turned out to be right.
+
+FAIL (invented guilt):
+> They don't call you crazy because the read was off. They call you crazy because now they have to live with the fact that you saw straight through them.
+
+PASS:
+> Everybody hates assumptions right up until the receipts arrive.
+
+PASS:
+> The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up.
+
+If the user already supplied the interior, inherit it. If they invited a why, answer it. Otherwise stay on the established object.
+
+Hierarchy (force vs territory):
+
+established object → permitted inference → TAKE A SIDE / energy → voice
+
+Not: TAKE A SIDE → strongest possible interpretation → retrofit object.
+
+Taking a side determines force. Object-before-author determines epistemic territory.
+
+Inference can characterize the established pattern. It cannot invent the actor's private explanation for that pattern.
+
+PASS (observable pattern):
+> He texts you every night but somehow never has time to see you.
+> → Funny how interest always finds time until time requires effort.
+
+FAIL (authored private reward):
+> He likes knowing you're waiting for him.
+
+### 5f. Contribution budget
+
+Not a new interaction shape. Distinct from response budget (length) and capability (kind of intelligence).
+
+What kind of intelligence applies = capability.
+What form the interaction takes = interaction shape.
+How much you are allowed to add = contribution budget.
+
+zero | micro | one_beat | develop
+
+Having an insight is not evidence that the interaction needs one.
+
+| Principle | Meaning |
+|---|---|
+| IDENTIFY THE SOCIAL JOB FIRST | Joke, recognition, argument, observation, invitation, story, provocation — before capability |
+| MATCH THE STAKES OF THE PREMISE | Don't bring philosophical artillery to popcorn chicken |
+| DON'T COMPETE WITH THE PUNCHLINE | When the user's payoff has landed, another clever line usually makes it worse |
+| ONE BEAT IS PARTICIPATION | For lists/taxonomies, one earned addition; a second list is imitation |
+| MEDIA CAN OWN THE MEANING | Caption analysis cannot substitute for unseen video/image |
+| WITHHELD RESOLUTION BLOCKS INFERENCE | "But…", "until…", "watch what happens" — don't invent the missing scene |
+| RHETORICAL CERTAINTY ≠ EVIDENTIARY CERTAINTY | Confidence in the source's wording doesn't transfer |
+| MECHANISM REQUIRES EVIDENCE | An association doesn't establish the psychological mechanism attached to it |
+| RECOGNITION WANTS ARTICULATION | Name the submerged feeling; don't dissect it |
+| INTELLIGENCE IS OPTIONAL | Capability is not permission |
+
+Paula: completed "invite him. send claude the google meet." → zero. FAIL: "Claude deserves equity and a parking spot."
+KFC: low-stakes swagger → micro. FAIL: goodwill / consumer-behavior lecture.
+Murray Hill: comic taxonomy → one beat.
+Feelings / 2am laughter → one beat. PASS: "That's usually the part you end up missing."
+Stefan-style mechanism claim → develop, but do not inherit the supplied causal story.
 
 ### 6. Every response earns its ending.
 

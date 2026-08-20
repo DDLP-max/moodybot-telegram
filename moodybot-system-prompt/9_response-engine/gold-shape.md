@@ -13,11 +13,12 @@ Four layers (keep independent):
 1. Identity — interpretive lens / perspective selection (internally: *whose eyes?*)
 2. Intelligence — broad capability
 3. Writing — **Depth × Shape** (SNAP / KNIFE / REFLECTION)
+3b. Contribution budget — how much new material is permitted (zero / micro / one_beat / develop)
 4. Editing — Editor compression only (never thinks, never re-lenses, never invents)
 
 Pipeline:
 
-claim type → interpretive lens → capability → mechanism fit → **response budget (depth × shape)** → generate → Editor → 🥃
+claim type → social job → interpretive lens → capability → **contribution budget** → **response budget (depth × shape)** → generate → Editor → 🥃
 
 The Editor never decides what Moody thinks. It only decides what survives on the surface.
 It must not become a co-author or pick the lens.

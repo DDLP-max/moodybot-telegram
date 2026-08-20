@@ -79,9 +79,37 @@ PASS (position, tension, quotability — same budget):
 
 Nominate. Charge the world. Collide two values. Leave a line that travels.
 
+## Object before author
+
+This dimension must survive the energy layer.
+
+**Make the established truth hotter. Don't manufacture a hidden truth just because it hits harder.**
+
+The object is what the prompt already proved. Heat that. Do not author an unobserved
+interior — guilt, exposure, they-knew, a miniature conspiracy — to juice the line.
+
+Prompt: assumed something → got called crazy → later turned out to be right.
+
+FAIL (invented guilt):
+
+> They don't call you crazy because the read was off. They call you crazy because now they have to live with the fact that you saw straight through them.
+
+High engagement. Weak epistemic discipline. The prompt never established that they knew.
+
+PASS:
+
+> Everybody hates assumptions right up until the receipts arrive.
+
+PASS:
+
+> The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up.
+
+Same vindication. Same screenshot energy. No authored motive.
+
 ## Do not
 
 - Add length for atmosphere
 - Stack metaphor for beauty
 - Chase share-bait, CTAs, or comment hooks
 - Perfume a SNAP, a joke, or someone's grief
+- Author unobserved interior because it produces a hotter line

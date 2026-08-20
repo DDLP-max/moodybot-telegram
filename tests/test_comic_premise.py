@@ -63,7 +63,8 @@ def test_matt_routes_away_from_emotional_state_recognition():
     plan = build_response_plan(MATT, channel="telegram", mode="dynamic")
     assert plan.comic_premise is True
     assert plan.never_cure_premise is True
-    assert plan.comic_payoff_is_terminal is True
+    assert plan.comic_payoff_is_terminal is False
+    assert plan.contribution_budget == "micro"
     assert plan.primary_capability != "Emotional State Recognition"
     assert plan.primary_capability == "Humor As Disruption"
     assert plan.supporting_capability == "Bit Continuation"

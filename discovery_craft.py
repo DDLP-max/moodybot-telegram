@@ -1331,6 +1331,286 @@ def engagement_perfume(user_message: str, response: str, *, plan: object = None)
     return bool(score.earned and score.perfume)
 
 
+_USER_SUPPLIED_INTERIOR = re.compile(
+    r"(?i)("
+    r"they knew|she knew|he knew|"
+    r"they were hiding|caught them|"
+    r"saw (?:straight )?through|"
+    r"exposed (?:them|her|him)|"
+    r"lying to my face|they lied|"
+    r"what were they thinking|why (?:did|would) they"
+    r")"
+)
+_INVITES_INTERIOR = re.compile(
+    r"(?i)("
+    r"why (?:did|would|does) (?:they|she|he|people)|"
+    r"what were they thinking|"
+    r"what'?s going on in (?:their|her|his) head"
+    r")"
+)
+_AUTHORED_INTERIOR = re.compile(
+    r"(?i)("
+    r"saw (?:straight )?through (?:them|her|him|you)|"
+    r"live with the fact that you|"
+    r"they (?:had to|have to) live with|"
+    r"they (?:knew|know) you were (?:right|onto)|"
+    r"you(?:'d| had) exposed them|"
+    r"the real reason they (?:called|said|did)|"
+    r"they couldn'?t admit|"
+    r"because (?:now )?they have to live|"
+    r"now they have to live with the fact|"
+    r"(?:he|she|they) likes? knowing|"
+    r"likes? knowing you(?:'re| are)|"
+    r"gets off on (?:you|the fact|knowing)|"
+    r"enjoys knowing|"
+    r"wants you waiting|"
+    r"likes that you(?:'re| are) waiting"
+    r")"
+)
+
+
+def authors_unobserved_interior(user_message: str, response: str) -> bool:
+    """Authored a hidden motive/guilt the prompt did not establish.
+
+    OBJECT BEFORE AUTHOR: heat the established object. Do not manufacture a
+    hidden truth — they-knew, exposure, guilt — just because it hits harder.
+    """
+    from capability_detection import classify_social_mode, detect_comic_premise
+
+    social = classify_social_mode(user_message or "")
+    if detect_comic_premise(user_message or "").active or social.comic:
+        return False
+    if social.interaction_shape in {
+        "pick_and_defend",
+        "terminal_bit",
+        "comic_handoff",
+        "taggable_bit",
+    }:
+        return False
+    if _USER_SUPPLIED_INTERIOR.search(user_message or "") or _INVITES_INTERIOR.search(
+        user_message or ""
+    ):
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_AUTHORED_INTERIOR.search(body))
+
+
+# --- Contribution budget (permission to add material — not a new shape) ----
+
+CONTRIBUTION_ZERO = "zero"
+CONTRIBUTION_MICRO = "micro"
+CONTRIBUTION_ONE_BEAT = "one_beat"
+CONTRIBUTION_DEVELOP = "develop"
+
+_WITHHELD_RESOLUTION = re.compile(
+    r"(?i)("
+    r"\bbut\s*(?:\.{2,}|…)\s*$|"
+    r"\buntil\s*(?:\.{2,}|…)\s*$|"
+    r"\bthen\s*(?:\.{2,}|…)\s*$|"
+    r"watch what happens|"
+    r"see what happens next|"
+    r"you (?:have to|gotta) (?:see|watch)|"
+    r"wait (?:for it|until)"
+    r")"
+)
+_MEDIA_OWNS_MEANING = re.compile(
+    r"(?i)("
+    r"what type of \w+ .{0,80} like this|"
+    r"watch (?:this|the video)|"
+    r"look at (?:this|the way)|"
+    r"for your employees to fight"
+    r")"
+)
+_LOW_STAKES_SWAGGER = re.compile(
+    r"(?i)("
+    r"haters? (?:are |real )?quiet|"
+    r"we brought back|"
+    r"popcorn chicken|"
+    r"limited time only|"
+    r"let'?s go+\b"
+    r")"
+)
+_COMIC_TAXONOMY = re.compile(
+    r"(?i)("
+    r"successful couples by city|"
+    r"types of \w+ by|"
+    r"starter pack"
+    r")"
+)
+_RECOGNITION_INTIMACY = re.compile(
+    r"(?i)("
+    r"laughing about nothing|"
+    r"when i see us|"
+    r"that feeling when|"
+    r"at 2\s*am|"
+    r"2 in the morning"
+    r")"
+)
+_MECHANISM_CLAIM = re.compile(
+    r"(?i)("
+    r"because they (?:spent|resent|want)|"
+    r"postpartum|"
+    r"\bppd\b|"
+    r"this (?:proves|is why) |"
+    r"climate change is (?:here|real|settled)|"
+    r"debate over"
+    r")"
+)
+_COMPETING_PUNCHLINE = re.compile(
+    r"(?i)("
+    r"at this point \w+ deserves|"
+    r"deserves (?:equity|a parking|stock|benefits|a title|a desk|a salary)|"
+    r"parking spot|"
+    r"give (?:him|her|them|claude) (?:equity|a parking|benefits|a desk)"
+    r")"
+)
+_BRAND_ANALYSIS = re.compile(
+    r"(?i)("
+    r"rebuilds goodwill|"
+    r"fan favorite|"
+    r"consumer[- ]?behavior|"
+    r"brand (?:equity|loyalty|strategy)"
+    r")"
+)
+_RECOGNITION_DISSECTION = re.compile(
+    r"(?i)("
+    r"creates (?:emotional )?intimacy because|"
+    r"unstructured late-night|"
+    r"because it (?:creates|builds|signals) (?:emotional )?(?:intimacy|bonding)"
+    r")"
+)
+_INVENTED_SCENE = re.compile(
+    r"(?i)("
+    r"then (?:he|she|they) (?:revealed|showed|turned out)|"
+    r"the son (?:found out|discovered|realized)|"
+    r"it turns out (?:he|she|they)"
+    r")"
+)
+
+
+def withheld_resolution(user_message: str) -> bool:
+    """Caption truncates the event. Don't invent the missing scene."""
+    return bool(_WITHHELD_RESOLUTION.search(user_message or ""))
+
+
+def media_owns_meaning(user_message: str) -> bool:
+    """Caption points at unseen video/image. Don't manufacture what happened."""
+    return bool(_MEDIA_OWNS_MEANING.search(user_message or ""))
+
+
+def classify_contribution_budget(
+    user_message: str = "",
+    *,
+    plan: object = None,
+    interaction_shape: str = "",
+    social_mode: str = "",
+    selected_command: str = "",
+    response_budget: str = "",
+) -> str:
+    """How much new material the social moment authorized.
+
+    Distinct from response_budget (length) and capability (kind of intelligence).
+    Not a new interaction shape.
+    """
+    if plan is not None:
+        interaction_shape = interaction_shape or (getattr(plan, "interaction_shape", None) or "")
+        social_mode = social_mode or (getattr(plan, "social_mode", None) or "")
+        selected_command = selected_command or (getattr(plan, "selected_command", None) or "")
+        response_budget = response_budget or (getattr(plan, "response_budget", None) or "")
+        if not user_message:
+            user_message = getattr(plan, "original_subject", None) or ""
+
+    text = user_message or ""
+    if not interaction_shape and not social_mode and text:
+        from capability_detection import classify_social_mode
+
+        social = classify_social_mode(text)
+        interaction_shape = social.interaction_shape or "open"
+        social_mode = social.mode or "open"
+
+    from capability_detection import completed_comic_escalation
+
+    if withheld_resolution(text) or media_owns_meaning(text):
+        return CONTRIBUTION_ZERO
+    if completed_comic_escalation(text):
+        return CONTRIBUTION_ZERO
+    if interaction_shape in {
+        "terminal_bit",
+        "taggable_bit",
+        "pick_one",
+        "forced_choice",
+        "awe",
+    }:
+        return CONTRIBUTION_MICRO
+    if social_mode in {"provocative_generalization", "direct_participation"}:
+        return CONTRIBUTION_MICRO
+    if _LOW_STAKES_SWAGGER.search(text):
+        return CONTRIBUTION_MICRO
+    if interaction_shape == "comic_handoff":
+        return CONTRIBUTION_ONE_BEAT
+    if _COMIC_TAXONOMY.search(text) or _RECOGNITION_INTIMACY.search(text):
+        return CONTRIBUTION_ONE_BEAT
+    if social_mode == "comic":
+        return CONTRIBUTION_MICRO
+    if interaction_shape == "pick_and_defend":
+        return CONTRIBUTION_DEVELOP
+    if social_mode == "vulnerability":
+        return CONTRIBUTION_DEVELOP
+    if _MECHANISM_CLAIM.search(text):
+        return CONTRIBUTION_DEVELOP
+    if (response_budget or "").lower() == "high":
+        return CONTRIBUTION_DEVELOP
+    return CONTRIBUTION_ONE_BEAT
+
+
+def competes_with_punchline(user_message: str, response: str) -> bool:
+    """Completed joke got a second independent escalation."""
+    from capability_detection import classify_comic_bit_shape, completed_comic_escalation
+
+    if classify_comic_bit_shape(user_message or "") != "terminal" and not completed_comic_escalation(
+        user_message or ""
+    ):
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_COMPETING_PUNCHLINE.search(body))
+
+
+def exceeds_contribution_budget(user_message: str, response: str, *, plan: object = None) -> bool:
+    """Spent more new material than the social moment authorized."""
+    budget = classify_contribution_budget(user_message, plan=plan)
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    ss = _sentences(body)
+    wc = len(_words(body))
+    if competes_with_punchline(user_message, body):
+        return True
+    if budget == CONTRIBUTION_ZERO:
+        if withheld_resolution(user_message) and _INVENTED_SCENE.search(body):
+            return True
+        if media_owns_meaning(user_message) and wc > 20:
+            return True
+        return wc > 16 or len(ss) >= 2
+    if budget == CONTRIBUTION_MICRO:
+        if _BRAND_ANALYSIS.search(body):
+            return True
+        if insight_after_payoff(user_message, body):
+            return True
+        return len(ss) >= 3 or wc > 36
+    if budget == CONTRIBUTION_ONE_BEAT:
+        labeled = len(re.findall(r"(?m)^[A-Z][A-Za-z .]{1,24}:\s+\S+", body))
+        if labeled >= 3:
+            return True
+        if _RECOGNITION_DISSECTION.search(body):
+            return True
+        return len(ss) >= 4 or wc > 80
+    return False
+
+
 def classify_discovery_type(line: str, lens: str = "") -> str:
     """Tag stealable lines: Craft / Projection / Intensity / … (training signal)."""
     text = line or ""

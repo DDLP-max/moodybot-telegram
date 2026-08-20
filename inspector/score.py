@@ -396,6 +396,10 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             engagement_energy_flat,
             engagement_perfume,
             score_engagement_energy,
+            authors_unobserved_interior,
+            exceeds_contribution_budget,
+            competes_with_punchline,
+            classify_contribution_budget,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -634,6 +638,46 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                         "✓ He was right about Wakanda's hypocrisy; he just confused justice with vengeance.",
                     ],
                 )
+        if authors_unobserved_interior(prompt, out) or "authored_interior" in failures:
+            add(
+                "Object before author",
+                "fail",
+                "manufactured a hidden truth — motive, guilt, they-knew — that the prompt did not establish. Heat the established object; don't author unobserved interior because it hits harder.",
+                examples=[
+                    "✗ They call you crazy because now they have to live with the fact that you saw straight through them.",
+                    "✓ Everybody hates assumptions right up until the receipts arrive.",
+                    "✓ The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up.",
+                ],
+            )
+        else:
+            add(
+                "Object before author",
+                "pass",
+                "did not author an unobserved interior to juice the line",
+            )
+        if (
+            exceeds_contribution_budget(prompt, out)
+            or competes_with_punchline(prompt, out)
+            or "over_contribution" in failures
+        ):
+            add(
+                "Contribution budget",
+                "fail",
+                "spent more new material than the social moment authorized — capability is not permission",
+                examples=[
+                    "✗ At this point Claude deserves equity and a parking spot.",
+                    "✗ bringing back a fan favorite rebuilds goodwill",
+                    "✓ That's usually the part you end up missing.",
+                    "✓ Retirement plan denied. Crack the can.",
+                ],
+            )
+        else:
+            cb = classify_contribution_budget(prompt)
+            add(
+                "Contribution budget",
+                "pass",
+                f"{cb} — did not overspend the social moment",
+            )
     except Exception:
         pass
 

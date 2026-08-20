@@ -413,6 +413,10 @@ def test_guidance_names_the_gates():
     assert "comic premise must be inherited" in blob
     assert "take a side" in blob
     assert "comic handoff" in blob
+    assert "object before author" in blob
+    assert "receipts arrive" in blob
+    assert "contribution budget" in blob
+    assert "interest always finds time" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
     assert "recognition must advance" in burn

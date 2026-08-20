@@ -252,6 +252,8 @@ class ResponsePlan:
     premise_guards: List[str] = field(default_factory=list)
     # Writing-energy dimension after routing — not a new interaction shape.
     engagement_energy: bool = False
+    # Permission to add material — distinct from response_budget (length).
+    contribution_budget: str = "one_beat"  # zero | micro | one_beat | develop
 
 
 @dataclass
@@ -916,6 +918,39 @@ def response_budget_guidance(budget: str, structure: str = "", topic_mode: str =
     )
 
 
+def contribution_budget_guidance(budget: str) -> str:
+    """Permission to add material — not length, not a new interaction shape."""
+    b = (budget or "one_beat").lower()
+    if b == "zero":
+        return (
+            "\nCONTRIBUTION BUDGET: zero. The social job is complete, or the meaning "
+            "lives in unseen media / a withheld resolution. Do not invent the missing "
+            "scene. Do not compete with the punchline. Silence or a reaction. SNAP.\n"
+            "FAIL: \"At this point Claude deserves equity and a parking spot.\"\n"
+        )
+    if b == "micro":
+        return (
+            "\nCONTRIBUTION BUDGET: micro. Match the stakes. One tag that compresses "
+            "the existing frame. No brand analysis. No second joke. Intelligence is optional.\n"
+            "FAIL: popcorn chicken → \"bringing back a fan favorite rebuilds goodwill.\"\n"
+            "PASS: \"Retirement plan denied. Crack the can.\"\n"
+        )
+    if b == "one_beat":
+        return (
+            "\nCONTRIBUTION BUDGET: one beat. One earned addition — not a second list, "
+            "not a dissection. Recognition wants articulation. Comic taxonomies are "
+            "worlds to enter; one category is participation.\n"
+            "FAIL: eight more cities. FAIL: \"Shared laughter creates emotional intimacy because…\"\n"
+            "PASS: \"That's usually the part you end up missing.\"\n"
+        )
+    return (
+        "\nCONTRIBUTION BUDGET: develop. Earn the intelligence. Mechanism claims "
+        "require mechanism evidence. Rhetorical certainty is not evidentiary certainty. "
+        "/thoughts does not mean invent the smartest-sounding causal story.\n"
+        "Hierarchy: established object → permitted inference → TAKE A SIDE → voice.\n"
+    )
+
+
 def domain_mechanism_guidance(
     domain: str,
     lens: str = "",
@@ -1391,7 +1426,10 @@ def build_response_plan(
         "action": "action_line",
         "silence": "silence",
     }
-    from discovery_craft import engagement_energy_earned as _engagement_energy_earned
+    from discovery_craft import (
+        classify_contribution_budget as _classify_contribution_budget,
+        engagement_energy_earned as _engagement_energy_earned,
+    )
 
     engagement_energy = _engagement_energy_earned(
         user_message,
@@ -1402,6 +1440,13 @@ def build_response_plan(
         selected_command=selected_command or "/thoughts",
         response_budget=response_budget,
         premise_guards=list(social.premise_guards or []),
+    )
+    contribution_budget = _classify_contribution_budget(
+        user_message,
+        interaction_shape=social.interaction_shape or "open",
+        social_mode=social.mode or "open",
+        selected_command=selected_command or "/thoughts",
+        response_budget=response_budget,
     )
     return ResponsePlan(
         intent=intent,
@@ -1454,6 +1499,7 @@ def build_response_plan(
         tone_source=tone_source or "",
         premise_guards=list(social.premise_guards or []),
         engagement_energy=engagement_energy,
+        contribution_budget=contribution_budget,
     )
 
 
@@ -1467,11 +1513,12 @@ Layers (mandatory — keep independent):
   1) Identity — interpretive lens (perspective selection). Internally: whose eyes?
   2) Question — one invisible ask that opens many capabilities under that lens
   3) Intelligence — capability / mental tool (NOT an alias for the lens)
+  3b) Contribution budget — how much new material the social moment authorized (zero | micro | one_beat | develop)
   4) Writing — Depth × Shape (SNAP / KNIFE / REFLECTION)
   5) Editing — Editor (Gold) compression within the allocated budget
 
 Pipeline:
-claim type → interpretive lens → question → capability → mechanism fit → response budget (depth × shape) → generate → Editor → 🥃
+claim type → social job → interpretive lens → question → capability → contribution budget → response budget (depth × shape) → generate → Editor → 🥃
 
 LENS PERSISTENCE (invariant): once routing selects the lens, generation cannot change it,
 the Editor cannot change it, editorial cannot change it. Only routing can.
@@ -1594,6 +1641,27 @@ PERFUME: "Justice wears the mask of vengeance in the messy visceral hues of real
 Measure Position, Tension, Quotability — not share-bait.
 FAIL (essay-critical): "The diagnosis was airtight. Only the prescription turned him into the villain the story needed."
 PASS: "Killmonger. Wakanda spent centuries watching the world bleed while sitting on the means to help it, then called that restraint. He was right about the hypocrisy; he just confused justice with vengeance. The diagnosis made him dangerous. The prescription made him the villain."
+
+OBJECT BEFORE AUTHOR (survives the energy layer — not a new shape):
+Make the established truth hotter. Don't manufacture a hidden truth just because it hits harder.
+The object is what the prompt already proved. Do not author an unobserved interior — guilt, exposure, they-knew — to juice the line.
+Hierarchy: established object → permitted inference → TAKE A SIDE / energy → voice.
+Not: TAKE A SIDE → strongest possible interpretation → retrofit object.
+Inference can characterize the established pattern. It cannot invent the actor's private explanation for that pattern.
+FAIL: assumed → called crazy → later right becomes "they called you crazy because you saw straight through them."
+PASS: "Everybody hates assumptions right up until the receipts arrive."
+PASS: "The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up."
+PASS (inference from observable pattern): He texts every night but never has time to see you → "Funny how interest always finds time until time requires effort."
+FAIL (authored interior): "He likes knowing you're waiting for him."
+
+CONTRIBUTION BUDGET (permission to add — not a new shape; distinct from response budget / length):
+What kind of intelligence applies = capability. What form = interaction shape. How much you may add = contribution budget.
+zero | micro | one_beat | develop
+Having an insight is not evidence that the interaction needs one.
+MATCH THE STAKES. DON'T COMPETE WITH THE PUNCHLINE. MEDIA CAN OWN THE MEANING. MECHANISM REQUIRES EVIDENCE.
+FAIL (Paula): completed "invite him. send claude the google meet." → "At this point Claude deserves equity and a parking spot."
+FAIL (KFC): popcorn chicken swagger → brand analysis.
+PASS (Feelings): "That's usually the part you end up missing."
 
 RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
 
@@ -2101,7 +2169,10 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
     voice_bit = f" Voice: {voice}." if voice else ""
     struct_bit = f" Shape: {structure}."
     mech_bit = f" Mechanism family (internal): {mech}." if mech else ""
-    budget_bit = f" Depth: {budget}. Topic mode: {topic_mode}."
+    budget_bit = (
+        f" Depth: {budget}. Topic mode: {topic_mode}."
+        f" Contribution: {getattr(plan, 'contribution_budget', None) or 'one_beat'}."
+    )
     q_bit = f'\nQuestion (invisible step — ask before capability): "{q}"\n' if q else "\n"
     family = lens_capability_family(lens)
     family_bit = (
@@ -2212,6 +2283,9 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "made him dangerous. The prescription made him the villain. 🥃\"\n"
             "HEAT: \"He was right about Wakanda's hypocrisy; he just confused justice with vengeance.\"\n"
             "PERFUME: \"Justice wears the mask of vengeance in the messy visceral hues of reality.\"\n"
+            "OBJECT BEFORE AUTHOR: Make the established truth hotter. Do not manufacture a "
+            "hidden truth just because it hits harder. Do not author they-knew / exposure / "
+            "guilt the prompt did not prove.\n"
         )
         family_bit = ""
         q_bit = "\n"
@@ -2302,6 +2376,12 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "Heat, not perfume. Position, tension, quotability — not viral.\n"
             "HEAT: \"He was right about Wakanda's hypocrisy; he just confused justice with vengeance.\"\n"
             "PERFUME: \"Justice wears the mask of vengeance in the messy visceral hues of reality.\"\n"
+            "OBJECT BEFORE AUTHOR: Make the established truth hotter. Do not manufacture a "
+            "hidden truth just because it hits harder. Do not author they-knew / exposure / "
+            "guilt the prompt did not prove.\n"
+            "FAIL: assumed → called crazy → later right becomes \"they called you crazy "
+            "because you saw straight through them.\"\n"
+            "PASS: \"Everybody hates assumptions right up until the receipts arrive.\"\n"
         )
     return (
         f"RUNTIME TURN (this reply only):\n"
@@ -2320,6 +2400,9 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             )
         )
         + response_budget_guidance(budget, structure, topic_mode=topic_mode)
+        + contribution_budget_guidance(
+            getattr(plan, "contribution_budget", None) or "one_beat"
+        )
         + lens_voice
         + domain_block
         + extra
@@ -2981,6 +3064,7 @@ def finalize_response(
         "social_resolution": getattr(plan, "social_resolution", None) or "",
         "interaction_shape": getattr(plan, "interaction_shape", None) or "open",
         "engagement_energy": str(bool(getattr(plan, "engagement_energy", False))).lower(),
+        "contribution_budget": getattr(plan, "contribution_budget", None) or "one_beat",
         "tone_source": getattr(plan, "tone_source", None) or "",
         "selected_command": getattr(plan, "selected_command", None) or "",
         "closing_strategy": plan.closing_strategy,
