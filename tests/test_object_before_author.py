@@ -89,6 +89,15 @@ ENDGAME_CASINO_PASS = (
 ENDGAME_CUSTOMERS_PASS = (
     "Hard to win capitalism if your endgame is deleting all the customers. 🥃"
 )
+ENDGAME_COMPRESSED = (
+    "The confusion hits because the numbers were never supposed to survive "
+    "the collapse. They just had to stay bigger than the next guy's until the "
+    "lights went out. That's the only scoreboard that still registers when "
+    "everything else stops making sense. 🥃"
+)
+ENDGAME_SCORE_PASS = (
+    "Hard to call it winning when your endgame deletes the economy keeping score. 🥃"
+)
 TEXTS = "He texts you every night but somehow never has time to see you."
 TEXTS_INFERENCE = "Funny how interest always finds time until time requires effort. 🥃"
 TEXTS_AUTHORED = "He likes knowing you're waiting for him. 🥃"
@@ -221,6 +230,8 @@ def test_endgame_does_not_author_status_hunger():
     assert authors_unobserved_interior(ENDGAME, ENDGAME_LITERARY) is True
     assert authors_unobserved_interior(ENDGAME, ENDGAME_CASINO_PASS) is False
     assert authors_unobserved_interior(ENDGAME, ENDGAME_CUSTOMERS_PASS) is False
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_COMPRESSED) is True
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_SCORE_PASS) is False
     assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_FAIL, "SNAP")
     assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_LITERARY, "SNAP")
     assert "authored_interior" not in evaluate_gold_shape(ENDGAME, ENDGAME_PASS, "SNAP")
@@ -230,6 +241,10 @@ def test_endgame_does_not_author_status_hunger():
     )
     assert "authored_interior" not in evaluate_gold_shape(
         ENDGAME, ENDGAME_CUSTOMERS_PASS, "SNAP"
+    )
+    assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_COMPRESSED, "SNAP")
+    assert "authored_interior" not in evaluate_gold_shape(
+        ENDGAME, ENDGAME_SCORE_PASS, "SNAP"
     )
     insp_fail = _inspect(ENDGAME, ENDGAME_FAIL)
     assert _checks(insp_fail)["Object before author"]["status"] == "fail"
@@ -241,6 +256,10 @@ def test_endgame_does_not_author_status_hunger():
     assert _checks(insp_casino)["Object before author"]["status"] == "pass"
     insp_customers = _inspect(ENDGAME, ENDGAME_CUSTOMERS_PASS)
     assert _checks(insp_customers)["Object before author"]["status"] == "pass"
+    insp_compressed = _inspect(ENDGAME, ENDGAME_COMPRESSED)
+    assert _checks(insp_compressed)["Object before author"]["status"] == "fail"
+    insp_score = _inspect(ENDGAME, ENDGAME_SCORE_PASS)
+    assert _checks(insp_score)["Object before author"]["status"] == "pass"
     guide = plan_runtime_instruction(build_response_plan(ENDGAME)).lower()
     assert "licensed interior" in guide
     assert "permanent receipt" in guide
@@ -267,6 +286,7 @@ def test_authored_interior_family_is_one_violation():
         (TEXTS, TEXTS_AUTHORED),
         (ENDGAME, ENDGAME_FAIL),
         (ENDGAME, ENDGAME_LITERARY),
+        (ENDGAME, ENDGAME_COMPRESSED),
         (ENDGAME, override),
     )
     for prompt, reply in family:

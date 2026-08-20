@@ -1061,6 +1061,100 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update_id,
                 len(raw_content or ""),
             )
+            from generation_gate import (
+                reject_reason,
+                retry_messages,
+                settle_authored_interior,
+            )
+
+            structure_for_gate = (
+                getattr(response_plan, "routed_structure", None)
+                or getattr(response_plan, "preferred_structure", None)
+                or "SNAP"
+            )
+            budget_for_gate = (
+                getattr(response_plan, "response_budget", None) or "medium"
+            )
+            generation_retry = "false"
+            generation_reject = "none"
+            generation_settle = "first"
+            first_draft = raw_content
+            gate_reason = reject_reason(
+                user_input,
+                first_draft,
+                structure_for_gate,
+                budget_for_gate,
+            )
+            if gate_reason:
+                generation_reject = "authored_interior"
+                generation_retry = "true"
+                logger.info(
+                    "[update %s] Generation rejected %s; retrying once",
+                    update_id,
+                    generation_reject,
+                )
+                retry_draft = None
+                model_calls_for_update += 1
+                t_retry = time.monotonic()
+                try:
+                    retry_response = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                            "HTTP-Referer": "https://moodybot.ai",
+                            "X-Title": "MoodyBot"
+                        },
+                        json={
+                            "model": OPENROUTER_MODEL,
+                            "messages": retry_messages(messages, gate_reason),
+                            "max_tokens": 1000
+                        },
+                        timeout=20
+                    )
+                    retry_latency_ms = (time.monotonic() - t_retry) * 1000.0
+                    retry_result = retry_response.json()
+                    retry_has_choices = (
+                        isinstance(retry_result, dict)
+                        and isinstance(retry_result.get("choices"), list)
+                        and bool(retry_result["choices"])
+                    )
+                    if retry_response.status_code < 400 and retry_has_choices:
+                        retry_draft = retry_result["choices"][0]["message"]["content"]
+                        logger.info(
+                            "[update %s] Generation retry ok chars=%s model_calls=%s",
+                            update_id,
+                            len(retry_draft or ""),
+                            model_calls_for_update,
+                        )
+                    else:
+                        retry_fields = _openrouter_error_fields(retry_result)
+                        logger.error(
+                            "[update %s] OpenRouter retry failed status=%s "
+                            "error_code=%s error_message=%s latency_ms=%.0f",
+                            update_id,
+                            retry_response.status_code,
+                            retry_fields["error_code"],
+                            retry_fields["error_message"],
+                            retry_latency_ms,
+                        )
+                except Exception:
+                    logger.exception(
+                        "[update %s] OpenRouter retry failed; using grounded fallback",
+                        update_id,
+                    )
+                raw_content, generation_settle = settle_authored_interior(
+                    user_input,
+                    first_draft,
+                    retry_draft,
+                    structure_for_gate,
+                    budget_for_gate,
+                )
+                logger.info(
+                    "[update %s] Generation settled source=%s reject=%s",
+                    update_id,
+                    generation_settle,
+                    generation_reject,
+                )
             draft_paragraph_count = paragraph_count(raw_content)
 
             # Apply new post-processing pipeline
@@ -1124,6 +1218,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             # Immutable after final_surface_render inside finalize_response.
             content = finalized.text
+            finalized.diagnostics["generation_retry"] = generation_retry
+            finalized.diagnostics["generation_reject"] = generation_reject
+            finalized.diagnostics["generation_settle"] = generation_settle
             logger.info(
                 "[update %s] Finalization diagnostics: %s",
                 update_id,

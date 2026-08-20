@@ -1368,11 +1368,16 @@ _AUTHORED_INTERIOR = re.compile(
     r"the bunker is just the final scoreboard|"
     r"numbers on the screen aren'?t a future currency|"
     r"bigger than the other|"
+    r"bigger than the next|"
+    r"stay bigger than|"
     r"keeping the numbers bigger|"
     r"the whole point was always|"
     r"pile still proves|"
     r"walk away empty-handed|"
-    r"didn'?t walk away empty"
+    r"didn'?t walk away empty|"
+    r"only scoreboard|"
+    r"scoreboard that still|"
+    r"relative.?status"
     r")"
 )
 # Override the user's stated object with an unsupplied feeling.
@@ -1383,7 +1388,8 @@ _AUTHORED_USER_INTERIOR = re.compile(
     r"quieter dread|"
     r"what you(?:'re| are) really (?:asking|feeling|afraid)|"
     r"the real (?:fear|dread|question) is|"
-    r"it'?s the quieter"
+    r"it'?s the quieter|"
+    r"confusion hits because"
     r")"
 )
 _USER_NAMED_AFFECT = re.compile(

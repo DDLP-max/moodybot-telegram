@@ -912,6 +912,7 @@ def apply_gold_shape_pass(
 
     # Failures that warrant rewrite
     # mechanism_mismatch is diagnostic only — do not invent a better insight here.
+    # authored_interior is a generation reject (retry once), never a compression rewrite.
     rewrite_triggers = {
         "premise_restatement",
         "thesis_repetition",
