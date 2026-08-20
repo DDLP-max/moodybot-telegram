@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from capability_detection import classify_comic_bit_shape, classify_social_mode, detect_comic_premise
-from discovery_craft import insight_after_payoff, sidesteps_forced_choice
+from discovery_craft import inert_terminal_tag, insight_after_payoff, sidesteps_forced_choice
 from gold_shape import evaluate_gold_shape
 from response_finalization import (
     build_response_plan,
@@ -29,7 +29,9 @@ ENERGY_FAIL = (
     "It's the daily bribe that keeps the version of you who still thinks the car is possible "
     "from checking out completely. 🥃"
 )
-ENERGY_PASS = "Fair. 🥃"
+ENERGY_INERT = "Fair. 🥃"
+ENERGY_MICRO = "Retirement plan denied. Crack the can. 🥃"
+ENERGY_MICRO_2 = "Financial literacy has gone too far. 🥃"
 ENERGY_SILENCE = "🥃"
 
 DATA_CENTER_GIRL = (
@@ -72,40 +74,51 @@ def test_energy_drink_is_terminal_bit():
     plan = build_response_plan(ENERGY_DRINK)
     assert plan.interaction_shape == "terminal_bit"
     assert plan.primary_capability == "Humor As Disruption"
-    assert plan.mechanism_hint == "terminal_bit_leave_payoff"
+    assert plan.mechanism_hint == "terminal_bit_micro_tag"
     assert plan.preferred_structure == "SNAP"
     assert plan.response_budget == "low"
     assert plan.comic_payoff_is_terminal is True
-    assert plan.landing == "silence"
+    assert plan.landing == "body_ends_response"
     assert plan.primary_capability != "Emotional State Recognition"
 
     guide = plan_runtime_instruction(plan).lower()
     assert "terminal bit" in guide
-    assert "insight is not additive" in guide
+    assert "no new interpretation" in guide
+    assert "fair. 🥃" in guide
 
     assert insight_after_payoff(ENERGY_DRINK, ENERGY_FAIL) is True
-    assert insight_after_payoff(ENERGY_DRINK, ENERGY_PASS) is False
-    assert insight_after_payoff(ENERGY_DRINK, ENERGY_SILENCE) is False
+    assert inert_terminal_tag(ENERGY_DRINK, ENERGY_INERT) is True
+    assert inert_terminal_tag(ENERGY_DRINK, ENERGY_MICRO) is False
+    assert insight_after_payoff(ENERGY_DRINK, ENERGY_INERT) is False
     fails = evaluate_gold_shape(ENERGY_DRINK, ENERGY_FAIL, "SNAP")
     assert "insight_after_payoff" in fails
-    ok = evaluate_gold_shape(ENERGY_DRINK, ENERGY_PASS, "SNAP")
+    inert_fails = evaluate_gold_shape(ENERGY_DRINK, ENERGY_INERT, "SNAP")
+    assert "inert_terminal_tag" in inert_fails
+    ok = evaluate_gold_shape(ENERGY_DRINK, ENERGY_MICRO, "SNAP")
+    assert "inert_terminal_tag" not in ok
     assert "insight_after_payoff" not in ok
 
 
-def test_terminal_bit_bounded_ack_passes_delivery_gate():
+def test_terminal_bit_micro_tag_contract():
     plan = build_response_plan(ENERGY_DRINK)
     assert plan.interaction_shape == "terminal_bit"
-    assert plan.landing == "silence"
 
-    for ack in (ENERGY_SILENCE, ENERGY_PASS, "Exactly. 🥃", "Case closed. 🥃"):
-        assert is_valid_terminal_response(ack, plan) is True, ack
-        assert is_deliverable_response(ack, plan) is True, ack
+    for micro in (ENERGY_MICRO, ENERGY_MICRO_2, "Ten years of discipline and still no Porsche. Drink up. 🥃"):
+        assert is_valid_terminal_response(micro, plan) is True, micro
+        assert is_deliverable_response(micro, plan) is True, micro
+        assert inert_terminal_tag(ENERGY_DRINK, micro) is False, micro
+
+    for inert in (ENERGY_INERT, "Exactly. 🥃", "Agreed. 🥃"):
+        assert inert_terminal_tag(ENERGY_DRINK, inert) is True, inert
+        normalized, collapsed = normalize_terminal_response(inert, plan, ENERGY_DRINK)
+        assert collapsed is True
+        assert normalized == "🥃"
 
     long_insight = (
         "Actually, the energy drink represents your inability to surrender hope. 🥃"
     )
     assert is_valid_terminal_response(long_insight, plan) is False
-    normalized, collapsed = normalize_terminal_response(long_insight, plan)
+    normalized, collapsed = normalize_terminal_response(long_insight, plan, ENERGY_DRINK)
     assert collapsed is True
     assert normalized == "🥃"
 
@@ -113,11 +126,11 @@ def test_terminal_bit_bounded_ack_passes_delivery_gate():
     assert result.text.strip() == "🥃"
     assert is_deliverable_response(result.text, plan) is True
 
+    result_good = finalize_response(ENERGY_MICRO, ENERGY_DRINK, plan=plan)
+    assert ENERGY_MICRO.split("🥃")[0].strip() in result_good.text
+
     open_plan = build_response_plan("Why did Game of Thrones season 8 fail?")
-    assert is_valid_terminal_response(ENERGY_SILENCE, open_plan) is False
-    assert is_valid_terminal_response(ENERGY_PASS, open_plan) is False
-    assert is_deliverable_response(ENERGY_SILENCE, open_plan) is False
-    assert is_deliverable_response(ENERGY_PASS, open_plan) is False
+    assert is_deliverable_response(ENERGY_INERT, open_plan) is False
     assert is_deliverable_response("k", open_plan) is False
 
 

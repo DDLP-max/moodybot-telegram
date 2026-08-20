@@ -1162,11 +1162,14 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
     if mode.terminal_bit or mode.interaction_shape == "terminal_bit":
         return (
             "\nSOCIAL MODE: terminal comic bit — setup and punchline are complete.\n"
-            "TERMINAL BIT: insight is not additive. Do not explain what the joke is "
-            "really about. No hidden transaction, daily bribe, or existential upgrade.\n"
-            "Silence-equivalent: 🥃 alone, or one tiny reinforcing tag at most. SNAP.\n"
-            "FAIL: energy-drink math → \"The $2.50 isn't really about the car… daily bribe…\"\n"
-            "PASS: \"🥃\" or \"Fair. 🥃\"\n"
+            "TERMINAL BIT: no new interpretation. Do not explain what the joke is really "
+            "about. No hidden transaction, daily bribe, or existential upgrade.\n"
+            "Add one micro-tag that compresses or heightens the existing joke — same frame, "
+            "new punch. Not a reaction button. SNAP.\n"
+            "FAIL (insight): energy-drink math → \"The $2.50 isn't really about the car…\"\n"
+            "FAIL (inert): \"Fair. 🥃\" / \"Exactly. 🥃\" / \"Agreed. 🥃\"\n"
+            "PASS: \"Retirement plan denied. Crack the can. 🥃\"\n"
+            "PASS: \"Financial literacy has gone too far. 🥃\"\n"
         )
     if mode.comic_handoff:
         return (

@@ -1137,10 +1137,10 @@ def build_response_plan(
         lens = "Hank Moody"
         voice = None
         preferred_structure = "SNAP"
-        mechanism_hint = "terminal_bit_leave_payoff"
+        mechanism_hint = "terminal_bit_micro_tag"
         topic_mode = "compress"
         response_budget = "low"
-        landing = "silence"
+        landing = "body_ends_response"
         insight = False
         domain = "general"
     elif social.interaction_shape == "pick_and_defend":
@@ -1328,11 +1328,11 @@ def build_response_plan(
         # Keep SNAP/low fine for tags — guidance forbids curing the premise
         if social.interaction_shape == "terminal_bit":
             supporting = None
-            mechanism_hint = "terminal_bit_leave_payoff"
+            mechanism_hint = "terminal_bit_micro_tag"
             preferred_structure = "SNAP"
             response_budget = "low"
             topic_mode = "compress"
-            landing = "silence"
+            landing = "body_ends_response"
             insight = False
         elif social.comic_handoff:
             mechanism_hint = "comic_handoff_complete"
@@ -2143,11 +2143,15 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
     elif terminal:
         extra = (
             "\nTERMINAL BIT CONTRACT: Setup and punchline are complete. "
-            "Insight is not additive. Do not explain what the joke is really about. "
-            "Do not import hidden transaction, bribe, or existential upgrade. "
-            "Silence-equivalent: 🥃 alone, or one tiny reinforcing tag at most. SNAP.\n"
-            "FAIL: \"The math works until you notice the $2.50 isn't really about the car…\"\n"
-            "PASS: \"🥃\" or \"Fair. 🥃\"\n"
+            "No new interpretation — do not explain what the joke is really about. "
+            "Do not import hidden transaction, bribe, or existential upgrade.\n"
+            "Add one micro-tag that compresses or heightens the existing joke inside "
+            "the same frame. Not a reaction button. Not therapy. SNAP.\n"
+            "FAIL (insight): \"The math works until you notice the $2.50 isn't really about the car…\"\n"
+            "FAIL (inert): \"Fair. 🥃\" / \"Exactly. 🥃\" / \"Agreed. 🥃\"\n"
+            "PASS: \"Retirement plan denied. Crack the can. 🥃\"\n"
+            "PASS: \"Ten years of discipline and still no Porsche. Drink up. 🥃\"\n"
+            "PASS: \"Financial literacy has gone too far. 🥃\"\n"
         )
         family_bit = ""
         q_bit = "\n"
@@ -2477,8 +2481,8 @@ def _apply_closing_strategy(
         cleaned, punch_stripped = strip_post_comic_punchline(before)
         cleaned2, mod = protective_cleanup(cleaned)
         plan.comic_payoff_is_terminal = True
-        plan.landing = "silence"
-        plan.closing_strategy = "silence"
+        plan.landing = "body_ends_response"
+        plan.closing_strategy = "none"
         plan.allow_question = False
         logger.info(
             "FINALIZER_TRACE comic_payoff_terminal=1 recognition_landing=0 "
@@ -2595,8 +2599,8 @@ def _normalize_compare(text: str) -> str:
 
 TERMINAL_BIT_ACK = "🥃"
 _MIN_DELIVERABLE_CHARS = 10
-_MAX_TERMINAL_TAG_CHARS = 30
-_MAX_TERMINAL_TAG_WORDS = 3
+_MAX_TERMINAL_TAG_CHARS = 72
+_MAX_TERMINAL_TAG_WORDS = 14
 
 
 def is_valid_terminal_response(text: str, plan: object) -> bool:
@@ -2623,13 +2627,23 @@ def is_valid_terminal_ack(text: str, plan: object) -> bool:
     return is_valid_terminal_response(text, plan)
 
 
-def normalize_terminal_response(text: str, plan: object) -> Tuple[str, bool]:
-    """Finalizer: valid tiny tags survive; invalid elaborations collapse to whiskey."""
+def normalize_terminal_response(
+    text: str, plan: object, user_message: str = ""
+) -> Tuple[str, bool]:
+    """Finalizer: contributing micro-tags survive; insight/inert collapse to whiskey."""
     if getattr(plan, "interaction_shape", None) != "terminal_bit":
         return (text or "").strip(), False
     cleaned = (text or "").strip()
     if not cleaned:
         return TERMINAL_BIT_ACK, True
+    prompt = user_message or getattr(plan, "original_subject", None) or ""
+    try:
+        from discovery_craft import inert_terminal_tag, insight_after_payoff
+
+        if inert_terminal_tag(prompt, cleaned) or insight_after_payoff(prompt, cleaned):
+            return TERMINAL_BIT_ACK, True
+    except Exception:
+        pass
     if is_valid_terminal_response(cleaned, plan):
         if cleaned == TERMINAL_BIT_ACK:
             return TERMINAL_BIT_ACK, False
@@ -2833,7 +2847,7 @@ def finalize_response(
         post_reasons.append("surface_typography")
 
     if getattr(plan, "interaction_shape", None) == "terminal_bit":
-        text, terminal_collapsed = normalize_terminal_response(text, plan)
+        text, terminal_collapsed = normalize_terminal_response(text, plan, user_message)
         if terminal_collapsed:
             post_reasons.append("terminal_ack_collapsed")
 

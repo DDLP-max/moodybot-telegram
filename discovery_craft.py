@@ -896,6 +896,31 @@ def insight_after_payoff(user_message: str, response: str) -> bool:
     return words > 30
 
 
+_INERT_TERMINAL_REACTION = re.compile(
+    r"(?i)^(?:"
+    r"fair|exactly|agreed|true|yes|correct|accurate|indeed|"
+    r"case closed|carry on|pretty much|basically|this|same|"
+    r"totally|right|facts|wow|nice|lol|mood|truth|same energy|"
+    r"well said|well put|spot on|preach"
+    r")(?:[.!?]|\s)*$"
+)
+
+
+def inert_terminal_tag(user_message: str, response: str) -> bool:
+    """Terminal micro-tag that adds no comic beat — reaction-button compliance only."""
+    from capability_detection import classify_comic_bit_shape
+
+    if classify_comic_bit_shape(user_message or "") != "terminal":
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip()).strip()
+    if not body:
+        return False
+    if _INERT_TERMINAL_REACTION.match(body):
+        return True
+    words = re.findall(r"[a-z']+", body.lower())
+    return len(words) <= 2 and len(body) <= 16
+
+
 _SIDESTEP_FORCED_CHOICE = re.compile(
     r"(?i)(?:"
     r"\b(?:sidestep|skip)\s+(?:all\s+three|the\s+options|these)\b|"

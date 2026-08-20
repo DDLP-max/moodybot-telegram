@@ -388,6 +388,7 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             rhetorical_explained,
             missed_comic_handoff,
             insight_after_payoff,
+            inert_terminal_tag,
             sidesteps_forced_choice,
             reverses_premise_guard,
             uninvited_corrective_analysis,
@@ -542,6 +543,23 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "Terminal bit",
                 "pass",
                 "did not upgrade a finished comic payoff into philosophy",
+            )
+        if inert_terminal_tag(prompt, out) or "inert_terminal_tag" in failures:
+            add(
+                "Terminal contribution",
+                "fail",
+                "terminal micro-tag was inert — reaction button, not a comic beat",
+                examples=[
+                    "✗ Fair. 🥃",
+                    "✓ Retirement plan denied. Crack the can. 🥃",
+                    "✓ Financial literacy has gone too far. 🥃",
+                ],
+            )
+        else:
+            add(
+                "Terminal contribution",
+                "pass",
+                "micro-tag compressed or heightened the existing payoff",
             )
         if sidesteps_forced_choice(prompt, out) or "sidestep_forced_choice" in failures:
             add(
