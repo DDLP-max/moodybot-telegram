@@ -56,6 +56,23 @@ def test_scoreboard_object_heat_is_not_rejected():
     assert reject_reason(ENDGAME, ENDGAME_SCORE_PASS, "SNAP") is None
 
 
+def test_addiction_telos_is_rejected_portfolio_is_not():
+    addiction = (
+        "It's the same quiet addiction that never needed a finish line. You keep "
+        "stacking the chips because the moment you stop counting is the moment you "
+        "have to admit the game was only ever the counting. 🥃"
+    )
+    portfolio = (
+        "Pretty impressive portfolio if the final asset is a bunker in an economy "
+        "that no longer exists. 🥃"
+    )
+    assert reject_reason(ENDGAME, addiction, "SNAP") == AUTHORED_INTERIOR_RETRY
+    assert reject_reason(ENDGAME, portfolio, "SNAP") is None
+    text, source = settle_authored_interior(ENDGAME, addiction, addiction)
+    assert source == "fallback"
+    assert text == CONSERVATIVE_FALLBACK
+
+
 def test_retry_instruction_does_not_feed_back_the_draft():
     messages = [{"role": "user", "content": ENDGAME}]
     out = retry_messages(messages, AUTHORED_INTERIOR_RETRY)
@@ -218,6 +235,8 @@ if __name__ == "__main__":
     print("ok surgical")
     test_scoreboard_object_heat_is_not_rejected()
     print("ok pass")
+    test_addiction_telos_is_rejected_portfolio_is_not()
+    print("ok addiction telos")
     test_retry_instruction_does_not_feed_back_the_draft()
     print("ok discard draft")
     test_settle_ships_first_when_valid()

@@ -1415,6 +1415,32 @@ _UNESTABLISHED_INTERIOR_PAYLOAD = re.compile(
     r"\bego\b"
     r")"
 )
+# Rhetorical why / what's-the-point is not a license to invent a private telos.
+_ASKED_UNSUPPORTED_WHY = re.compile(
+    r"(?i)("
+    r"what(?:'s| is) the (?:actual )?point|"
+    r"the actual point|"
+    r"what are \w+(?: \w+){0,3} (?:actually )?.{0,40}\bfor\b|"
+    r"\bwhy (?:do|did|are|would) (?:they|he|she|billionaires)\b"
+    r")"
+)
+# The operation of answering that why with unobserved interior — not a motive-noun list.
+# Status, addiction, fear, ego, control, denial all use these frames.
+_AUTHORED_WHY_TELOS = re.compile(
+    r"(?i)("
+    r"\b(?:addiction|compulsion|obsession|craving)\b|"
+    r"\baddicted\b|"
+    r"never needed a finish|"
+    r"the game was only|"
+    r"only ever the|"
+    r"for its own sake|"
+    r"stop \w+ing is the moment|"
+    r"have to admit the game|"
+    r"because the moment (?:you|they)|"
+    r"stacking the chips because|"
+    r"keep (?:stacking|counting|hoarding) because"
+    r")"
+)
 
 
 def authors_unobserved_interior(user_message: str, response: str) -> bool:
@@ -1425,6 +1451,8 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
     Referencing the object then launching into unestablished interior is still a fail.
     Changing the metaphor does not change the proposition. Overriding the user's
     stated object with an unsupplied feeling is also authored interior.
+    Answering an unsupported why with a private motive or condition is
+    authored interior, whatever noun Grok picks for that motive.
     """
     from capability_detection import classify_social_mode, detect_comic_premise
 
@@ -1447,6 +1475,10 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
         return True
     if _AUTHORED_USER_INTERIOR.search(body) and not _USER_NAMED_AFFECT.search(
         user_message or ""
+    ):
+        return True
+    if _ASKED_UNSUPPORTED_WHY.search(user_message or "") and _AUTHORED_WHY_TELOS.search(
+        body
     ):
         return True
     return bool(

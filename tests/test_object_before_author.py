@@ -17,6 +17,7 @@ Contract that survives the energy layer:
 from __future__ import annotations
 
 from discovery_craft import authors_unobserved_interior
+from generation_gate import reject_reason, settle_authored_interior
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
 from prompt_runtime import build_runtime_prompt
@@ -97,6 +98,21 @@ ENDGAME_COMPRESSED = (
 )
 ENDGAME_SCORE_PASS = (
     "Hard to call it winning when your endgame deletes the economy keeping score. 🥃"
+)
+ENDGAME_ADDICTION = (
+    "It's the same quiet addiction that never needed a finish line. You keep "
+    "stacking the chips because the moment you stop counting is the moment you "
+    "have to admit the game was only ever the counting. Eventually the bunker "
+    "is just a very expensive room where the numbers on the screen still move "
+    "but nothing else does. 🥃"
+)
+ENDGAME_TELOS_NO_NOUN = (
+    "You keep stacking the chips because the moment you stop counting is the "
+    "moment you have to admit the game was only ever the counting. 🥃"
+)
+ENDGAME_PORTFOLIO_PASS = (
+    "Pretty impressive portfolio if the final asset is a bunker in an economy "
+    "that no longer exists. 🥃"
 )
 TEXTS = "He texts you every night but somehow never has time to see you."
 TEXTS_INFERENCE = "Funny how interest always finds time until time requires effort. 🥃"
@@ -232,6 +248,9 @@ def test_endgame_does_not_author_status_hunger():
     assert authors_unobserved_interior(ENDGAME, ENDGAME_CUSTOMERS_PASS) is False
     assert authors_unobserved_interior(ENDGAME, ENDGAME_COMPRESSED) is True
     assert authors_unobserved_interior(ENDGAME, ENDGAME_SCORE_PASS) is False
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_ADDICTION) is True
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_TELOS_NO_NOUN) is True
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_PORTFOLIO_PASS) is False
     assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_FAIL, "SNAP")
     assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_LITERARY, "SNAP")
     assert "authored_interior" not in evaluate_gold_shape(ENDGAME, ENDGAME_PASS, "SNAP")
@@ -245,6 +264,13 @@ def test_endgame_does_not_author_status_hunger():
     assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_COMPRESSED, "SNAP")
     assert "authored_interior" not in evaluate_gold_shape(
         ENDGAME, ENDGAME_SCORE_PASS, "SNAP"
+    )
+    assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_ADDICTION, "SNAP")
+    assert "authored_interior" in evaluate_gold_shape(
+        ENDGAME, ENDGAME_TELOS_NO_NOUN, "SNAP"
+    )
+    assert "authored_interior" not in evaluate_gold_shape(
+        ENDGAME, ENDGAME_PORTFOLIO_PASS, "SNAP"
     )
     insp_fail = _inspect(ENDGAME, ENDGAME_FAIL)
     assert _checks(insp_fail)["Object before author"]["status"] == "fail"
@@ -260,6 +286,12 @@ def test_endgame_does_not_author_status_hunger():
     assert _checks(insp_compressed)["Object before author"]["status"] == "fail"
     insp_score = _inspect(ENDGAME, ENDGAME_SCORE_PASS)
     assert _checks(insp_score)["Object before author"]["status"] == "pass"
+    insp_addiction = _inspect(ENDGAME, ENDGAME_ADDICTION)
+    assert _checks(insp_addiction)["Object before author"]["status"] == "fail"
+    insp_telos = _inspect(ENDGAME, ENDGAME_TELOS_NO_NOUN)
+    assert _checks(insp_telos)["Object before author"]["status"] == "fail"
+    insp_portfolio = _inspect(ENDGAME, ENDGAME_PORTFOLIO_PASS)
+    assert _checks(insp_portfolio)["Object before author"]["status"] == "pass"
     guide = plan_runtime_instruction(build_response_plan(ENDGAME)).lower()
     assert "licensed interior" in guide
     assert "permanent receipt" in guide
@@ -287,11 +319,31 @@ def test_authored_interior_family_is_one_violation():
         (ENDGAME, ENDGAME_FAIL),
         (ENDGAME, ENDGAME_LITERARY),
         (ENDGAME, ENDGAME_COMPRESSED),
+        (ENDGAME, ENDGAME_ADDICTION),
+        (ENDGAME, ENDGAME_TELOS_NO_NOUN),
         (ENDGAME, override),
     )
     for prompt, reply in family:
         assert authors_unobserved_interior(prompt, reply) is True
         assert "authored_interior" in evaluate_gold_shape(prompt, reply, "SNAP")
+
+
+def test_unsupported_why_fails_on_telos_not_motive_noun():
+    """The violation is answering why with interior, not the particular theory."""
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_ADDICTION) is True
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_TELOS_NO_NOUN) is True
+    assert "addiction" not in ENDGAME_TELOS_NO_NOUN.lower()
+    assert "status" not in ENDGAME_TELOS_NO_NOUN.lower()
+    assert "next guy" not in ENDGAME_TELOS_NO_NOUN.lower()
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_PORTFOLIO_PASS) is False
+    assert reject_reason(ENDGAME, ENDGAME_ADDICTION, "SNAP") is not None
+    assert reject_reason(ENDGAME, ENDGAME_PORTFOLIO_PASS, "SNAP") is None
+    text, source = settle_authored_interior(
+        ENDGAME, ENDGAME_ADDICTION, ENDGAME_ADDICTION
+    )
+    assert source == "fallback"
+    assert "addiction" not in text.lower()
+    assert "counting" not in text.lower()
 
 
 def test_core_write_and_energy_name_the_contract():
@@ -346,5 +398,7 @@ if __name__ == "__main__":
     print("ok killmonger")
     test_authored_interior_family_is_one_violation()
     print("ok family")
+    test_unsupported_why_fails_on_telos_not_motive_noun()
+    print("ok telos")
     test_core_write_and_energy_name_the_contract()
     print("ok")
