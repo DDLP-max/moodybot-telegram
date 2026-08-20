@@ -256,22 +256,36 @@ def test_killmonger_heat_does_not_false_positive():
     assert _checks(insp)["Object before author"]["status"] == "pass"
 
 
+def test_authored_interior_family_is_one_violation():
+    """Different surface language, same latent violation."""
+    override = (
+        "The confusion isn't really about their spreadsheets. It's the quieter "
+        "dread that the room is already gone. 🥃"
+    )
+    family = (
+        (MATT, LAUNCHPAD),
+        (TEXTS, TEXTS_AUTHORED),
+        (ENDGAME, ENDGAME_FAIL),
+        (ENDGAME, ENDGAME_LITERARY),
+        (ENDGAME, override),
+    )
+    for prompt, reply in family:
+        assert authors_unobserved_interior(prompt, reply) is True
+        assert "authored_interior" in evaluate_gold_shape(prompt, reply, "SNAP")
+
+
 def test_core_write_and_energy_name_the_contract():
+    """Durable concepts — not historical FAIL phrases pinned verbatim."""
     blob = CORE_WRITE_DIRECTIVE.lower()
     assert "object before author" in blob
     assert "established truth hotter" in blob
-    assert "receipts arrive" in blob
-    assert "saw straight through them" in blob
-    assert "interest always finds time" in blob
-    assert "waiting for him" in blob
-    assert "contribution budget" in blob
-    assert "rewrite the story" in blob
-    assert "shelf life" in blob
     assert "licensed interior" in blob
-    assert "permanent receipt" in blob
     assert "metaphor inherits" in blob
-    assert "quieter dread" in blob
-    assert "no casino left" in blob
+    assert "does not change the proposition" in blob
+    assert "literary wrapping" in blob
+    assert "heat the contradiction" in blob
+    assert "really feeling" in blob
+    assert "contribution budget" in blob
 
     closer = plan_closer_instruction(build_response_plan(MATT)).lower()
     assert "object before author" in closer
@@ -279,6 +293,9 @@ def test_core_write_and_energy_name_the_contract():
     assert "object before author" in turn
     assert "licensed interior" in turn
     assert "metaphor inherits" in turn
+    assert "literary" in turn
+    assert "really feeling" in turn
+    assert "heat the contradiction" in turn
 
     villain = build_response_plan(VILLAIN, selected_command="/thoughts")
     guide = plan_runtime_instruction(villain).lower()
@@ -307,5 +324,7 @@ if __name__ == "__main__":
     print("ok gold")
     test_killmonger_heat_does_not_false_positive()
     print("ok killmonger")
+    test_authored_interior_family_is_one_violation()
+    print("ok family")
     test_core_write_and_energy_name_the_contract()
     print("ok")
