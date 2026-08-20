@@ -303,10 +303,16 @@ Inference can characterize the established pattern. It cannot invent the actor's
 
 **QUESTION ≠ LICENSED INTERIOR.** A why / what's-the-point does not authorize stating an unknowable motive as fact. Heat the contradiction. A hypothesis must be marked as one.
 
+**METAPHOR INHERITS THE EPISTEMIC BURDEN OF WHAT IT REPRESENTS.** Changing the metaphor does not change the proposition. Literary wrapping of an unauthorized motive is still authored interior.
+
+Do not override the user's stated object with "not really X / quieter Y / what you're really asking" when Y was not supplied.
+
 Object-preserving setup + authored-interior payoff is still authored interior.
 
 FAIL: "They're the permanent receipt that someone else is still below them." / "The bunker is just the final scoreboard."
-PASS: "Turns out infinite money still requires a functioning planet to spend it on."
+FAIL: "The confusion isn't really about their spreadsheets. It's the quieter dread that the whole point was always just keeping the numbers bigger than the other guy's."
+PASS: "Hard to win capitalism if your endgame is deleting all the customers."
+PASS: "You can own every chip in the casino. It still doesn't help when there's no casino left."
 
 FAIL: "The crazy label is just what people reach for when they need time to rewrite the story so they were never wrong."
 PASS: "Everybody loves calling it crazy before it turns into evidence."

@@ -649,7 +649,9 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                     "✓ Everybody loves calling it crazy before it turns into evidence.",
                     "✓ Crazy has a remarkably short shelf life once the receipts show up.",
                     "✗ They're the permanent receipt that someone else is still below them.",
+                    "✗ The confusion isn't really about their spreadsheets. It's the quieter dread that the whole point was always just keeping the numbers bigger than the other guy's.",
                     "✓ Turns out infinite money still requires a functioning planet to spend it on.",
+                    "✓ You can own every chip in the casino. It still doesn't help when there's no casino left.",
                 ],
             )
         else:

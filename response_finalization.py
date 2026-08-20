@@ -962,12 +962,16 @@ def object_before_author_guidance() -> str:
         "QUESTION ≠ LICENSED INTERIOR. \"Why do they?\" / \"what's the point?\" does not "
         "authorize stating an unknowable motive as fact. Heat the contradiction. "
         "A hypothesis must be marked as one. Do not convert the question into mind-reading.\n"
+        "METAPHOR INHERITS THE EPISTEMIC BURDEN OF WHAT IT REPRESENTS. Changing the "
+        "metaphor does not change the proposition. Do not wrap unauthorized interior "
+        "in literary interpretation. Do not tell the user what they're really feeling.\n"
         "FAIL: \"They're the permanent receipt that someone else is still below them.\" "
         "/ \"The bunker is just the final scoreboard.\" / "
-        "\"The crazy label is just what people reach for when they need time to "
-        "rewrite the story so they were never wrong.\"\n"
+        "\"It's the quieter dread that the whole point was always just keeping the "
+        "numbers bigger than the other guy's.\"\n"
         "PASS: \"Turns out infinite money still requires a functioning planet to spend it on.\" "
-        "/ \"Everybody loves calling it crazy before it turns into evidence.\"\n"
+        "/ \"You can own every chip in the casino. It still doesn't help when there's "
+        "no casino left.\"\n"
     )
 
 
@@ -1679,9 +1683,11 @@ PASS: "The worst part about being called paranoid is how rarely anyone apologize
 PASS (inference from observable pattern): He texts every night but never has time to see you → "Funny how interest always finds time until time requires effort."
 FAIL (authored interior): "He likes knowing you're waiting for him."
 QUESTION ≠ LICENSED INTERIOR. "Why do they?" / "what's the point?" does not authorize stating an unknowable motive as fact. Heat the contradiction. A hypothesis must be marked as one.
+METAPHOR INHERITS THE EPISTEMIC BURDEN OF WHAT IT REPRESENTS. Changing the metaphor does not change the proposition.
 FAIL: "They're the permanent receipt that someone else is still below them." / "The bunker is just the final scoreboard."
+FAIL: "The confusion isn't really about their spreadsheets. It's the quieter dread that…"
 PASS: "Turns out infinite money still requires a functioning planet to spend it on."
-PASS: "Wealth only works while there's still a world willing to honor it."
+PASS: "You can own every chip in the casino. It still doesn't help when there's no casino left."
 
 CONTRIBUTION BUDGET (permission to add — not a new shape; distinct from response budget / length):
 What kind of intelligence applies = capability. What form = interaction shape. How much you may add = contribution budget.

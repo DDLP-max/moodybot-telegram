@@ -419,6 +419,7 @@ def test_guidance_names_the_gates():
     assert "interest always finds time" in blob
     assert "rewrite the story" in blob
     assert "licensed interior" in blob
+    assert "metaphor inherits" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
     assert "recognition must advance" in burn

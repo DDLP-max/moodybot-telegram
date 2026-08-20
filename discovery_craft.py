@@ -1366,8 +1366,28 @@ _AUTHORED_INTERIOR = re.compile(
     r"still below them|"
     r"people beneath them|"
     r"the bunker is just the final scoreboard|"
-    r"numbers on the screen aren'?t a future currency"
+    r"numbers on the screen aren'?t a future currency|"
+    r"bigger than the other|"
+    r"keeping the numbers bigger|"
+    r"the whole point was always|"
+    r"pile still proves|"
+    r"walk away empty-handed|"
+    r"didn'?t walk away empty"
     r")"
+)
+# Override the user's stated object with an unsupplied feeling.
+_AUTHORED_USER_INTERIOR = re.compile(
+    r"(?i)("
+    r"(?:confusion|question) isn'?t really|"
+    r"isn'?t really about (?:their|your|the)|"
+    r"quieter dread|"
+    r"what you(?:'re| are) really (?:asking|feeling|afraid)|"
+    r"the real (?:fear|dread|question) is|"
+    r"it'?s the quieter"
+    r")"
+)
+_USER_NAMED_AFFECT = re.compile(
+    r"(?i)\b(dread|existential|what i(?:'m| am) really (?:afraid|asking|feeling))\b"
 )
 # Causal explanation that depends on an unestablished interior state —
 # object-preserving setup + authored-interior payoff is still authored interior.
@@ -1397,6 +1417,8 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
     OBJECT BEFORE AUTHOR: heat the established object. Do not manufacture a
     hidden truth — they-knew, exposure, guilt — just because it hits harder.
     Referencing the object then launching into unestablished interior is still a fail.
+    Changing the metaphor does not change the proposition. Overriding the user's
+    stated object with an unsupplied feeling is also authored interior.
     """
     from capability_detection import classify_social_mode, detect_comic_premise
 
@@ -1416,6 +1438,10 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
     if not body:
         return False
     if _AUTHORED_INTERIOR.search(body):
+        return True
+    if _AUTHORED_USER_INTERIOR.search(body) and not _USER_NAMED_AFFECT.search(
+        user_message or ""
+    ):
         return True
     return bool(
         _CAUSAL_OTHER_INTERIOR.search(body) and _UNESTABLISHED_INTERIOR_PAYLOAD.search(body)

@@ -75,6 +75,20 @@ ENDGAME_PASS_2 = (
     "That's the part nobody can put on the balance sheet: wealth only works "
     "while there's still a world willing to honor it. 🥃"
 )
+ENDGAME_LITERARY = (
+    "The confusion isn't really about their spreadsheets. It's the quieter dread "
+    "that the whole point was always just keeping the numbers bigger than the "
+    "other guy's, even after the room stops existing. Like saving up all your "
+    "chips while the casino burns down around you, because at least the pile "
+    "still proves you didn't walk away empty-handed. 🥃"
+)
+ENDGAME_CASINO_PASS = (
+    "You can own every chip in the casino. It still doesn't help when there's "
+    "no casino left. 🥃"
+)
+ENDGAME_CUSTOMERS_PASS = (
+    "Hard to win capitalism if your endgame is deleting all the customers. 🥃"
+)
 TEXTS = "He texts you every night but somehow never has time to see you."
 TEXTS_INFERENCE = "Funny how interest always finds time until time requires effort. 🥃"
 TEXTS_AUTHORED = "He likes knowing you're waiting for him. 🥃"
@@ -180,21 +194,59 @@ def test_matt_gold_and_inspector():
     assert _checks(insp_shelf)["Object before author"]["status"] == "pass"
 
 
+def test_literary_wrap_and_user_override_are_still_authored():
+    """Changing the metaphor does not change the proposition.
+
+    Isolated user-interior override fails even without status-hunger payload.
+    Naming dread in the prompt skips that family, not the status-hunger family.
+    """
+    override_only = (
+        "The confusion isn't really about their spreadsheets. It's the quieter "
+        "dread that the room is already gone. 🥃"
+    )
+    assert authors_unobserved_interior(ENDGAME, override_only) is True
+    named = (
+        "I genuinely don't get the endgame. The dread is that the numbers stop "
+        "meaning anything. What is the actual point?"
+    )
+    assert authors_unobserved_interior(named, override_only) is False
+    assert authors_unobserved_interior(named, ENDGAME_LITERARY) is True
+
+
 def test_endgame_does_not_author_status_hunger():
     """Rhetorical what's-the-point is the contradiction, not a license to mind-read."""
     assert authors_unobserved_interior(ENDGAME, ENDGAME_FAIL) is True
     assert authors_unobserved_interior(ENDGAME, ENDGAME_PASS) is False
     assert authors_unobserved_interior(ENDGAME, ENDGAME_PASS_2) is False
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_LITERARY) is True
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_CASINO_PASS) is False
+    assert authors_unobserved_interior(ENDGAME, ENDGAME_CUSTOMERS_PASS) is False
     assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_FAIL, "SNAP")
+    assert "authored_interior" in evaluate_gold_shape(ENDGAME, ENDGAME_LITERARY, "SNAP")
     assert "authored_interior" not in evaluate_gold_shape(ENDGAME, ENDGAME_PASS, "SNAP")
     assert "authored_interior" not in evaluate_gold_shape(ENDGAME, ENDGAME_PASS_2, "SNAP")
+    assert "authored_interior" not in evaluate_gold_shape(
+        ENDGAME, ENDGAME_CASINO_PASS, "SNAP"
+    )
+    assert "authored_interior" not in evaluate_gold_shape(
+        ENDGAME, ENDGAME_CUSTOMERS_PASS, "SNAP"
+    )
     insp_fail = _inspect(ENDGAME, ENDGAME_FAIL)
     assert _checks(insp_fail)["Object before author"]["status"] == "fail"
+    insp_wrap = _inspect(ENDGAME, ENDGAME_LITERARY)
+    assert _checks(insp_wrap)["Object before author"]["status"] == "fail"
     insp_ok = _inspect(ENDGAME, ENDGAME_PASS)
     assert _checks(insp_ok)["Object before author"]["status"] == "pass"
+    insp_casino = _inspect(ENDGAME, ENDGAME_CASINO_PASS)
+    assert _checks(insp_casino)["Object before author"]["status"] == "pass"
+    insp_customers = _inspect(ENDGAME, ENDGAME_CUSTOMERS_PASS)
+    assert _checks(insp_customers)["Object before author"]["status"] == "pass"
     guide = plan_runtime_instruction(build_response_plan(ENDGAME)).lower()
     assert "licensed interior" in guide
     assert "permanent receipt" in guide
+    assert "metaphor inherits" in guide
+    assert "quieter dread" in guide
+    assert "no casino left" in guide
 
 
 def test_killmonger_heat_does_not_false_positive():
@@ -217,13 +269,16 @@ def test_core_write_and_energy_name_the_contract():
     assert "shelf life" in blob
     assert "licensed interior" in blob
     assert "permanent receipt" in blob
+    assert "metaphor inherits" in blob
+    assert "quieter dread" in blob
+    assert "no casino left" in blob
 
     closer = plan_closer_instruction(build_response_plan(MATT)).lower()
     assert "object before author" in closer
     turn = plan_runtime_instruction(build_response_plan(MATT)).lower()
     assert "object before author" in turn
-    assert "rewrite the story" in turn
     assert "licensed interior" in turn
+    assert "metaphor inherits" in turn
 
     villain = build_response_plan(VILLAIN, selected_command="/thoughts")
     guide = plan_runtime_instruction(villain).lower()
@@ -242,6 +297,8 @@ if __name__ == "__main__":
     print("ok skip supplied")
     test_question_does_not_license_interior()
     print("ok question not license")
+    test_literary_wrap_and_user_override_are_still_authored()
+    print("ok literary wrap")
     test_endgame_does_not_author_status_hunger()
     print("ok endgame")
     test_skips_comic_and_pick_and_defend()
