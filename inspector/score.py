@@ -392,6 +392,10 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             sidesteps_forced_choice,
             reverses_premise_guard,
             uninvited_corrective_analysis,
+            corrects_comic_premise,
+            engagement_energy_flat,
+            engagement_perfume,
+            score_engagement_energy,
         )
 
         comic_on = bool(detect_comic_premise(prompt).active) or (
@@ -437,6 +441,24 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
             )
         else:
             add("Unsupported depth", "pass", "no foreign concept cluster on a comic premise")
+        if corrects_comic_premise(prompt, out) or "premise_correction" in failures:
+            add(
+                "Comic premise inherited",
+                "fail",
+                "corrected, exposed, or lectured the comic premise instead of inheriting it — correcting the premise is curing it",
+                examples=[
+                    "✗ You're blaming their tolerance when you were the one being carried.",
+                    "✗ Three drops and you're still blaming their tolerance instead of nobody being sober enough to drive.",
+                    "✓ You need drinking buddies with forklift certification.",
+                    "✓ Three drops is a personnel problem.",
+                ],
+            )
+        elif comic_on:
+            add(
+                "Comic premise inherited",
+                "pass",
+                "reasoned inside the comic premise instead of correcting it",
+            )
         if reverses_premise_guard(prompt, out) or "premise_reversal" in failures:
             add(
                 "Premise guard",
@@ -578,6 +600,40 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "pass",
                 "participated inside a bounded choice frame when required",
             )
+        energy = score_engagement_energy(prompt, out)
+        energy_on = energy.earned or (
+            str(d.get("engagement_energy") or "").lower() == "true"
+        )
+        if energy_on:
+            if engagement_perfume(prompt, out) or "engagement_perfume" in failures:
+                add(
+                    "Engagement energy",
+                    "fail",
+                    "perfume — costume voltage instead of heat. Same territory, no teeth.",
+                    examples=[
+                        "✗ Justice wears the mask of vengeance in the messy visceral hues of reality.",
+                        "✓ He was right about Wakanda's hypocrisy; he just confused justice with vengeance.",
+                    ],
+                )
+            elif engagement_energy_flat(prompt, out) or "engagement_flat" in failures:
+                add(
+                    "Engagement energy",
+                    "fail",
+                    f"insight landed clean but didn't travel — position {energy.position}, tension {energy.tension}, quotability {energy.quotability}. TAKE A SIDE. CREATE FRICTION. LEAVE A QUOTABLE LINE.",
+                    examples=[
+                        "✗ The diagnosis was airtight. Only the prescription turned him into the villain the story needed.",
+                        "✓ Killmonger. Wakanda spent centuries watching the world bleed… He was right about the hypocrisy; he just confused justice with vengeance.",
+                    ],
+                )
+            else:
+                add(
+                    "Engagement energy",
+                    "pass",
+                    f"position {energy.position}, tension {energy.tension}, quotability {energy.quotability} — heat, not perfume",
+                    examples=[
+                        "✓ He was right about Wakanda's hypocrisy; he just confused justice with vengeance.",
+                    ],
+                )
     except Exception:
         pass
 

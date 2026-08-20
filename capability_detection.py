@@ -376,6 +376,22 @@ _COMIC_ABSURD_EQUIVALENCE = re.compile(
     r"ocean.{0,80}(?:hvac|data\s*center|hum)"
     r")"
 )
+# Blame inversion: others "can't handle X" while the speaker is the payload.
+_COMIC_MISASSIGNED_FAILURE = re.compile(
+    r"(?i)("
+    r"can'?t\s+handle\s+(?:their\s+)?(?:alcohol|liquor|drink(?:ing|s)?|booze)|"
+    r"can'?t\s+hold\s+(?:their\s+)?(?:liquor|alcohol|drink)|"
+    r"friends\s+who\s+can'?t\s+handle|"
+    r"low\s+tolerance"
+    r")"
+)
+_COMIC_SELF_AS_PAYLOAD = re.compile(
+    r"(?i)("
+    r"(?:drop(?:ped|ping)|carr(?:y|ying|ied)|haul(?:ed|ing)|drag(?:ged|ging))\s+me|"
+    r"carrying\s+my\s+(?:drunk\s+)?ass|"
+    r"while\s+carrying"
+    r")"
+)
 # Crude provocation with latent human content — NOT a bit to cure,
 # but also not automatic comic-never-cure. Depth may be earned.
 _PROVOCATION_CRUDE = re.compile(
@@ -576,7 +592,11 @@ _PREMISE_CURE = re.compile(
     r"self[- ]worth\s+isn'?t\s+measured|"
     r"you\s+don'?t\s+wish|"
     r"feels\s+guilty|"
-    r"stop\s+keeping\s+score"
+    r"stop\s+keeping\s+score|"
+    r"still\s+blaming|"
+    r"blaming\s+their\s+tolerance|"
+    r"sober\s+enough\s+to\s+drive|"
+    r"you\s+were\s+the\s+one\s+(?:being\s+)?(?:carried|dropped|drunk)"
     r")"
 )
 
@@ -611,13 +631,23 @@ _COMIC_STRONG_PUNCH = re.compile(
 )
 
 
+def inverted_comic_premise(user_message: str) -> bool:
+    """Speaker assigns failure to others; punchline shows the speaker is the payload."""
+    text = user_message or ""
+    return bool(_COMIC_MISASSIGNED_FAILURE.search(text) and _COMIC_SELF_AS_PAYLOAD.search(text))
+
+
 def classify_comic_bit_shape(user_message: str) -> str:
     """Classify comic interaction grammar: open | taggable | terminal | \"\"."""
     text = (user_message or "").strip()
     if not text:
         return ""
+    if _COMIC_GENUINE_DISTRESS.search(text):
+        return ""
     if _COMIC_HANDOFF.search(text):
         return "open"
+    if inverted_comic_premise(text):
+        return "terminal"
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
     last = sentences[-1] if sentences else text
     list_lines = [ln.strip() for ln in re.split(r"[\n\r]+", text) if ln.strip()]
@@ -706,6 +736,9 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
     if _COMIC_ABSURD_EQUIVALENCE.search(text):
         signals.append("absurd_equivalence")
         score += 0.6
+    if inverted_comic_premise(text):
+        signals.append("inverted_premise")
+        score += 0.7
 
     out.signals = signals
     out.confidence = round(min(0.95, score), 2)
@@ -721,6 +754,7 @@ def detect_comic_premise(user_message: str) -> ComicPremiseAnalysis:
             "vice_as_fate",
             "comic_handoff",
             "absurd_equivalence",
+            "inverted_premise",
         )
     )
     out.active = out.confidence >= COMIC_FLOOR and (len(signals) >= 2 or strong_bit)
@@ -1164,12 +1198,19 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "\nSOCIAL MODE: terminal comic bit — setup and punchline are complete.\n"
             "TERMINAL BIT: no new interpretation. Do not explain what the joke is really "
             "about. No hidden transaction, daily bribe, or existential upgrade.\n"
+            "COMIC PREMISE MUST BE INHERITED. Enter the joke's reality; do not correct it. "
+            "Do not reveal the actual responsibility, import real-world consequences, or "
+            "explain why the premise is funny. Correcting the premise is curing it.\n"
             "Add one micro-tag that compresses or heightens the existing joke — same frame, "
             "new punch. Not a reaction button. SNAP.\n"
             "FAIL (insight): energy-drink math → \"The $2.50 isn't really about the car…\"\n"
             "FAIL (inert): \"Fair. 🥃\" / \"Exactly. 🥃\" / \"Agreed. 🥃\"\n"
+            "FAIL (premise correction): dropped-while-carried → \"Three drops and you're "
+            "still blaming their tolerance instead of the fact that nobody left standing "
+            "was sober enough to drive.\"\n"
             "PASS: \"Retirement plan denied. Crack the can. 🥃\"\n"
             "PASS: \"Financial literacy has gone too far. 🥃\"\n"
+            "PASS: \"You need drinking buddies with forklift certification. 🥃\"\n"
         )
     if mode.comic_handoff:
         return (
@@ -1205,10 +1246,16 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
     if m == "comic":
         return (
             "\nSOCIAL MODE: comic premise. Play inside it. Do not excavate trauma.\n"
-            "DON'T CORRECT THE ABSURD PREMISE. INHERIT IT.\n"
+            "COMIC PREMISE MUST BE INHERITED. DON'T CORRECT THE ABSURD PREMISE.\n"
+            "When the humor depends on an intentionally false, inverted, selfish, absurd, "
+            "or misassigned premise, reason inside that premise. Do not correct it, reveal "
+            "the actual responsibility, introduce real-world consequences, or explain why "
+            "the premise is funny. Correcting the premise is curing it.\n"
             "When someone says toothpaste is food, brushing is reheating leftovers. "
             "When falling is flying, landing cancels the ticket. "
-            "When HVAC is the ocean, the ocean gets uptime.\n"
+            "When HVAC is the ocean, the ocean gets uptime. "
+            "When friends 'can't handle alcohol' because they dropped the speaker three "
+            "times carrying him to the car, the carrying is the failure — not his sobriety.\n"
             "Unless contradiction is itself the joke, \"Actually, your ridiculous "
             "premise is wrong\" kills the game. Live in the world they built for one sentence.\n"
             "The tag should click before it needs explaining. Do not abandon concrete "
@@ -1225,8 +1272,11 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "(invents guilt; the joke is voluntary behavior presented as fate.)\n"
             "FAIL (premise rejection → unsupported depth): HVAC hum = ocean → "
             "\"The hum isn't the ocean. It's the opposite.\" then mortality/feeling.\n"
+            "FAIL (premise correction): \"You're blaming their tolerance when you were "
+            "the one being carried.\"\n"
             "FAIL (unsupported depth): \"put a leash on something that won't wear one\" "
             "on a name-formula joke that contains no leash, ownership, or restraint.\n"
+            "PASS: \"You need drinking buddies with forklift certification.\"\n"
             "PASS: \"Identity theft has gotten incredibly lazy.\"\n"
             "PASS: stay inside the metaphor (surveillance joke → footage, plates, "
             "timestamps — not whether the house still belongs to you).\n"
@@ -1297,9 +1347,18 @@ def social_mode_guidance(mode: SocialModeAnalysis) -> str:
             "/thoughts breaks the tie toward argument when defense is plausible.\n"
             "PICK-AND-DEFEND CONTRACT: Nominate decisively. Then earn the nomination. "
             "2–4 sentences. No hedging preamble. No essay. No trivia collapse. KNIFE.\n"
-            "PASS: \"Killmonger. He wasn't wrong about the diagnosis — only the prescription. "
-            "The world broke him first.\"\n"
-            "FAIL: \"Thanos. The numbers never lied. 🥃\" (trivia SNAP without a case)\n"
+            "Name first, then a contestable case for why the judgment holds.\n"
+            "ENGAGEMENT ENERGY: TAKE A SIDE. CREATE FRICTION. LEAVE A QUOTABLE LINE. "
+            "Charged specificity, not a clean essay distinction. Heat, not perfume.\n"
+            "FAIL (trivia): \"Thanos. The numbers never lied. 🥃\"\n"
+            "FAIL (essay-critical): \"The diagnosis was airtight. Only the prescription "
+            "turned him into the villain the story needed.\"\n"
+            "PASS: \"Killmonger. Wakanda spent centuries watching the world bleed while "
+            "sitting on the means to help it, then called that restraint. He was right "
+            "about the hypocrisy; he just confused justice with vengeance. The diagnosis "
+            "made him dangerous. The prescription made him the villain. 🥃\"\n"
+            "HEAT: \"He was right about Wakanda's hypocrisy; he just confused justice with vengeance.\"\n"
+            "PERFUME: \"Justice wears the mask of vengeance in the messy visceral hues of reality.\"\n"
         )
     if m == "direct_participation" or mode.participation:
         return (
@@ -1379,6 +1438,9 @@ def capability_guidance(
             "\nCOMIC PREMISE (gate before therapeutic reframing — not a mode):\n"
             f"Confidence={comic.confidence:.2f} signals={','.join(comic.signals[:6])}.\n"
             "NEVER CURE THE PREMISE. The distortion IS the joke.\n"
+            "COMIC PREMISE MUST BE INHERITED. Correcting the premise is curing it. "
+            "Do not reveal the actual responsibility, import real-world consequences, "
+            "or explain why the bit is funny.\n"
             "Heighten the bit or add a sharper tag. Stay inside the user's frame.\n"
             "COMIC PAYOFF IS TERMINAL. Once the punchline lands, STOP — "
             "body_ends_response. No second aphorism, no emotional truth, "
@@ -1389,8 +1451,10 @@ def capability_guidance(
             "FAIL: punchline + poetic closer "
             "(\"…lift your gaze. The mirror never asked for your number anyway.\")\n"
             "FAIL: \"whether the house still belongs to you\" on a Flock-camera joke.\n"
+            "FAIL: \"You're blaming their tolerance when you were the one being carried.\"\n"
             "PASS: one heighten inside the frame, then get off stage "
             "(\"…you'll need a spotter just to lift your gaze.\")\n"
+            "PASS: \"You need drinking buddies with forklift certification.\"\n"
         )
     if ht.active:
         tone = (

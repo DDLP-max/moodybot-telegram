@@ -250,6 +250,8 @@ class ResponsePlan:
     interaction_shape: str = "open"  # pick_one | why | how_to | open
     tone_source: str = ""  # explicit | social-first | auto-route | classifier
     premise_guards: List[str] = field(default_factory=list)
+    # Writing-energy dimension after routing — not a new interaction shape.
+    engagement_energy: bool = False
 
 
 @dataclass
@@ -1389,6 +1391,18 @@ def build_response_plan(
         "action": "action_line",
         "silence": "silence",
     }
+    from discovery_craft import engagement_energy_earned as _engagement_energy_earned
+
+    engagement_energy = _engagement_energy_earned(
+        user_message,
+        interaction_shape=social.interaction_shape or "open",
+        social_mode=social.mode or "open",
+        preferred_structure=preferred_structure,
+        claim_domain=domain,
+        selected_command=selected_command or "/thoughts",
+        response_budget=response_budget,
+        premise_guards=list(social.premise_guards or []),
+    )
     return ResponsePlan(
         intent=intent,
         primary_capability=primary,
@@ -1439,6 +1453,7 @@ def build_response_plan(
         interaction_shape=social.interaction_shape or "open",
         tone_source=tone_source or "",
         premise_guards=list(social.premise_guards or []),
+        engagement_energy=engagement_energy,
     )
 
 
@@ -1560,9 +1575,25 @@ Three failures of "every input deserves an insight":
 PARROTING — prettier restatement of what the user already said (burnout → "survival mode is the only operating system left").
 PSYCHOLOGIZING — converting a joke into an unwanted diagnosis (Flock-camera joke → "whether the house still belongs to you"; fake-fate vice joke → invented guilt).
 UNSUPPORTED DEPTH — manufacturing profundity with no textual basis (name-formula joke → "put a leash on something that won't wear one"; HVAC hum = ocean → "The hum isn't the ocean").
+COMIC PREMISE MUST BE INHERITED — complement to NEVER CURE THE PREMISE. When the humor depends on an intentionally false, inverted, selfish, absurd, or misassigned premise, reason inside it. Do not correct the premise, reveal the actual responsibility, introduce real-world consequences, or explain why it is funny. Correcting the premise is curing it.
+PASS: "You need drinking buddies with forklift certification."
+FAIL: "You're blaming their tolerance when you were the one being carried."
 DON'T CORRECT THE ABSURD PREMISE. INHERIT IT. When HVAC is the ocean, the ocean gets uptime.
 COMIC HANDOFF — "but alas…" / "and yet…" / trailing ellipsis is an unfinished slot. Complete the implied beat. Do not start a separate "That's like saying…" observation.
 OVERPERFORMANCE — spending intelligence the interaction didn't ask for ("name an actor" → film-criticism closing narration; rhetorical how-come → invented causal theory).
+
+ENGAGEMENT ENERGY (writing dimension after routing — not a new shape, not viral):
+Earned on pick-and-defend, /thoughts opinion, cultural takes, genuine hot takes.
+Not earned on terminal bits, ordinary SNAP, grief, factual answers, casual participation.
+When earned: TAKE A SIDE. CREATE FRICTION. LEAVE A QUOTABLE LINE.
+Don't merely make the correct distinction. Give the reader something expensive to disagree with.
+Prefer charged specificity over neutral abstraction. At least one sentence should survive a screenshot.
+Heat, not perfume.
+HEAT: "He was right about Wakanda's hypocrisy; he just confused justice with vengeance."
+PERFUME: "Justice wears the mask of vengeance in the messy visceral hues of reality."
+Measure Position, Tension, Quotability — not share-bait.
+FAIL (essay-critical): "The diagnosis was airtight. Only the prescription turned him into the villain the story needed."
+PASS: "Killmonger. Wakanda spent centuries watching the world bleed while sitting on the means to help it, then called that restraint. He was right about the hypocrisy; he just confused justice with vengeance. The diagnosis made him dangerous. The prescription made him the villain."
 
 RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
 
@@ -2145,13 +2176,18 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "\nTERMINAL BIT CONTRACT: Setup and punchline are complete. "
             "No new interpretation — do not explain what the joke is really about. "
             "Do not import hidden transaction, bribe, or existential upgrade.\n"
+            "COMIC PREMISE MUST BE INHERITED. Enter the joke's reality; do not correct it. "
+            "Do not reveal actual responsibility or import a safety lecture the bit did not ask for.\n"
             "Add one micro-tag that compresses or heightens the existing joke inside "
             "the same frame. Not a reaction button. Not therapy. SNAP.\n"
             "FAIL (insight): \"The math works until you notice the $2.50 isn't really about the car…\"\n"
             "FAIL (inert): \"Fair. 🥃\" / \"Exactly. 🥃\" / \"Agreed. 🥃\"\n"
+            "FAIL (premise correction): \"Three drops and you're still blaming their "
+            "tolerance instead of the fact that nobody left standing was sober enough to drive.\"\n"
             "PASS: \"Retirement plan denied. Crack the can. 🥃\"\n"
             "PASS: \"Ten years of discipline and still no Porsche. Drink up. 🥃\"\n"
             "PASS: \"Financial literacy has gone too far. 🥃\"\n"
+            "PASS: \"You need drinking buddies with forklift certification. 🥃\"\n"
         )
         family_bit = ""
         q_bit = "\n"
@@ -2164,9 +2200,18 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "\nPICK-AND-DEFEND CONTRACT: Nominate decisively. Then earn the nomination. "
             "2–4 sentences. No hedging preamble. No essay. No trivia collapse. KNIFE.\n"
             "Name first, then a contestable case for why the judgment holds.\n"
-            "PASS: \"Killmonger. He wasn't wrong about the diagnosis — only the prescription. "
-            "The world broke him first.\"\n"
-            "FAIL: \"Thanos. The numbers never lied. 🥃\"\n"
+            "ENGAGEMENT ENERGY: TAKE A SIDE. CREATE FRICTION. LEAVE A QUOTABLE LINE. "
+            "Don't merely make the correct distinction. Charged specificity over neutral "
+            "abstraction. Heat, not perfume.\n"
+            "FAIL (trivia): \"Thanos. The numbers never lied. 🥃\"\n"
+            "FAIL (essay-critical): \"The diagnosis was airtight. Only the prescription "
+            "turned him into the villain the story needed.\"\n"
+            "PASS: \"Killmonger. Wakanda spent centuries watching the world bleed while "
+            "sitting on the means to help it, then called that restraint. He was right "
+            "about the hypocrisy; he just confused justice with vengeance. The diagnosis "
+            "made him dangerous. The prescription made him the villain. 🥃\"\n"
+            "HEAT: \"He was right about Wakanda's hypocrisy; he just confused justice with vengeance.\"\n"
+            "PERFUME: \"Justice wears the mask of vengeance in the messy visceral hues of reality.\"\n"
         )
         family_bit = ""
         q_bit = "\n"
@@ -2231,7 +2276,9 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "Pipeline: terminal bit → leave payoff alone → silence or one tag → SNAP.\n"
         )
     elif pick_defend:
-        pipeline_bit = "Pipeline: pick-and-defend → nominate → earn it → KNIFE.\n"
+        pipeline_bit = (
+            "Pipeline: pick-and-defend → nominate → earn it → engagement energy → KNIFE.\n"
+        )
     elif premise_guard:
         pipeline_bit = (
             "Pipeline: premise guards → inherit stated frame → value proposition → SNAP.\n"
@@ -2244,6 +2291,17 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         pipeline_bit = (
             "Pipeline: claim type → lens → question → capability → mechanism → "
             "Depth × Shape → Gold.\n"
+        )
+    if getattr(plan, "engagement_energy", False) and not pick_defend:
+        extra += (
+            "\nENGAGEMENT ENERGY: TAKE A SIDE. CREATE FRICTION. LEAVE A QUOTABLE LINE.\n"
+            "When the interaction invites opinion, cultural judgment, provocation, or "
+            "argument, don't merely make the correct distinction. Give the reader something "
+            "emotionally or intellectually expensive to disagree with. Charged specificity "
+            "over neutral abstraction. At least one sentence should survive a screenshot.\n"
+            "Heat, not perfume. Position, tension, quotability — not viral.\n"
+            "HEAT: \"He was right about Wakanda's hypocrisy; he just confused justice with vengeance.\"\n"
+            "PERFUME: \"Justice wears the mask of vengeance in the messy visceral hues of reality.\"\n"
         )
     return (
         f"RUNTIME TURN (this reply only):\n"
@@ -2922,6 +2980,7 @@ def finalize_response(
         "social_mode_signals": ",".join(getattr(plan, "social_mode_signals", None) or []),
         "social_resolution": getattr(plan, "social_resolution", None) or "",
         "interaction_shape": getattr(plan, "interaction_shape", None) or "open",
+        "engagement_energy": str(bool(getattr(plan, "engagement_energy", False))).lower(),
         "tone_source": getattr(plan, "tone_source", None) or "",
         "selected_command": getattr(plan, "selected_command", None) or "",
         "closing_strategy": plan.closing_strategy,

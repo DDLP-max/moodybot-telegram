@@ -15,7 +15,8 @@ Paraphrase collapse:
 from __future__ import annotations
 
 import re
-from typing import List, Set
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Set
 
 
 def _words(text: str) -> List[str]:
@@ -599,6 +600,12 @@ _FOREIGN_DEPTH_CLUSTERS = {
         "no matter what you are feeling",
         "emotional constancy",
     ),
+    "safety_lecture": (
+        "sober enough to drive",
+        "designated driver",
+        "drunk driv",
+        "nobody left standing",
+    ),
 }
 
 _RESTATEMENT_OPEN = re.compile(
@@ -741,6 +748,23 @@ _PREMISE_REJECTION = re.compile(
     r")"
 )
 
+_PREMISE_CORRECTION = re.compile(
+    r"(?i)("
+    r"still\s+blaming|"
+    r"you'?re\s+(?:still\s+)?blaming|"
+    r"blaming\s+their\s+tolerance|"
+    r"instead\s+of\s+the\s+fact|"
+    r"you\s+were\s+the\s+one\s+(?:being\s+)?(?:carried|dropped|drunk)|"
+    r"you\s+were\s+(?:the\s+)?drunk|"
+    r"the\s+(?:real\s+)?joke\s+is\s+that\s+you|"
+    r"what'?s\s+funny\s+is\s+that\s+you|"
+    r"sober\s+enough\s+to\s+drive|"
+    r"nobody\s+(?:left\s+)?standing\s+was\s+sober|"
+    r"designated\s+driver|"
+    r"drunk\s+driv"
+    r")"
+)
+
 _INDEPENDENT_JOKE_OPEN = re.compile(
     r"(?i)^\s*(that'?s\s+like\s+saying|it'?s\s+like\s+saying)\b"
 )
@@ -756,6 +780,26 @@ def rejects_absurd_premise(user_message: str, response: str) -> bool:
     if not body:
         return False
     return bool(_PREMISE_REJECTION.search(body))
+
+
+def corrects_comic_premise(user_message: str, response: str) -> bool:
+    """Corrected, exposed, or lectured a comic premise instead of inheriting it.
+
+    Complement to never_cure: explaining the inversion, reassigning actual
+    responsibility, or importing real-world consequences is itself a cure.
+    """
+    from capability_detection import classify_social_mode, detect_comic_premise
+
+    if rejects_absurd_premise(user_message, response):
+        return True
+    comic = detect_comic_premise(user_message or "")
+    social = classify_social_mode(user_message or "")
+    if not (comic.active or social.mode == "comic"):
+        return False
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    if not body:
+        return False
+    return bool(_PREMISE_CORRECTION.search(body))
 
 
 _GUARD_SMUGGLE: dict[str, tuple[str, ...]] = {
@@ -892,6 +936,8 @@ def insight_after_payoff(user_message: str, response: str) -> bool:
     if psychologizing(user_message, body, comic=True):
         return True
     if unsupported_depth(user_message, body, comic=True):
+        return True
+    if corrects_comic_premise(user_message, body):
         return True
     return words > 30
 
@@ -1043,6 +1089,246 @@ def rhetorical_explained(user_message: str, response: str) -> bool:
     if not body:
         return False
     return bool(_INVENTED_RHETORICAL_CAUSE.search(body))
+
+
+# --- Engagement energy (writing dimension after routing) -------------------
+
+_ENGAGEMENT_OFF_SHAPES = frozenset(
+    {
+        "terminal_bit",
+        "taggable_bit",
+        "comic_handoff",
+        "pick_one",
+        "forced_choice",
+        "awe",
+        "how_to",
+    }
+)
+_ENGAGEMENT_OFF_MODES = frozenset(
+    {"comic", "vulnerability", "question", "direct_participation", "provocative_generalization"}
+)
+_CULTURAL_TAKE = re.compile(
+    r"(?i)\b("
+    r"hot take|unpopular opinion|culture war|woke|feminist|feminism|"
+    r"patriarchy|misogyn|oppression|privilege|politics|reparations|"
+    r"villain who|100\s*%\s*right|"
+    r"justice|vengeance|hypocrisy"
+    r")\b"
+)
+_POSITION_STANCE = re.compile(
+    r"(?i)("
+    r"\b(?:he|she|they|it)\s+was(?:n'?t)?\s+(?:right|wrong)\b|"
+    r"\bwasn'?t\s+wrong\b|"
+    r"\bairtight\b|"
+    r"\bconfused\b.{0,40}\bwith\b|"
+    r"\bvillain\b|"
+    r"\bhypocrisy\b|"
+    r"\bcalled\s+that\b|"
+    r"\bwatching\s+the\s+world\s+bleed\b"
+    r")"
+)
+_POSITION_HEDGE = re.compile(
+    r"(?i)\b(perhaps|maybe|it'?s complicated|both sides|to be fair|"
+    r"one could argue|it depends)\b"
+)
+_PERFUME_PROSE = re.compile(
+    r"(?i)("
+    r"wears?\s+the\s+mask|"
+    r"messy\s+visceral|"
+    r"visceral\s+hues|"
+    r"hues\s+of\s+(?:reality|the)|"
+    r"tapestry\s+of|"
+    r"symphony\s+of|"
+    r"dance\s+(?:of|between)|"
+    r"labyrinth\s+of|"
+    r"in\s+the\s+\w+\s+hues"
+    r")"
+)
+_MORAL_PAIRS = (
+    ("justice", "vengeance"),
+    ("hypocrisy", "restraint"),
+    ("oppression", "silence"),
+    ("bleed", "help"),
+    ("dangerous", "villain"),
+)
+_ANALYTICAL_PAIRS = (
+    ("diagnosis", "prescription"),
+)
+_QUOTABLE_HEAT = re.compile(
+    r"(?i)("
+    r"was\s+right\s+about.{0,48}confused|"
+    r"confused\s+\w+\s+with|"
+    r"called\s+that\s+\w+|"
+    r"watching\s+the\s+world\s+bleed|"
+    r"diagnosis\s+made\s+him\s+dangerous"
+    r")"
+)
+
+
+@dataclass
+class EngagementEnergyScore:
+    earned: bool = False
+    position: str = "low"
+    tension: str = "low"
+    quotability: str = "low"
+    perfume: bool = False
+
+    @property
+    def hits_target(self) -> bool:
+        if not self.earned:
+            return True
+        if self.perfume:
+            return False
+        return self.position == "high" and self.tension == "high" and self.quotability == "high"
+
+
+def engagement_energy_earned(
+    user_message: str = "",
+    *,
+    plan: object = None,
+    interaction_shape: str = "",
+    social_mode: str = "",
+    preferred_structure: str = "",
+    claim_domain: str = "",
+    selected_command: str = "",
+    response_budget: str = "",
+    premise_guards: Optional[Sequence[str]] = None,
+) -> bool:
+    """Writing-energy gate after routing. Not a new interaction shape."""
+    if plan is not None:
+        interaction_shape = interaction_shape or (getattr(plan, "interaction_shape", None) or "")
+        social_mode = social_mode or (getattr(plan, "social_mode", None) or "")
+        preferred_structure = preferred_structure or (
+            getattr(plan, "preferred_structure", None) or ""
+        )
+        claim_domain = claim_domain or (getattr(plan, "claim_domain", None) or "")
+        selected_command = selected_command or (getattr(plan, "selected_command", None) or "")
+        response_budget = response_budget or (getattr(plan, "response_budget", None) or "")
+        if premise_guards is None:
+            premise_guards = getattr(plan, "premise_guards", None) or []
+        if not user_message:
+            user_message = getattr(plan, "original_subject", None) or ""
+
+    if not interaction_shape and not social_mode and user_message:
+        from capability_detection import classify_social_mode
+
+        social = classify_social_mode(user_message)
+        interaction_shape = social.interaction_shape or "open"
+        social_mode = social.mode or "open"
+        premise_guards = premise_guards if premise_guards is not None else social.premise_guards
+        if not preferred_structure:
+            preferred_structure = "KNIFE" if interaction_shape == "pick_and_defend" else "SNAP"
+        if not selected_command and (user_message or "").lstrip().startswith("/thoughts"):
+            selected_command = "/thoughts"
+
+    shape = (interaction_shape or "open").lower()
+    mode = (social_mode or "open").lower()
+    structure = (preferred_structure or "").upper()
+    domain = (claim_domain or "").lower()
+    command = (selected_command or "").lower()
+    guards = list(premise_guards or [])
+
+    if shape in _ENGAGEMENT_OFF_SHAPES or mode in _ENGAGEMENT_OFF_MODES:
+        return False
+    if domain == "grief":
+        return False
+    if structure == "SNAP" and shape != "pick_and_defend":
+        return False
+    if guards:
+        return False
+
+    if shape == "pick_and_defend":
+        return True
+
+    cultural = bool(_CULTURAL_TAKE.search(user_message or ""))
+    thoughts = command.startswith("/thoughts")
+    knife = structure in {"KNIFE", "REFLECTION"}
+    if not knife:
+        return False
+    if cultural:
+        return True
+    if thoughts and mode in {"observation", "open", "provocation"}:
+        return True
+    return False
+
+
+def _pair_hits(text: str, pairs: Sequence[tuple[str, str]]) -> int:
+    tl = (text or "").lower()
+    return sum(1 for a, b in pairs if a in tl and b in tl)
+
+
+def score_engagement_energy(
+    user_message: str,
+    response: str,
+    *,
+    plan: object = None,
+    earned: Optional[bool] = None,
+) -> EngagementEnergyScore:
+    """Position / tension / quotability. Heat, not perfume. Not a virality score."""
+    if earned is None:
+        earned = engagement_energy_earned(user_message, plan=plan)
+    body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
+    out = EngagementEnergyScore(earned=bool(earned), perfume=bool(_PERFUME_PROSE.search(body)))
+    if not body:
+        return out
+
+    wc = len(_words(body))
+    moral = _pair_hits(body, _MORAL_PAIRS)
+    analytical = _pair_hits(body, _ANALYTICAL_PAIRS)
+    stance = bool(_POSITION_STANCE.search(body))
+    hedge = bool(_POSITION_HEDGE.search(body))
+
+    if stance and not hedge:
+        out.position = "high"
+    elif hedge and not stance:
+        out.position = "low"
+    elif stance:
+        out.position = "medium"
+    else:
+        out.position = "medium" if wc >= 18 else "low"
+
+    if moral >= 1:
+        out.tension = "high"
+    elif analytical >= 1:
+        out.tension = "medium"
+    else:
+        out.tension = "low"
+
+    ss = _sentences(body)
+    quot = "low"
+    for s in ss:
+        sw = len(_words(s))
+        if sw < 8 or sw > 32:
+            continue
+        if _pair_hits(s, _MORAL_PAIRS) or _QUOTABLE_HEAT.search(s):
+            quot = "high"
+            break
+        if _pair_hits(s, _ANALYTICAL_PAIRS) or re.search(r"(?i)\bairtight\b|\bvillain\b", s):
+            quot = "medium"
+    out.quotability = quot
+
+    if wc <= 12 and moral == 0:
+        if out.tension == "high":
+            out.tension = "medium"
+        if out.position == "high" and not stance:
+            out.position = "medium"
+        if out.quotability == "high":
+            out.quotability = "medium"
+    return out
+
+
+def engagement_energy_flat(user_message: str, response: str, *, plan: object = None) -> bool:
+    """Earned energy, but the insight is too clean / essay-critical to travel."""
+    score = score_engagement_energy(user_message, response, plan=plan)
+    if not score.earned or score.perfume:
+        return False
+    return not score.hits_target
+
+
+def engagement_perfume(user_message: str, response: str, *, plan: object = None) -> bool:
+    """LLM-smell voltage — costume instead of teeth."""
+    score = score_engagement_energy(user_message, response, plan=plan)
+    return bool(score.earned and score.perfume)
 
 
 def classify_discovery_type(line: str, lens: str = "") -> str:

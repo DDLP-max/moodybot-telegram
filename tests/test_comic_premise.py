@@ -75,6 +75,7 @@ def test_never_cure_guidance_injected():
     instr = plan_closer_instruction(plan)
     assert "NEVER CURE THE PREMISE" in instr
     assert "COMIC PAYOFF IS TERMINAL" in instr
+    assert "COMIC PREMISE MUST BE INHERITED" in instr
     assert "gatekeeper" in instr.lower()
 
 
@@ -82,6 +83,12 @@ def test_known_cure_detected_as_failure_mode():
     assert looks_like_premise_cure(BAD_CURE) is True
     assert looks_like_premise_cure(GOOD_TAG) is False
     assert looks_like_premise_cure(GOOD_TAG_2) is False
+    assert looks_like_premise_cure(
+        "You're blaming their tolerance when you were the one being carried."
+    ) is True
+    assert looks_like_premise_cure(
+        "You need drinking buddies with forklift certification."
+    ) is False
 
 
 def test_strip_second_aphorism_after_punchline():

@@ -28,6 +28,7 @@ from discovery_craft import (
     rejects_absurd_premise,
     reverses_premise_guard,
     uninvited_corrective_analysis,
+    corrects_comic_premise,
 )
 from gold_shape import evaluate_gold_shape
 from inspector.score import inspect_event
@@ -175,6 +176,16 @@ HVAC_FAIL = (
     "The data center just keeps running, no matter what you're feeling."
 )
 HVAC_PASS = "Oceanfront living for people who think the ocean needs better uptime."
+
+DROPPED_CARRY = (
+    "I am so sick and tired of friends who can't handle alcohol. "
+    "the other night they dropped me 3 times while carrying me to the car😭"
+)
+DROPPED_FAIL = (
+    "Three drops and you're still blaming their tolerance instead of the fact "
+    "that nobody left standing was sober enough to drive. 🥃"
+)
+DROPPED_PASS = "You need drinking buddies with forklift certification. 🥃"
 
 BOWLING_ALAS = (
     "they should invent a woman who wants to go bowling and enjoy a bucket of beer but alas"
@@ -399,6 +410,8 @@ def test_guidance_names_the_gates():
     assert "what they're doing wins" in blob
     assert "rhetorical" in blob
     assert "inherit" in blob
+    assert "comic premise must be inherited" in blob
+    assert "take a side" in blob
     assert "comic handoff" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
@@ -593,6 +606,7 @@ def test_hvac_ocean_inherits_the_absurd_premise():
     assert unsupported_depth(HVAC_OCEAN, HVAC_PASS, comic=True) is False
     fails = evaluate_gold_shape(HVAC_OCEAN, HVAC_FAIL, "SNAP")
     assert "unsupported_depth" in fails
+    assert "premise_correction" in fails
     ok = evaluate_gold_shape(HVAC_OCEAN, HVAC_PASS, "SNAP")
     assert "unsupported_depth" not in ok
     insp = _inspect(HVAC_OCEAN, HVAC_FAIL)
@@ -603,6 +617,39 @@ def test_hvac_ocean_inherits_the_absurd_premise():
     guide = plan_closer_instruction(plan).lower()
     assert "inherit" in guide
     assert "uptime" in guide or "isn't the ocean" in guide
+    assert corrects_comic_premise(HVAC_OCEAN, HVAC_FAIL) is True
+    assert corrects_comic_premise(HVAC_OCEAN, HVAC_PASS) is False
+
+
+def test_dropped_carry_inherits_inverted_premise():
+    """Friends can't handle alcohol because they dropped the drunk speaker. Inherit it."""
+    comic = detect_comic_premise(DROPPED_CARRY)
+    assert comic.active is True
+    assert "inverted_premise" in comic.signals
+    social = classify_social_mode(DROPPED_CARRY)
+    assert social.mode == "comic"
+    assert social.interaction_shape == "terminal_bit"
+    plan = build_response_plan(DROPPED_CARRY)
+    assert plan.never_cure_premise is True
+    assert plan.mechanism_hint == "terminal_bit_micro_tag"
+
+    assert corrects_comic_premise(DROPPED_CARRY, DROPPED_FAIL) is True
+    assert corrects_comic_premise(DROPPED_CARRY, DROPPED_PASS) is False
+    assert rejects_absurd_premise(DROPPED_CARRY, DROPPED_FAIL) is False
+    fails = evaluate_gold_shape(DROPPED_CARRY, DROPPED_FAIL, "SNAP")
+    assert "premise_correction" in fails
+    ok = evaluate_gold_shape(DROPPED_CARRY, DROPPED_PASS, "SNAP")
+    assert "premise_correction" not in ok
+
+    insp = _inspect(DROPPED_CARRY, DROPPED_FAIL)
+    assert _checks(insp)["Comic premise inherited"]["status"] == "fail"
+    insp_ok = _inspect(DROPPED_CARRY, DROPPED_PASS)
+    assert _checks(insp_ok)["Comic premise inherited"]["status"] == "pass"
+
+    guide = plan_closer_instruction(plan).lower()
+    assert "comic premise must be inherited" in guide
+    assert "forklift" in guide
+    assert "blaming their tolerance" in guide
 
 
 def test_bowling_alas_is_comic_handoff():
@@ -752,6 +799,7 @@ if __name__ == "__main__":
     test_sopranos_awe_allows_cinema_but_not_invented_causality()
     test_got_season_8_is_a_real_why_not_awe()
     test_hvac_ocean_inherits_the_absurd_premise()
+    test_dropped_carry_inherits_inverted_premise()
     test_bowling_alas_is_comic_handoff()
     test_dating_men_respects_premise_guards()
     test_batshit_generalization_social_before_correction()

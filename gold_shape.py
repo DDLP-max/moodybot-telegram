@@ -465,6 +465,9 @@ def evaluate_gold_shape(
             sidesteps_forced_choice,
             reverses_premise_guard,
             uninvited_corrective_analysis,
+            corrects_comic_premise,
+            engagement_energy_flat,
+            engagement_perfume,
         )
         from capability_detection import detect_comic_premise
 
@@ -499,6 +502,12 @@ def evaluate_gold_shape(
             failures.append("premise_reversal")
         if uninvited_corrective_analysis(user_message, body):
             failures.append("corrective_analysis")
+        if corrects_comic_premise(user_message, body):
+            failures.append("premise_correction")
+        if engagement_perfume(user_message, body):
+            failures.append("engagement_perfume")
+        elif engagement_energy_flat(user_message, body):
+            failures.append("engagement_flat")
     except Exception:
         pass
 

@@ -35,6 +35,12 @@ This system ensures **every response is tailored**, **every tone is earned**, an
 - [`mode-escalation.md`](mode-escalation.md)  
   Enables MoodyBot to escalate or shift tone mid-reply based on emotional signal changes (e.g., validate → roast).
 
+- [`unforgettable-lines.md`](unforgettable-lines.md)  
+  Discovery density: the sentence people steal. Not a routing layer.
+
+- [`engagement-energy.md`](engagement-energy.md)  
+  Writing-energy after routing. TAKE A SIDE. CREATE FRICTION. LEAVE A QUOTABLE LINE. Gated. Heat, not perfume.
+
 ---
 
 ## 🔁 Integration Priority

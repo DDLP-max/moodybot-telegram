@@ -2,8 +2,18 @@
 """Cross-case regression: open vs taggable vs terminal comic bits."""
 from __future__ import annotations
 
-from capability_detection import classify_comic_bit_shape, classify_social_mode, detect_comic_premise
-from discovery_craft import inert_terminal_tag, insight_after_payoff, sidesteps_forced_choice
+from capability_detection import (
+    classify_comic_bit_shape,
+    classify_social_mode,
+    detect_comic_premise,
+    inverted_comic_premise,
+)
+from discovery_craft import (
+    inert_terminal_tag,
+    insight_after_payoff,
+    sidesteps_forced_choice,
+    corrects_comic_premise,
+)
 from gold_shape import evaluate_gold_shape
 from response_finalization import (
     build_response_plan,
@@ -61,6 +71,18 @@ SEX_GYM_MONEY = (
 SEX_GYM_FAIL = "I'd sidestep all three and choose freedom. 🥃"
 SEX_GYM_PASS = "Money. 🥃"
 SEX_GYM_TAG = "Money. Hard to flex loneliness. 🥃"
+
+DROPPED_CARRY = (
+    "I am so sick and tired of friends who can't handle alcohol. "
+    "the other night they dropped me 3 times while carrying me to the car😭"
+)
+DROPPED_FAIL = (
+    "Three drops and you're still blaming their tolerance instead of the fact "
+    "that nobody left standing was sober enough to drive. 🥃"
+)
+DROPPED_PASS = "You need drinking buddies with forklift certification. 🥃"
+DROPPED_PASS_2 = "Three drops is a personnel problem. 🥃"
+DROPPED_PASS_3 = "Get friends with better upper-body strength. 🥃"
 
 
 def test_energy_drink_is_terminal_bit():
@@ -184,9 +206,11 @@ def test_villain_routes_pick_and_defend():
         assert plan.response_budget == "medium"
         assert plan.mechanism_hint == "pick_and_defend"
         assert plan.primary_capability == "Evidence / Contradiction Analysis"
+        assert plan.engagement_energy is True
         guide = plan_runtime_instruction(plan)
         assert "PICK-AND-DEFEND CONTRACT" in guide
         assert "PICK-ONE CONTRACT" not in guide
+        assert "ENGAGEMENT ENERGY" in guide
 
     assert classify_social_mode(SANDLER).interaction_shape == "pick_one"
 
@@ -219,3 +243,59 @@ def test_sex_gym_money_is_forced_choice():
     assert "sidestep_forced_choice" in fails
     ok = evaluate_gold_shape(SEX_GYM_MONEY, SEX_GYM_PASS, "SNAP")
     assert "sidestep_forced_choice" not in ok
+
+
+def test_dropped_three_times_inherits_comic_premise():
+    """Blame inversion is a finished bit. Inherit it; don't lecture driving."""
+    assert inverted_comic_premise(DROPPED_CARRY) is True
+    assert inverted_comic_premise(
+        "I am so sick and tired of friends who can't handle alcohol."
+    ) is False
+    assert classify_comic_bit_shape(DROPPED_CARRY) == "terminal"
+    comic = detect_comic_premise(DROPPED_CARRY)
+    assert comic.active
+    assert comic.never_cure
+    assert "inverted_premise" in comic.signals
+
+    social = classify_social_mode(DROPPED_CARRY)
+    assert social.mode == "comic"
+    assert social.interaction_shape == "terminal_bit"
+    assert social.terminal_bit is True
+    assert social.depth_earned is False
+
+    plan = build_response_plan(DROPPED_CARRY)
+    assert plan.comic_premise is True
+    assert plan.never_cure_premise is True
+    assert plan.interaction_shape == "terminal_bit"
+    assert plan.primary_capability == "Humor As Disruption"
+    assert plan.mechanism_hint == "terminal_bit_micro_tag"
+    assert plan.preferred_structure == "SNAP"
+    assert plan.response_budget == "low"
+    assert plan.comic_payoff_is_terminal is True
+    assert plan.landing == "body_ends_response"
+
+    guide = plan_runtime_instruction(plan).lower()
+    assert "comic premise must be inherited" in guide
+    assert "forklift" in guide
+    assert "blaming their tolerance" in guide
+
+    assert corrects_comic_premise(DROPPED_CARRY, DROPPED_FAIL) is True
+    assert insight_after_payoff(DROPPED_CARRY, DROPPED_FAIL) is True
+    for tag in (DROPPED_PASS, DROPPED_PASS_2, DROPPED_PASS_3):
+        assert corrects_comic_premise(DROPPED_CARRY, tag) is False, tag
+        assert insight_after_payoff(DROPPED_CARRY, tag) is False, tag
+        assert inert_terminal_tag(DROPPED_CARRY, tag) is False, tag
+        assert is_valid_terminal_response(tag, plan) is True, tag
+
+    fails = evaluate_gold_shape(DROPPED_CARRY, DROPPED_FAIL, "SNAP")
+    assert "premise_correction" in fails
+    ok = evaluate_gold_shape(DROPPED_CARRY, DROPPED_PASS, "SNAP")
+    assert "premise_correction" not in ok
+    assert "insight_after_payoff" not in ok
+    assert "inert_terminal_tag" not in ok
+
+    result = finalize_response(DROPPED_FAIL, DROPPED_CARRY, plan=plan)
+    assert result.text.strip() == "🥃"
+    result_good = finalize_response(DROPPED_PASS, DROPPED_CARRY, plan=plan)
+    assert "forklift" in result_good.text.lower()
+

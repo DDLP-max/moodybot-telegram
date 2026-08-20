@@ -298,6 +298,9 @@ def select_guidance_modules(
     if getattr(plan, "comic_premise", False) or social_mode == "comic":
         paths.append(CAPABILITY_MODULES["Humor As Disruption"])
 
+    if getattr(plan, "engagement_energy", False):
+        paths.append("9_response-engine/engagement-energy.md")
+
     if getattr(plan, "needs_practical_action", False):
         paths.append(CAPABILITY_MODULES["Practical Next Action"])
 
