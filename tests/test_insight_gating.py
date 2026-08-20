@@ -417,6 +417,7 @@ def test_guidance_names_the_gates():
     assert "receipts arrive" in blob
     assert "contribution budget" in blob
     assert "interest always finds time" in blob
+    assert "rewrite the story" in blob
 
     burn = plan_closer_instruction(build_response_plan(BURNOUT)).lower()
     assert "recognition must advance" in burn

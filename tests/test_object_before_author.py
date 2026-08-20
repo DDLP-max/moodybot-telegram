@@ -51,6 +51,12 @@ PARANOID = (
 OBJECT_HEAT = (
     "They call you crazy because being right too early looks like paranoia. 🥃"
 )
+LAUNCHPAD = (
+    "The crazy label is just what people reach for when they need time to "
+    "rewrite the story so they were never wrong. 🥃"
+)
+CRAZY_EVIDENCE = "Everybody loves calling it crazy before it turns into evidence. 🥃"
+SHELF_LIFE = "Crazy has a remarkably short shelf life once the receipts show up. 🥃"
 TEXTS = "He texts you every night but somehow never has time to see you."
 TEXTS_INFERENCE = "Funny how interest always finds time until time requires effort. 🥃"
 TEXTS_AUTHORED = "He likes knowing you're waiting for him. 🥃"
@@ -98,6 +104,9 @@ def test_matt_authors_unobserved_interior():
     assert authors_unobserved_interior(MATT, RECEIPTS) is False
     assert authors_unobserved_interior(MATT, PARANOID) is False
     assert authors_unobserved_interior(MATT, OBJECT_HEAT) is False
+    assert authors_unobserved_interior(MATT, LAUNCHPAD) is True
+    assert authors_unobserved_interior(MATT, CRAZY_EVIDENCE) is False
+    assert authors_unobserved_interior(MATT, SHELF_LIFE) is False
 
 
 def test_inference_is_not_authored_interior():
@@ -134,11 +143,19 @@ def test_matt_gold_and_inspector():
     assert "authored_interior" not in receipts
     paranoid = evaluate_gold_shape(MATT, PARANOID, "SNAP")
     assert "authored_interior" not in paranoid
+    launch = evaluate_gold_shape(MATT, LAUNCHPAD, "SNAP")
+    assert "authored_interior" in launch
+    assert "authored_interior" not in evaluate_gold_shape(MATT, CRAZY_EVIDENCE, "SNAP")
+    assert "authored_interior" not in evaluate_gold_shape(MATT, SHELF_LIFE, "SNAP")
 
     insp_fail = _inspect(MATT, INVENTED_GUILT)
     assert _checks(insp_fail)["Object before author"]["status"] == "fail"
+    insp_launch = _inspect(MATT, LAUNCHPAD)
+    assert _checks(insp_launch)["Object before author"]["status"] == "fail"
     insp_ok = _inspect(MATT, RECEIPTS)
     assert _checks(insp_ok)["Object before author"]["status"] == "pass"
+    insp_shelf = _inspect(MATT, SHELF_LIFE)
+    assert _checks(insp_shelf)["Object before author"]["status"] == "pass"
 
 
 def test_killmonger_heat_does_not_false_positive():
@@ -157,9 +174,14 @@ def test_core_write_and_energy_name_the_contract():
     assert "interest always finds time" in blob
     assert "waiting for him" in blob
     assert "contribution budget" in blob
+    assert "rewrite the story" in blob
+    assert "shelf life" in blob
 
     closer = plan_closer_instruction(build_response_plan(MATT)).lower()
     assert "object before author" in closer
+    turn = plan_runtime_instruction(build_response_plan(MATT)).lower()
+    assert "object before author" in turn
+    assert "rewrite the story" in turn
 
     villain = build_response_plan(VILLAIN, selected_command="/thoughts")
     guide = plan_runtime_instruction(villain).lower()

@@ -645,8 +645,10 @@ def inspect_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "manufactured a hidden truth — motive, guilt, they-knew — that the prompt did not establish. Heat the established object; don't author unobserved interior because it hits harder.",
                 examples=[
                     "✗ They call you crazy because now they have to live with the fact that you saw straight through them.",
+                    "✗ The crazy label is just what people reach for when they need time to rewrite the story so they were never wrong.",
+                    "✓ Everybody loves calling it crazy before it turns into evidence.",
+                    "✓ Crazy has a remarkably short shelf life once the receipts show up.",
                     "✓ Everybody hates assumptions right up until the receipts arrive.",
-                    "✓ The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up.",
                 ],
             )
         else:

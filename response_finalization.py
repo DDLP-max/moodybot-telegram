@@ -951,6 +951,24 @@ def contribution_budget_guidance(budget: str) -> str:
     )
 
 
+def object_before_author_guidance() -> str:
+    """Always-on generation contract — not gated on engagement energy."""
+    return (
+        "\nOBJECT BEFORE AUTHOR: Make the established truth hotter. Do not manufacture "
+        "a hidden truth just because it hits harder. Referencing the object then launching "
+        "into unestablished interior is still authored interior.\n"
+        "Do not explain why they called you crazy. Heat the reversal (crazy → evidence), "
+        "not their private strategy.\n"
+        "FAIL: \"The crazy label is just what people reach for when they need time to "
+        "rewrite the story so they were never wrong.\"\n"
+        "FAIL: assumed → called crazy → later right becomes \"they called you crazy "
+        "because you saw straight through them.\"\n"
+        "PASS: \"Everybody loves calling it crazy before it turns into evidence.\"\n"
+        "PASS: \"Crazy has a remarkably short shelf life once the receipts show up.\"\n"
+        "PASS: \"Everybody hates assumptions right up until the receipts arrive.\"\n"
+    )
+
+
 def domain_mechanism_guidance(
     domain: str,
     lens: str = "",
@@ -1648,6 +1666,11 @@ The object is what the prompt already proved. Do not author an unobserved interi
 Hierarchy: established object → permitted inference → TAKE A SIDE / energy → voice.
 Not: TAKE A SIDE → strongest possible interpretation → retrofit object.
 Inference can characterize the established pattern. It cannot invent the actor's private explanation for that pattern.
+Object-preserving setup + authored-interior payoff is still authored interior. Referencing the object does not license a causal story about their private motive.
+Do not explain why they called you crazy. Heat the reversal (crazy → evidence), not their strategy.
+FAIL (launchpad): "The crazy label is just what people reach for when they need time to rewrite the story so they were never wrong."
+PASS: "Everybody loves calling it crazy before it turns into evidence."
+PASS: "Crazy has a remarkably short shelf life once the receipts show up."
 FAIL: assumed → called crazy → later right becomes "they called you crazy because you saw straight through them."
 PASS: "Everybody hates assumptions right up until the receipts arrive."
 PASS: "The worst part about being called paranoid is how rarely anyone apologizes when the evidence finally shows up."
@@ -2403,6 +2426,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
         + contribution_budget_guidance(
             getattr(plan, "contribution_budget", None) or "one_beat"
         )
+        + object_before_author_guidance()
         + lens_voice
         + domain_block
         + extra

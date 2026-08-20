@@ -83,6 +83,10 @@ DROPPED_FAIL = (
 DROPPED_PASS = "You need drinking buddies with forklift certification. 🥃"
 DROPPED_PASS_2 = "Three drops is a personnel problem. 🥃"
 DROPPED_PASS_3 = "Get friends with better upper-body strength. 🥃"
+# Live 2026-08-20: Iggy continued the forklift world. Behavioral gold, not a generation rule.
+IGGY_CONTINUE = (
+    "Where will we park it, I'm sure will end up lifting people's cars when we drink"
+)
 
 
 def test_energy_drink_is_terminal_bit():
@@ -298,4 +302,22 @@ def test_dropped_three_times_inherits_comic_premise():
     assert result.text.strip() == "🥃"
     result_good = finalize_response(DROPPED_PASS, DROPPED_CARRY, plan=plan)
     assert "forklift" in result_good.text.lower()
+
+
+def test_iggy_forklift_author_continued_the_world():
+    """Live 2026-08-20 behavioral gold.
+
+    Affordance is evidence the architecture worked — inherit, one beat, exit.
+    Not a generation mandate to ask a question or manufacture a hook.
+    """
+    plan = build_response_plan(DROPPED_CARRY)
+    assert plan.contribution_budget == "micro"
+    assert "?" not in DROPPED_PASS
+    assert corrects_comic_premise(DROPPED_CARRY, DROPPED_PASS) is False
+    # Author stayed inside the inherited world, not a defense of the drop.
+    assert "park" in IGGY_CONTINUE.lower()
+    assert "car" in IGGY_CONTINUE.lower()
+    assert "sober" not in IGGY_CONTINUE.lower()
+    assert "tolerance" not in IGGY_CONTINUE.lower()
+    assert "forklift" in DROPPED_PASS.lower()
 

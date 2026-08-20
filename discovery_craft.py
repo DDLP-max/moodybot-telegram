@@ -1364,7 +1364,31 @@ _AUTHORED_INTERIOR = re.compile(
     r"gets off on (?:you|the fact|knowing)|"
     r"enjoys knowing|"
     r"wants you waiting|"
-    r"likes that you(?:'re| are) waiting"
+    r"likes that you(?:'re| are) waiting|"
+    r"need time to rewrite|"
+    r"rewrite the story|"
+    r"so they were never wrong|"
+    r"reach for when they need"
+    r")"
+)
+# Causal explanation that depends on an unestablished interior state —
+# object-preserving setup + authored-interior payoff is still authored interior.
+_CAUSAL_OTHER_INTERIOR = re.compile(
+    r"(?i)(?:when they|because they|so they|so that they|"
+    r"in order to|to protect themselves|to avoid admitting)"
+)
+_UNESTABLISHED_INTERIOR_PAYLOAD = re.compile(
+    r"(?i)("
+    r"rewrite (?:the )?story|"
+    r"never wrong|"
+    r"weren'?t wrong|"
+    r"admit(?:ting)? (?:error|they were|they'?re wrong)|"
+    r"save face|"
+    r"protect themselves|"
+    r"need time|"
+    r"couldn'?t face|"
+    r"psychological|"
+    r"\bego\b"
     r")"
 )
 
@@ -1374,6 +1398,7 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
 
     OBJECT BEFORE AUTHOR: heat the established object. Do not manufacture a
     hidden truth — they-knew, exposure, guilt — just because it hits harder.
+    Referencing the object then launching into unestablished interior is still a fail.
     """
     from capability_detection import classify_social_mode, detect_comic_premise
 
@@ -1394,7 +1419,11 @@ def authors_unobserved_interior(user_message: str, response: str) -> bool:
     body = re.sub(r"\s*🥃\s*$", "", (response or "").strip())
     if not body:
         return False
-    return bool(_AUTHORED_INTERIOR.search(body))
+    if _AUTHORED_INTERIOR.search(body):
+        return True
+    return bool(
+        _CAUSAL_OTHER_INTERIOR.search(body) and _UNESTABLISHED_INTERIOR_PAYLOAD.search(body)
+    )
 
 
 # --- Contribution budget (permission to add material — not a new shape) ----

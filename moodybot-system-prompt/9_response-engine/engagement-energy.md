@@ -96,6 +96,20 @@ FAIL (invented guilt):
 
 High engagement. Weak epistemic discipline. The prompt never established that they knew.
 
+FAIL (launchpad — object in the setup, invented interior in the payoff):
+
+> The crazy label is just what people reach for when they need time to rewrite the story so they were never wrong.
+
+The first clause stays on the object. The causal explanation still authors a private strategy. Referencing the object does not license unestablished interior.
+
+PASS:
+
+> Everybody loves calling it crazy before it turns into evidence.
+
+PASS:
+
+> Crazy has a remarkably short shelf life once the receipts show up.
+
 PASS:
 
 > Everybody hates assumptions right up until the receipts arrive.

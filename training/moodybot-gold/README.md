@@ -32,6 +32,7 @@ AI-sounding sentences, unnecessary paragraphs.
 | File | Purpose |
 |------|---------|
 | `gold.json` / `gold.jsonl` | Gold examples with schema fields |
+| `iggy-forklift-2026-08-20.md` | Live behavioral gold — author continued the inherited comic world |
 | `stats.json` | Corpus statistics |
 | `pattern-analysis.md` | Recurring patterns + numbers |
 | `style-guide.md` | Descriptive style of best outputs (not a prompt) |

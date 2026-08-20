@@ -40,6 +40,10 @@ FAIL: friends "can't handle alcohol" because they dropped the speaker three time
 "You're blaming their tolerance when you were the one being carried."
 PASS: "You need drinking buddies with forklift certification."
 
+Live (2026-08-20): the author continued the world — "Where will we park it… lifting people's cars when we drink."
+That is affordance: one beat, then give the premise back. Evaluation signal, not a generation mandate.
+Do not ask a question to manufacture the continuation.
+
 **COMIC PAYOFF IS TERMINAL.**
 
 Once Bit Continuation produces a clean punchline, `body_ends_response`.
