@@ -153,6 +153,7 @@ def vision_directive(intent: str, *, caption: str, prior: list, image_count: int
     parts = [
         "You can see the attached image. The pixels are the evidence, not a caption someone else wrote.",
         "Do not describe the image and then attach an insult. Interpret what it unintentionally reveals: posture, expression, framing, the background, and any contradiction between the words and the picture.",
+        "The line has to depend on a specific visible fact. If it would still work on a different photograph, it is the wrong line. When the frame contains a contradiction, that contradiction is the premise. Do not replace what you see with a mood.",
         "Hear what was said. Notice what it implies. Say the thing underneath it.",
         "One reply, in your own voice. The punchline is the exit. Do not explain why it is funny. Do not narrate that you can see an image.",
         "If a person in the image looks underage, do not roast or sexualize them. Say you won't, and stop.",
