@@ -1460,6 +1460,15 @@ def main():
     loop.run_until_complete(runtime.run(app))
 
 
+if os.getenv("MOODYBOT_VISION", "1").strip().lower() not in {"0", "off", "false", "no"}:
+    try:
+        import moodybot_vision
+
+        moodybot_vision.install(globals())
+    except Exception:
+        logger.exception("MoodyBot vision failed to load; text chat is unchanged")
+
+
 if __name__ == "__main__":
     try:
         main()
