@@ -22,5 +22,6 @@ aiohttp
 requests
 pytube
 pillow
+pillow-heif
 telebot
 

@@ -78,6 +78,18 @@ class ImageRejected(Exception):
         self.user_message = user_message
 
 
+class ImageRetrievalFailed(ImageRejected):
+    """Telegram accepted the message, but the file bytes never arrived."""
+
+
+class ImageUnsupported(ImageRejected):
+    """The attachment is not a picture this bot can open."""
+
+
+class ImageUnreadable(ImageRejected):
+    """Bytes arrived, and they were not a readable image."""
+
+
 def vision_enabled() -> bool:
     return os.getenv("MOODYBOT_VISION", "1").strip().lower() not in {
         "0", "off", "false", "no",
@@ -107,20 +119,92 @@ def _positive_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def message_has_image(message) -> bool:
+_IMAGE_EXTENSIONS = (
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif", ".tif", ".tiff",
+)
+
+
+def _carriers(message) -> list:
+    """The message itself, plus media that arrived only on a forwarded or external reply."""
     if message is None:
+        return []
+    carriers = [message]
+    external = getattr(message, "external_reply", None)
+    if external is not None:
+        carriers.append(external)
+    return carriers
+
+
+def _photo_rank(photo) -> tuple:
+    try:
+        size = int(getattr(photo, "file_size", None) or 0)
+    except (TypeError, ValueError):
+        size = 0
+    try:
+        width = int(getattr(photo, "width", None) or 0)
+        height = int(getattr(photo, "height", None) or 0)
+    except (TypeError, ValueError):
+        width = height = 0
+    return (size, width * height)
+
+
+def _clean_mime(mime: str | None) -> str:
+    return str(mime or "").split(";", 1)[0].strip().lower()
+
+
+def _document_is_image(document) -> bool:
+    if document is None:
         return False
-    if getattr(message, "photo", None):
+    mime = _clean_mime(getattr(document, "mime_type", None))
+    if mime.startswith("image/"):
         return True
-    document = getattr(message, "document", None)
-    mime = str(getattr(document, "mime_type", "") or "").lower()
-    return mime.startswith("image/")
+    if mime not in {"", "application/octet-stream", "binary/octet-stream"}:
+        return False
+    name = str(getattr(document, "file_name", "") or "").lower()
+    return name.endswith(_IMAGE_EXTENSIONS)
+
+
+def image_candidates(message) -> list:
+    """File ids for this message, largest photo first, then an image sent as a file."""
+    found = []
+    seen = set()
+    for carrier in _carriers(message):
+        photos = [
+            item for item in (getattr(carrier, "photo", None) or [])
+            if getattr(item, "file_id", None)
+        ]
+        for photo in sorted(photos, key=_photo_rank, reverse=True):
+            file_id = photo.file_id
+            if file_id in seen:
+                continue
+            seen.add(file_id)
+            found.append((file_id, "image/jpeg"))
+        document = getattr(carrier, "document", None)
+        file_id = getattr(document, "file_id", None) if document is not None else None
+        if file_id and file_id not in seen and _document_is_image(document):
+            seen.add(file_id)
+            found.append((file_id, _clean_mime(getattr(document, "mime_type", None)) or None))
+    return found
+
+
+def message_has_image(message) -> bool:
+    return bool(image_candidates(message))
 
 
 def user_words(message) -> str:
     if message is None:
         return ""
     return (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
+
+
+def vision_instruction(message) -> str:
+    """The caption on the picture, or the text of a reply pointing at one."""
+    own = user_words(message)
+    reply = getattr(message, "reply_to_message", None)
+    earlier = user_words(reply) if reply is not None else ""
+    if own and earlier and earlier not in own:
+        return own + "\n" + earlier
+    return own or earlier
 
 
 def classify_vision_intent(text: str) -> str:
@@ -216,29 +300,38 @@ def _data_uri(data: bytes, mime: str) -> str:
 
 
 def validate_declared_mime(mime: str | None) -> None:
-    if not mime:
+    clean = _clean_mime(mime)
+    if not clean or clean in {"application/octet-stream", "binary/octet-stream"}:
         return
-    clean = mime.split(";", 1)[0].strip().lower()
-    if clean in {"application/octet-stream", "binary/octet-stream"}:
+    if clean.startswith("image/"):
         return
-    allowed = {
-        "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/bmp",
-    }
-    if clean not in allowed:
-        raise ImageRejected("I can't see that file. Send a photo, screenshot, or image.")
+    raise ImageUnsupported("That file isn't a photo or screenshot.")
+
+
+def _register_heif() -> None:
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except Exception:
+        return
 
 
 def normalize_image(raw: bytes, mime: str | None = None) -> tuple:
     """Return JPEG bytes small enough to send, with orientation applied and metadata dropped."""
     validate_declared_mime(mime)
     if not raw:
-        raise ImageRejected("That file is empty.")
+        raise ImageRetrievalFailed("Telegram sent that file back empty.")
     if len(raw) > MAX_IMAGE_BYTES:
         raise ImageRejected("That image is too big. Send it smaller.")
+    clean = _clean_mime(mime)
     try:
         from PIL import Image, ImageOps
         import io
-
+    except ImportError as exc:
+        logger.exception("Pillow is not installed; image bytes cannot be read")
+        raise ImageUnreadable("I can't read images on this server yet.") from exc
+    try:
+        _register_heif()
         Image.MAX_IMAGE_PIXELS = 24_000_000
         with Image.open(io.BytesIO(raw)) as img:
             img.load()
@@ -261,8 +354,18 @@ def normalize_image(raw: bytes, mime: str | None = None) -> tuple:
                 data = _encode_jpeg(img, quality)
     except ImageRejected:
         raise
-    except Exception:
-        raise ImageRejected("I can't see that file. Send a photo, screenshot, or image.")
+    except Exception as exc:
+        logger.warning(
+            "vision decode failed mime=%s error=%s bytes=%s",
+            clean or "unknown", type(exc).__name__, len(raw),
+        )
+        if clean in {"image/heic", "image/heif"}:
+            raise ImageUnsupported(
+                "That HEIC photo isn't one I can open. Send it as a photo, not as a file."
+            ) from exc
+        raise ImageUnreadable(
+            "That image arrived, but I couldn't read it. Try sending it again."
+        ) from exc
     return data, "image/jpeg"
 
 
@@ -514,9 +617,12 @@ def install_image_handlers() -> None:
             return
         if getattr(handler, "filters", None) == filters.TEXT:
             self._moody_vision_photo = True
+            image_filter = filters.PHOTO | filters.Document.IMAGE
+            for extension in ("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif"):
+                image_filter = image_filter | filters.Document.FileExtension(extension)
             original(
                 self,
-                MessageHandler(filters.PHOTO | filters.Document.IMAGE, handler.callback),
+                MessageHandler(image_filter, handler.callback),
                 group,
             )
             logger.info("MoodyBot vision handlers registered")
@@ -604,7 +710,7 @@ async def handle_vision_update(update, context, mb, grouped=None):
         )
         if not images:
             await mb.send_simple_message(
-                update, "I can't see that file. Send a photo, screenshot, or image.",
+                update, "I don't still have that image. Send it again.",
             )
             return None
         intent = classify_vision_intent(caption)
@@ -644,28 +750,31 @@ async def _resolve_images(message, context, chat_id, grouped):
     captions = []
     message_ids = []
     rejection = None
+    saw_attachment = False
     for item in messages:
-        words = user_words(item)
+        words = vision_instruction(item)
         if words:
             captions.append(words)
         message_id = getattr(item, "message_id", None)
         if message_id is not None:
             message_ids.append(message_id)
-        if not message_has_image(item):
-            continue
-        downloaded = await _download(item, context)
-        if not downloaded:
-            continue
+        reply = getattr(item, "reply_to_message", None)
+        if message_has_image(item) or message_has_image(reply):
+            saw_attachment = True
         try:
-            fresh_images.append(normalize_image(*downloaded))
+            loaded = await _load_attached(item, context)
         except ImageRejected as exc:
             rejection = exc
+            continue
+        if loaded is None:
+            continue
+        fresh_images.append(loaded)
         if len(fresh_images) >= MAX_IMAGES:
             break
     caption = captions[0] if captions else ""
     if fresh_images:
         return fresh_images, caption, message_ids, [], True
-    if rejection is not None and any(message_has_image(item) for item in messages):
+    if rejection is not None and saw_attachment:
         raise rejection
 
     memory = default_memory()
@@ -675,30 +784,53 @@ async def _resolve_images(message, context, chat_id, grouped):
         stored = memory.load_images(prior)
         if stored:
             return stored, caption, message_ids, prior, False
-    if message_has_image(reply):
-        downloaded = await _download(reply, context)
-        if downloaded:
-            return [normalize_image(*downloaded)], caption, message_ids, prior, True
     return [], caption, message_ids, prior, False
 
 
+async def _fetch_file(context, file_id) -> bytes:
+    try:
+        telegram_file = await context.bot.get_file(file_id)
+        payload = await telegram_file.download_as_bytearray(read_timeout=45)
+    except Exception as exc:
+        logger.warning("vision retrieval failed error=%s", type(exc).__name__)
+        raise ImageRetrievalFailed(
+            "I couldn't download that file from Telegram. Try sending it again."
+        ) from exc
+    data = bytes(payload or b"")
+    if not data:
+        raise ImageRetrievalFailed("Telegram sent that file back empty.")
+    return data
+
+
+async def _load_attached(message, context):
+    """Download the best readable image on this message or the message it replies to."""
+    last = None
+    carriers = [message, getattr(message, "reply_to_message", None)]
+    tried = False
+    for carrier in carriers:
+        for file_id, mime in image_candidates(carrier):
+            tried = True
+            try:
+                raw = await _fetch_file(context, file_id)
+                return normalize_image(raw, mime)
+            except ImageRejected as exc:
+                last = exc
+                continue
+    if tried and last is not None:
+        raise last
+    return None
+
+
 async def _download(message, context):
-    file_id = None
-    mime = None
-    photos = getattr(message, "photo", None)
-    if photos:
-        file_id = photos[-1].file_id
-        mime = "image/jpeg"
-    else:
-        document = getattr(message, "document", None)
-        mime = str(getattr(document, "mime_type", "") or "")
-        if document is not None and mime.lower().startswith("image/"):
-            file_id = document.file_id
-    if not file_id:
+    """Backward-compatible helper: raw bytes and declared mime for the best candidate."""
+    candidates = image_candidates(message)
+    if not candidates:
+        reply = getattr(message, "reply_to_message", None)
+        candidates = image_candidates(reply)
+    if not candidates:
         return None
-    telegram_file = await context.bot.get_file(file_id)
-    payload = await telegram_file.download_as_bytearray()
-    return bytes(payload), mime
+    file_id, mime = candidates[0]
+    return await _fetch_file(context, file_id), mime
 
 
 def _prepare_model_turn(mb, planner_text, caption, intent, images, prior):
