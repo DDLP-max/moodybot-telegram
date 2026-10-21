@@ -468,6 +468,113 @@ def test_retrieval_failure_is_not_the_generic_blind_reply():
         raise AssertionError("a failed download must not look like a successful read")
 
 
+def test_file_named_photo_is_downloaded_not_remembered():
+    """A file Telegram shows as 'Photo' is a new upload, not a memory lookup."""
+    import asyncio
+    from moodybot_vision import ImageRetrievalFailed, _resolve_images, has_own_media
+
+    path = Path(__import__("tempfile").mkdtemp()) / "bare.jpg"
+    Image.new("RGB", (240, 80), (10, 20, 200)).save(path, format="JPEG", quality=90)
+    message = _message(
+        caption="Describe exactly what you see in this image.",
+        document=SimpleNamespace(
+            file_id="bare-photo", mime_type="application/octet-stream", file_name="Photo",
+        ),
+    )
+    assert has_own_media(message)
+
+    class Bot:
+        async def get_file(self, file_id):
+            assert file_id == "bare-photo"
+            from telegram import File
+            return File(file_id=file_id, file_unique_id="b", file_path=str(path))
+
+    images, caption, _ids, prior, fresh = asyncio.run(
+        _resolve_images(message, SimpleNamespace(bot=Bot()), 7, None)
+    )
+    assert fresh is True and prior == []
+    assert images[0][0][:2] == b"\xff\xd8"
+    assert caption.startswith("Describe exactly")
+
+    class DeadBot:
+        async def get_file(self, file_id):
+            raise RuntimeError("telegram getFile failed")
+
+    try:
+        asyncio.run(_resolve_images(message, SimpleNamespace(bot=DeadBot()), 7, None))
+    except ImageRetrievalFailed as exc:
+        assert "don't still have" not in exc.user_message
+    else:
+        raise AssertionError("a new Photo file must not fall through to memory")
+
+
+def test_fresh_photo_is_not_answered_from_memory():
+    import asyncio
+    from moodybot_vision import ImageRetrievalFailed, _resolve_images
+
+    class Remembered:
+        def select(self, *args, **kwargs):
+            raise AssertionError("a new photo must not be looked up in memory")
+
+    message = _message(
+        caption="Describe exactly what you see in this image.",
+        photo=[_photo("new-photo", 20000, 800, 600)],
+    )
+
+    class Bot:
+        async def get_file(self, file_id):
+            raise RuntimeError("telegram getFile failed")
+
+    try:
+        asyncio.run(_resolve_images(message, SimpleNamespace(bot=Bot()), 7, None))
+    except ImageRetrievalFailed as exc:
+        assert "download" in exc.user_message
+        assert "don't still have" not in exc.user_message
+    else:
+        raise AssertionError("failed download of a new photo must not fall through to memory")
+    Remembered()
+
+
+def test_ptb_photo_update_puts_pixels_in_the_model_request():
+    import asyncio
+    from telegram import Update
+    from moodybot_vision import _payload_shape, _resolve_images, user_content
+
+    path = Path(__import__("tempfile").mkdtemp()) / "seen.jpg"
+    Image.new("RGB", (320, 200), (220, 30, 40)).save(path, format="JPEG", quality=90)
+    update = Update.de_json(
+        {
+            "update_id": 501,
+            "message": {
+                "message_id": 77,
+                "date": 1760000000,
+                "chat": {"id": 42, "type": "private"},
+                "caption": "Describe exactly what you see in this image.",
+                "photo": [
+                    {"file_id": "small", "file_unique_id": "s", "width": 40, "height": 25, "file_size": 400},
+                    {"file_id": "full", "file_unique_id": "f", "width": 320, "height": 200, "file_size": 12000},
+                ],
+            },
+        },
+        bot=None,
+    )
+
+    class Bot:
+        async def get_file(self, file_id):
+            assert file_id == "full"
+            from telegram import File
+            return File(file_id=file_id, file_unique_id="f", file_path=str(path))
+
+    images, caption, _ids, prior, fresh = asyncio.run(
+        _resolve_images(update.message, SimpleNamespace(bot=Bot()), 42, None)
+    )
+    assert fresh is True and prior == []
+    assert caption.startswith("Describe exactly")
+    content = user_content(caption, images)
+    assert content[1]["type"] == "image_url"
+    assert _payload_shape([{"role": "user", "content": content}]).startswith("user[text,image:")
+
+
 def test_real_jpeg_reaches_the_model_payload():
     """Read a real JPEG through Telegram's file object, then into the model payload."""
     import asyncio
@@ -551,6 +658,9 @@ def _run() -> None:
     test_external_reply_photo_counts_as_the_attachment()
     test_reply_to_an_image_keeps_the_instruction_and_the_pixels()
     test_retrieval_failure_is_not_the_generic_blind_reply()
+    test_file_named_photo_is_downloaded_not_remembered()
+    test_fresh_photo_is_not_answered_from_memory()
+    test_ptb_photo_update_puts_pixels_in_the_model_request()
     test_real_jpeg_reaches_the_model_payload()
     print("vision tests ok")
 

@@ -370,6 +370,16 @@ class BotRuntime:
 
         update_id = data.get("update_id", "?")
         self._info("[update %s] webhook received", update_id)
+        try:
+            from moodybot_vision import summarize_raw_update
+            import json as _json
+            self._info(
+                "[update %s] webhook shape %s",
+                update_id,
+                _json.dumps(summarize_raw_update(data), sort_keys=True),
+            )
+        except Exception:
+            self.log.exception(self._fmt("[update %s] webhook shape failed"), update_id)
 
         try:
             update = Update.de_json(data, app.bot)

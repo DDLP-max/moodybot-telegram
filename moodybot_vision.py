@@ -164,31 +164,243 @@ def _document_is_image(document) -> bool:
     return name.endswith(_IMAGE_EXTENSIONS)
 
 
+def _file_id_of(item) -> str:
+    if isinstance(item, dict):
+        value = item.get("file_id")
+    else:
+        value = getattr(item, "file_id", None)
+    value = str(value or "").strip()
+    return value
+
+
+def _photo_dicts(photo) -> list:
+    if not photo:
+        return []
+    try:
+        sequence = list(photo)
+    except TypeError:
+        sequence = [photo]
+    items = []
+    for item in sequence:
+        if isinstance(item, dict):
+            if item.get("file_id"):
+                items.append(item)
+            continue
+        file_id = _file_id_of(item)
+        if not file_id:
+            continue
+        items.append({
+            "file_id": file_id,
+            "file_size": getattr(item, "file_size", None),
+            "width": getattr(item, "width", None),
+            "height": getattr(item, "height", None),
+        })
+    return items
+
+
+def _document_dict(document) -> dict:
+    if document is None:
+        return {}
+    if isinstance(document, dict):
+        return document
+    return {
+        "file_id": _file_id_of(document),
+        "mime_type": getattr(document, "mime_type", None),
+        "file_name": getattr(document, "file_name", None),
+        "file_size": getattr(document, "file_size", None),
+    }
+
+
+def _mapping(message, depth: int = 0) -> dict:
+    """Plain update fields. Objects and dicts both work, including PTB to_dict()."""
+    if message is None or depth > 3:
+        return {}
+    if isinstance(message, dict):
+        return message
+    to_dict = getattr(message, "to_dict", None)
+    if callable(to_dict):
+        try:
+            data = to_dict()
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            if not data.get("photo"):
+                photo = _photo_dicts(getattr(message, "photo", None))
+                if photo:
+                    data = dict(data)
+                    data["photo"] = photo
+            document = data.get("document")
+            if not (isinstance(document, dict) and document.get("file_id")):
+                fallback = _document_dict(getattr(message, "document", None))
+                if fallback.get("file_id"):
+                    data = dict(data)
+                    data["document"] = fallback
+            return data
+    data = {}
+    photo = _photo_dicts(getattr(message, "photo", None))
+    if photo:
+        data["photo"] = photo
+    document = _document_dict(getattr(message, "document", None))
+    if document.get("file_id") or document.get("mime_type") or document.get("file_name"):
+        data["document"] = document
+    for key in ("reply_to_message", "external_reply"):
+        child = getattr(message, key, None)
+        if child is not None:
+            data[key] = _mapping(child, depth + 1)
+    caption = getattr(message, "caption", None)
+    text = getattr(message, "text", None)
+    if caption:
+        data["caption"] = caption
+    if text:
+        data["text"] = text
+    message_id = getattr(message, "message_id", None)
+    if message_id is not None:
+        data["message_id"] = message_id
+    return data
+
+
+_BARE_IMAGE_NAMES = {"photo", "image", "img", "picture", "screenshot"}
+
+
+def _document_dict_is_image(document: dict) -> bool:
+    """True for image files, including an iPhone file sent as just 'Photo'."""
+    if not document:
+        return False
+    mime = _clean_mime(document.get("mime_type"))
+    if mime.startswith(("video/", "audio/")) or mime in {
+        "application/pdf", "text/plain", "application/zip",
+    }:
+        return False
+    if mime.startswith("image/"):
+        return True
+    name = str(document.get("file_name") or "").strip().lower()
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    if name.endswith(_IMAGE_EXTENSIONS) or stem in _BARE_IMAGE_NAMES:
+        return True
+    return False
+
+
+def _candidates_in(node: dict) -> list:
+    if not isinstance(node, dict):
+        return []
+    found = []
+    photos = node.get("photo") if isinstance(node.get("photo"), list) else _photo_dicts(node.get("photo"))
+    ranked = []
+    for item in photos:
+        if not isinstance(item, dict):
+            continue
+        file_id = _file_id_of(item)
+        if not file_id:
+            continue
+        try:
+            size = int(item.get("file_size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        try:
+            area = int(item.get("width") or 0) * int(item.get("height") or 0)
+        except (TypeError, ValueError):
+            area = 0
+        ranked.append((size, area, file_id))
+    ranked.sort(reverse=True)
+    found.extend((file_id, "image/jpeg") for _, _, file_id in ranked)
+    document = node.get("document")
+    if isinstance(document, dict) and _document_dict_is_image(document):
+        file_id = _file_id_of(document)
+        if file_id:
+            found.append((file_id, _clean_mime(document.get("mime_type")) or None))
+    return found
+
+
+def _nodes(message) -> list:
+    raw = _mapping(message)
+    nodes = [raw] if raw else []
+    for key in ("reply_to_message", "external_reply"):
+        child = raw.get(key) if isinstance(raw, dict) else None
+        if isinstance(child, dict):
+            nodes.append(child)
+    return nodes
+
+
 def image_candidates(message) -> list:
     """File ids for this message, largest photo first, then an image sent as a file."""
     found = []
     seen = set()
-    for carrier in _carriers(message):
-        photos = [
-            item for item in (getattr(carrier, "photo", None) or [])
-            if getattr(item, "file_id", None)
-        ]
-        for photo in sorted(photos, key=_photo_rank, reverse=True):
-            file_id = photo.file_id
+    for node in _nodes(message):
+        for file_id, mime in _candidates_in(node):
             if file_id in seen:
                 continue
             seen.add(file_id)
-            found.append((file_id, "image/jpeg"))
-        document = getattr(carrier, "document", None)
-        file_id = getattr(document, "file_id", None) if document is not None else None
-        if file_id and file_id not in seen and _document_is_image(document):
-            seen.add(file_id)
-            found.append((file_id, _clean_mime(getattr(document, "mime_type", None)) or None))
+            found.append((file_id, mime))
     return found
+
+
+def _node_has_picture(node: dict) -> bool:
+    if not isinstance(node, dict):
+        return False
+    if node.get("photo"):
+        return True
+    document = node.get("document")
+    return isinstance(document, dict) and _document_dict_is_image(document)
+
+
+def has_own_media(message) -> bool:
+    """Picture attached to this message itself, not one it merely replies to."""
+    return _node_has_picture(_mapping(message))
+
+
+def has_fresh_media(message) -> bool:
+    """True when this turn carries a picture, even if its file id is missing."""
+    return any(_node_has_picture(node) for node in _nodes(message))
 
 
 def message_has_image(message) -> bool:
     return bool(image_candidates(message))
+
+
+def summarize_message(message) -> dict:
+    """Structure only. No pixels, no credentials, no full file ids."""
+    raw = _mapping(message)
+    def tail(value) -> str:
+        text = str(value or "")
+        return text[-6:] if text else ""
+    def one(node):
+        if not isinstance(node, dict):
+            return None
+        photos = node.get("photo") if isinstance(node.get("photo"), list) else []
+        document = node.get("document") if isinstance(node.get("document"), dict) else {}
+        return {
+            "keys": sorted(key for key in node.keys() if key not in {"photo", "caption", "text"}),
+            "photo_sizes": len(photos),
+            "photo_tails": [tail(item.get("file_id")) for item in photos if isinstance(item, dict)],
+            "document_mime": document.get("mime_type"),
+            "document_name": document.get("file_name"),
+            "document_tail": tail(document.get("file_id")),
+            "caption_len": len(str(node.get("caption") or "")),
+            "text_len": len(str(node.get("text") or "")),
+        }
+    reply = raw.get("reply_to_message") if isinstance(raw.get("reply_to_message"), dict) else None
+    external = raw.get("external_reply") if isinstance(raw.get("external_reply"), dict) else None
+    return {
+        "own": one(raw),
+        "reply": one(reply) if reply else None,
+        "external": one(external) if external else None,
+        "candidates": len(image_candidates(message)),
+        "fresh_media": has_fresh_media(message),
+    }
+
+
+def summarize_raw_update(data: dict) -> dict:
+    if not isinstance(data, dict):
+        return {"kind": type(data).__name__}
+    message = data.get("message") or data.get("edited_message") or data.get("channel_post")
+    kind = "message" if data.get("message") else (
+        "edited_message" if data.get("edited_message") else (
+            "channel_post" if data.get("channel_post") else "other"
+        )
+    )
+    return {"kind": kind, "update_id": data.get("update_id"), **(
+        summarize_message(message) if isinstance(message, dict) else {"own": None}
+    )}
 
 
 def user_words(message) -> str:
@@ -281,6 +493,27 @@ def assemble_messages(system_prompt, structure, closer, directive, user_content)
     messages.append({"role": "system", "content": directive})
     messages.append({"role": "user", "content": user_content})
     return messages
+
+
+def _payload_shape(messages: list) -> str:
+    """Roles and part kinds only. Image URLs are counted, never logged."""
+    chunks = []
+    for item in messages:
+        content = item.get("content")
+        if isinstance(content, list):
+            kinds = []
+            for part in content:
+                if not isinstance(part, dict):
+                    kinds.append("?")
+                elif part.get("type") == "image_url":
+                    url = str((part.get("image_url") or {}).get("url") or "")
+                    kinds.append("image:" + str(len(url)))
+                else:
+                    kinds.append(str(part.get("type") or "text"))
+            chunks.append(str(item.get("role")) + "[" + ",".join(kinds) + "]")
+        else:
+            chunks.append(str(item.get("role")) + ":text")
+    return " ".join(chunks)
 
 
 def user_content(text: str, images: list) -> list:
@@ -615,9 +848,20 @@ def install_image_handlers() -> None:
         original(self, handler, group)
         if getattr(self, "_moody_vision_photo", False):
             return
-        if getattr(handler, "filters", None) == filters.TEXT:
+        filt = getattr(handler, "filters", None)
+        filter_name = str(getattr(filt, "name", "") or "")
+        if filt == filters.TEXT or filter_name == "filters.TEXT":
             self._moody_vision_photo = True
-            image_filter = filters.PHOTO | filters.Document.IMAGE
+
+            class _OwnImage(filters.MessageFilter):
+                def filter(self, message):
+                    try:
+                        return has_own_media(message)
+                    except Exception:
+                        logger.exception("vision attachment check failed")
+                        return False
+
+            image_filter = filters.PHOTO | filters.Document.IMAGE | _OwnImage(name="filters.MOODY_OWN_IMAGE")
             for extension in ("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif"):
                 image_filter = image_filter | filters.Document.FileExtension(extension)
             original(
@@ -659,6 +903,11 @@ async def dispatch(update, context, mb, compiled_handle):
             asyncio.create_task(_flush_album(group_id, context, mb))
         return None
     if _should_see(update):
+        logger.info(
+            "[update %s] vision route %s",
+            getattr(update, "update_id", "?"),
+            json.dumps(summarize_message(message), sort_keys=True),
+        )
         return await handle_vision_update(update, context, mb)
     return await compiled_handle(update, context)
 
@@ -667,10 +916,10 @@ def _should_see(update) -> bool:
     message = getattr(update, "message", None)
     if message is None:
         return False
-    if message_has_image(message):
+    if has_own_media(message) or message_has_image(message):
         return True
     reply = getattr(message, "reply_to_message", None)
-    if message_has_image(reply):
+    if has_own_media(reply) or message_has_image(reply):
         return True
     text = getattr(message, "text", None) or ""
     chat = getattr(update, "effective_chat", None)
@@ -709,6 +958,12 @@ async def handle_vision_update(update, context, mb, grouped=None):
             message, context, chat_id, grouped,
         )
         if not images:
+            # A new upload must never be answered as a forgotten earlier picture.
+            logger.info(
+                "[update %s] vision no bytes; memory miss only %s",
+                update_id,
+                json.dumps(summarize_message(message), sort_keys=True),
+            )
             await mb.send_simple_message(
                 update, "I don't still have that image. Send it again.",
             )
@@ -773,7 +1028,21 @@ async def _resolve_images(message, context, chat_id, grouped):
             break
     caption = captions[0] if captions else ""
     if fresh_images:
+        logger.info(
+            "[vision] fresh image bytes=%s caption_len=%s",
+            len(fresh_images[0][0]), len(caption),
+        )
         return fresh_images, caption, message_ids, [], True
+    if has_fresh_media(message) or any(has_fresh_media(item) for item in messages):
+        logger.warning(
+            "[vision] attachment present but not decoded %s",
+            json.dumps(summarize_message(message), sort_keys=True),
+        )
+        if rejection is not None:
+            raise rejection
+        raise ImageRetrievalFailed(
+            "Telegram included that picture without a file id I can download."
+        )
     if rejection is not None and saw_attachment:
         raise rejection
 
@@ -792,11 +1061,15 @@ async def _fetch_file(context, file_id) -> bytes:
         telegram_file = await context.bot.get_file(file_id)
         payload = await telegram_file.download_as_bytearray(read_timeout=45)
     except Exception as exc:
-        logger.warning("vision retrieval failed error=%s", type(exc).__name__)
+        logger.warning(
+            "vision getFile failed tail=%s error=%s",
+            str(file_id or "")[-6:], type(exc).__name__,
+        )
         raise ImageRetrievalFailed(
             "I couldn't download that file from Telegram. Try sending it again."
         ) from exc
     data = bytes(payload or b"")
+    logger.info("vision getFile ok tail=%s bytes=%s", str(file_id or "")[-6:], len(data))
     if not data:
         raise ImageRetrievalFailed("Telegram sent that file back empty.")
     return data
@@ -928,6 +1201,13 @@ async def _complete_and_send(mb, update, chat, update_id, caption, intent, image
         )
         stage = "openrouter_request"
         started = time.monotonic()
+        logger.info(
+            "[update %s] OpenRouter payload model=%s parts=%s image_bytes=%s",
+            update_id,
+            mb.OPENROUTER_MODEL,
+            _payload_shape(messages),
+            sum(len(data) for data, _mime in images),
+        )
         logger.info("[update %s] OpenRouter request started model=%s", update_id, mb.OPENROUTER_MODEL)
         async with mb.httpx.AsyncClient() as client:
             response = await client.post(
