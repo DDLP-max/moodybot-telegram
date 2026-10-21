@@ -575,6 +575,151 @@ def test_ptb_photo_update_puts_pixels_in_the_model_request():
     assert _payload_shape([{"role": "user", "content": content}]).startswith("user[text,image:")
 
 
+def _with_dict(payload: dict):
+    return SimpleNamespace(
+        to_dict=lambda: payload,
+        message_id=payload.get("message_id"),
+        photo=payload.get("photo"),
+        document=payload.get("document"),
+        caption=payload.get("caption"),
+        text=payload.get("text"),
+        reply_to_message=None,
+        external_reply=None,
+        chat=SimpleNamespace(id=1),
+    )
+
+
+def test_current_photo_wins_over_a_replied_photo():
+    from moodybot_vision import resolve_image_reference
+
+    message = _message(
+        caption="roast this",
+        photo=[_photo("own-photo", 100, 20, 20)],
+        reply_to_message=_message(message_id=2, photo=[_photo("older-photo", 90000, 800, 800)]),
+    )
+    ref = resolve_image_reference(message)
+    assert ref.source == "message.photo"
+    assert ref.file_id == "own-photo"
+
+
+def test_text_reply_uses_the_replied_photo_not_memory():
+    import asyncio
+    from moodybot_vision import resolve_image_reference, _resolve_images
+
+    message = _message(
+        text="Describe exactly what you see in this image.",
+        reply_to_message=_message(message_id=4, caption="gym", photo=[_photo("replied-photo", 80, 30, 30)]),
+    )
+    ref = resolve_image_reference(message)
+    assert ref.source == "reply_to_message.photo"
+    assert ref.file_id == "replied-photo"
+
+    path = Path(__import__("tempfile").mkdtemp()) / "reply.jpg"
+    Image.new("RGB", (30, 30), (1, 2, 3)).save(path, format="JPEG")
+
+    class Bot:
+        async def get_file(self, file_id):
+            assert file_id == "replied-photo"
+            from telegram import File
+            return File(file_id=file_id, file_unique_id="r", file_path=str(path))
+
+    class Memory:
+        def select(self, *args, **kwargs):
+            raise AssertionError("a replied photo with a file id must be downloaded")
+
+    images, caption, _ids, prior, fresh = asyncio.run(
+        _resolve_images(message, SimpleNamespace(bot=Bot()), 7, None)
+    )
+    assert fresh is True and prior == []
+    assert images[0][0][:2] == b"\xff\xd8"
+    assert "Describe exactly" in caption
+    Memory()
+
+
+def test_photo_without_caption_still_has_a_file_id():
+    from moodybot_vision import resolve_image_reference
+
+    message = _message(photo=[_photo("silent", 10, 8, 8)])
+    ref = resolve_image_reference(message)
+    assert ref.file_id == "silent"
+    assert ref.source == "message.photo"
+
+
+def test_photo_size_objects_are_not_dropped():
+    from moodybot_vision import resolve_image_reference
+
+    message = _with_dict({
+        "message_id": 3,
+        "photo": [SimpleNamespace(file_id="obj-photo", file_size=50, width=10, height=10)],
+    })
+    ref = resolve_image_reference(message)
+    assert ref.file_id == "obj-photo"
+    assert ref.source == "message.photo"
+
+
+def test_raw_update_keeps_the_file_id_the_parsed_object_lost():
+    from moodybot_vision import bind_raw_update, reset_raw_update, resolve_image_reference
+
+    token = bind_raw_update({
+        "update_id": 9,
+        "message": {
+            "message_id": 9,
+            "caption": "Describe exactly what you see in this image.",
+            "photo": [{"file_id": "raw-full", "width": 200, "height": 100, "file_size": 5000}],
+        },
+    })
+    try:
+        message = _with_dict({"message_id": 9, "photo": [{"width": 200, "height": 100}]})
+        ref = resolve_image_reference(message)
+        assert ref.file_id == "raw-full"
+        assert ref.source == "message.photo"
+    finally:
+        reset_raw_update(token)
+
+
+def test_live_photo_uses_the_still_not_the_video():
+    from moodybot_vision import resolve_image_reference
+
+    message = _with_dict({
+        "message_id": 5,
+        "live_photo": {
+            "file_id": "video-file",
+            "width": 40,
+            "height": 40,
+            "duration": 2,
+            "photo": [{"file_id": "still-file", "width": 40, "height": 40, "file_size": 10}],
+        },
+    })
+    ref = resolve_image_reference(message)
+    assert ref.file_id == "still-file"
+    assert ref.source == "message.live_photo.photo"
+
+
+def test_screenshot_document_and_roast_caption_download_that_file():
+    import asyncio
+    from moodybot_vision import _resolve_images
+
+    path = Path(__import__("tempfile").mkdtemp()) / "shot.png"
+    Image.new("RGB", (16, 16), (255, 0, 0)).save(path, format="PNG")
+    message = _message(
+        caption="roast this",
+        document=SimpleNamespace(file_id="shot-doc", mime_type="image/png", file_name="screenshot.png"),
+    )
+
+    class Bot:
+        async def get_file(self, file_id):
+            assert file_id == "shot-doc"
+            from telegram import File
+            return File(file_id=file_id, file_unique_id="d", file_path=str(path))
+
+    images, caption, _ids, prior, fresh = asyncio.run(
+        _resolve_images(message, SimpleNamespace(bot=Bot()), 7, None)
+    )
+    assert fresh is True and prior == []
+    assert caption == "roast this"
+    assert images[0][0][:2] == b"\xff\xd8"
+
+
 def test_real_jpeg_reaches_the_model_payload():
     """Read a real JPEG through Telegram's file object, then into the model payload."""
     import asyncio
@@ -661,6 +806,13 @@ def _run() -> None:
     test_file_named_photo_is_downloaded_not_remembered()
     test_fresh_photo_is_not_answered_from_memory()
     test_ptb_photo_update_puts_pixels_in_the_model_request()
+    test_current_photo_wins_over_a_replied_photo()
+    test_text_reply_uses_the_replied_photo_not_memory()
+    test_photo_without_caption_still_has_a_file_id()
+    test_photo_size_objects_are_not_dropped()
+    test_raw_update_keeps_the_file_id_the_parsed_object_lost()
+    test_live_photo_uses_the_still_not_the_video()
+    test_screenshot_document_and_roast_caption_download_that_file()
     test_real_jpeg_reaches_the_model_payload()
     print("vision tests ok")
 

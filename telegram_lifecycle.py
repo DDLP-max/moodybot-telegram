@@ -381,6 +381,14 @@ class BotRuntime:
         except Exception:
             self.log.exception(self._fmt("[update %s] webhook shape failed"), update_id)
 
+        raw_token = None
+        try:
+            from moodybot_vision import bind_raw_update, reset_raw_update
+            raw_token = bind_raw_update(data)
+        except Exception:
+            self.log.exception(self._fmt("[update %s] raw update bind failed"), update_id)
+            reset_raw_update = None
+
         try:
             update = Update.de_json(data, app.bot)
         except Exception:
@@ -388,10 +396,14 @@ class BotRuntime:
                 self._fmt("[update %s] Update.de_json failed"), update_id
             )
             flush_logs()
+            if raw_token is not None:
+                reset_raw_update(raw_token)
             return web.Response(status=400, text="bad update")
 
         if update is None:
             self._warning("[update %s] empty update after de_json", update_id)
+            if raw_token is not None:
+                reset_raw_update(raw_token)
             return web.Response(status=400, text="empty update")
 
         update_type = "unknown"
@@ -404,8 +416,10 @@ class BotRuntime:
         self._info("[update %s] parsed update type=%s", update_id, update_type)
         self._info("[update %s] dispatching application.process_update", update_id)
 
-        # Await process_update on the SAME Application; schedule so Telegram gets 200 fast.
+        # Schedule while the raw update is still bound. create_task copies that context.
         asyncio.create_task(self._process_update_safe(app, update, update_id))
+        if raw_token is not None:
+            reset_raw_update(raw_token)
         return web.Response(status=200, text="ok")
 
     async def _process_update_safe(

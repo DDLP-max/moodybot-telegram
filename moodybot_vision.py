@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import json
 import logging
 import os
@@ -280,6 +281,227 @@ def _document_dict_is_image(document: dict) -> bool:
     return False
 
 
+_RAW_MESSAGE: contextvars.ContextVar = contextvars.ContextVar("moody_raw_message", default=None)
+
+
+def bind_raw_update(data: dict):
+    """Remember the webhook JSON for this update. The parsed object can drop nested file ids."""
+    message = None
+    if isinstance(data, dict):
+        for key in ("message", "edited_message", "channel_post"):
+            if isinstance(data.get(key), dict):
+                message = data[key]
+                break
+    return _RAW_MESSAGE.set(message)
+
+
+def reset_raw_update(token) -> None:
+    _RAW_MESSAGE.reset(token)
+
+
+def _iter_sizes(photo) -> list:
+    """PhotoSize dicts with file_id. Accepts a list, one size, or a wrapper that holds .photo."""
+    if not photo or isinstance(photo, (str, bytes)):
+        return []
+    if isinstance(photo, dict):
+        inner = photo.get("photo")
+        if isinstance(inner, (list, tuple, dict)):
+            return _iter_sizes(inner)
+        if photo.get("file_id") and ("width" in photo or "height" in photo) and "duration" not in photo:
+            return [photo]
+        return []
+    try:
+        sequence = list(photo)
+    except TypeError:
+        sequence = [photo]
+    found = []
+    for item in sequence:
+        if isinstance(item, dict):
+            found.extend(_iter_sizes(item))
+            continue
+        if item is None or isinstance(item, (str, bytes)):
+            continue
+        nested = getattr(item, "photo", None)
+        if nested:
+            found.extend(_iter_sizes(nested))
+            continue
+        if getattr(item, "duration", None):
+            continue
+        file_id = _file_id_of(item)
+        if not file_id:
+            continue
+        found.append({
+            "file_id": file_id,
+            "file_size": getattr(item, "file_size", None),
+            "width": getattr(item, "width", None),
+            "height": getattr(item, "height", None),
+        })
+    return found
+
+
+def _largest_file_id(sizes: list) -> str:
+    ranked = []
+    for item in sizes:
+        file_id = _file_id_of(item)
+        if not file_id:
+            continue
+        try:
+            size = int((item.get("file_size") if isinstance(item, dict) else getattr(item, "file_size", None)) or 0)
+        except (TypeError, ValueError):
+            size = 0
+        try:
+            if isinstance(item, dict):
+                area = int(item.get("width") or 0) * int(item.get("height") or 0)
+            else:
+                area = int(getattr(item, "width", 0) or 0) * int(getattr(item, "height", 0) or 0)
+        except (TypeError, ValueError):
+            area = 0
+        ranked.append((size, area, file_id))
+    ranked.sort(reverse=True)
+    return ranked[0][2] if ranked else ""
+
+
+def _paid_sizes(paid) -> list:
+    if not isinstance(paid, dict):
+        return []
+    media = paid.get("paid_media") or paid.get("media") or []
+    if isinstance(media, dict):
+        media = [media]
+    if not isinstance(media, list):
+        return []
+    found = []
+    for item in media:
+        if isinstance(item, dict):
+            found.extend(_iter_sizes(item.get("photo")))
+        else:
+            found.extend(_iter_sizes(getattr(item, "photo", None)))
+    return found
+
+
+def _refs_in(node: dict, prefix: str) -> tuple:
+    """(file refs, True when a picture container had no downloadable file_id)."""
+    if not isinstance(node, dict):
+        return [], False
+    refs = []
+    missing = False
+    if node.get("photo"):
+        sizes = _iter_sizes(node.get("photo"))
+        file_id = _largest_file_id(sizes)
+        if file_id:
+            refs.append((file_id, "image/jpeg", f"{prefix}.photo"))
+        else:
+            missing = True
+    live = node.get("live_photo")
+    if live:
+        sizes = _iter_sizes(live.get("photo") if isinstance(live, dict) else getattr(live, "photo", None))
+        file_id = _largest_file_id(sizes)
+        if file_id:
+            refs.append((file_id, "image/jpeg", f"{prefix}.live_photo.photo"))
+        elif not refs:
+            missing = True
+    paid_sizes = _paid_sizes(node.get("paid_media"))
+    file_id = _largest_file_id(paid_sizes)
+    if file_id:
+        refs.append((file_id, "image/jpeg", f"{prefix}.paid_media.photo"))
+    document = node.get("document")
+    if isinstance(document, dict) and _document_dict_is_image(document):
+        file_id = _file_id_of(document)
+        if file_id:
+            refs.append((file_id, _clean_mime(document.get("mime_type")) or None, f"{prefix}.document"))
+        else:
+            thumb = _iter_sizes(document.get("thumbnail") or document.get("thumb"))
+            file_id = _largest_file_id(thumb)
+            if file_id:
+                refs.append((file_id, "image/jpeg", f"{prefix}.document.thumbnail"))
+            else:
+                missing = True
+    return refs, missing
+
+
+def _active_node(message) -> dict:
+    """Webhook JSON wins for this message. Attribute parsing fills anything the JSON left out."""
+    mapped = _mapping(message)
+    if not isinstance(mapped, dict):
+        mapped = {}
+    raw = _RAW_MESSAGE.get()
+    if not isinstance(raw, dict):
+        return mapped
+    raw_id = raw.get("message_id")
+    mapped_id = mapped.get("message_id")
+    if raw_id is not None and mapped_id is not None and raw_id != mapped_id:
+        return mapped
+    merged = dict(mapped)
+    merged.update(raw)
+    for key in ("photo", "document", "live_photo", "paid_media", "reply_to_message", "external_reply"):
+        if not merged.get(key) and mapped.get(key):
+            merged[key] = mapped[key]
+    return merged
+
+
+class ImageRef:
+    def __init__(self, file_id: str, mime: str | None, source: str):
+        self.file_id = file_id
+        self.mime = mime
+        self.source = source
+
+
+def resolve_image_reference(message) -> ImageRef | None:
+    """Current attachment first. A replied-to picture is used only when this message has none."""
+    node = _active_node(message)
+    refs, missing = _refs_in(node, "message")
+    if refs:
+        file_id, mime, source = refs[0]
+        return ImageRef(file_id, mime, source)
+    if missing:
+        logger.warning(
+            "[vision] picture container without file_id %s",
+            json.dumps(_container_shape(node), sort_keys=True),
+        )
+        raise ImageRetrievalFailed(
+            "Telegram included that picture without a file id I can download."
+        )
+    for key, label in (("reply_to_message", "reply_to_message"), ("external_reply", "external_reply")):
+        child = node.get(key)
+        if not isinstance(child, dict):
+            continue
+        refs, missing = _refs_in(child, label)
+        if refs:
+            file_id, mime, source = refs[0]
+            return ImageRef(file_id, mime, source)
+        if missing:
+            logger.warning(
+                "[vision] picture container without file_id %s",
+                json.dumps(_container_shape(child), sort_keys=True),
+            )
+            raise ImageRetrievalFailed(
+                "Telegram included that picture without a file id I can download."
+            )
+    return None
+
+
+def _container_shape(node: dict) -> dict:
+    """Field names only. No file ids, captions, or pixels."""
+    if not isinstance(node, dict):
+        return {}
+    photos = node.get("photo") if isinstance(node.get("photo"), list) else []
+    first = next((item for item in photos if isinstance(item, dict)), None)
+    document = node.get("document") if isinstance(node.get("document"), dict) else {}
+    live = node.get("live_photo") if isinstance(node.get("live_photo"), dict) else {}
+    return {
+        "keys": sorted(key for key in node if key not in {"caption", "text"}),
+        "photo_sizes": len(photos),
+        "photo0_keys": sorted(first) if first else [],
+        "document_keys": sorted(document),
+        "document_mime": document.get("mime_type"),
+        "document_name": document.get("file_name"),
+        "live_photo_keys": sorted(live),
+        "media_fields": [
+            key for key in ("photo", "document", "live_photo", "paid_media", "video", "animation", "sticker")
+            if node.get(key)
+        ],
+    }
+
+
 def _candidates_in(node: dict) -> list:
     if not isinstance(node, dict):
         return []
@@ -323,34 +545,31 @@ def _nodes(message) -> list:
 
 def image_candidates(message) -> list:
     """File ids for this message, largest photo first, then an image sent as a file."""
-    found = []
-    seen = set()
-    for node in _nodes(message):
-        for file_id, mime in _candidates_in(node):
-            if file_id in seen:
-                continue
-            seen.add(file_id)
-            found.append((file_id, mime))
-    return found
-
-
-def _node_has_picture(node: dict) -> bool:
-    if not isinstance(node, dict):
-        return False
-    if node.get("photo"):
-        return True
-    document = node.get("document")
-    return isinstance(document, dict) and _document_dict_is_image(document)
+    try:
+        ref = resolve_image_reference(message)
+    except ImageRetrievalFailed:
+        return []
+    if ref is None:
+        return []
+    return [(ref.file_id, ref.mime)]
 
 
 def has_own_media(message) -> bool:
     """Picture attached to this message itself, not one it merely replies to."""
-    return _node_has_picture(_mapping(message))
+    refs, missing = _refs_in(_active_node(message), "message")
+    return bool(refs or missing)
 
 
 def has_fresh_media(message) -> bool:
     """True when this turn carries a picture, even if its file id is missing."""
-    return any(_node_has_picture(node) for node in _nodes(message))
+    if has_own_media(message):
+        return True
+    node = _active_node(message)
+    for key in ("reply_to_message", "external_reply"):
+        child = node.get(key)
+        if isinstance(child, dict) and any(_refs_in(child, key)):
+            return True
+    return False
 
 
 def message_has_image(message) -> bool:
@@ -372,6 +591,11 @@ def summarize_message(message) -> dict:
             "keys": sorted(key for key in node.keys() if key not in {"photo", "caption", "text"}),
             "photo_sizes": len(photos),
             "photo_tails": [tail(item.get("file_id")) for item in photos if isinstance(item, dict)],
+            "photo0_keys": sorted(next((item for item in photos if isinstance(item, dict)), {})),
+            "media_fields": [
+                key for key in ("photo", "document", "live_photo", "paid_media", "video", "animation", "sticker")
+                if node.get(key)
+            ],
             "document_mime": document.get("mime_type"),
             "document_name": document.get("file_name"),
             "document_tail": tail(document.get("file_id")),
@@ -1076,22 +1300,13 @@ async def _fetch_file(context, file_id) -> bytes:
 
 
 async def _load_attached(message, context):
-    """Download the best readable image on this message or the message it replies to."""
-    last = None
-    carriers = [message, getattr(message, "reply_to_message", None)]
-    tried = False
-    for carrier in carriers:
-        for file_id, mime in image_candidates(carrier):
-            tried = True
-            try:
-                raw = await _fetch_file(context, file_id)
-                return normalize_image(raw, mime)
-            except ImageRejected as exc:
-                last = exc
-                continue
-    if tried and last is not None:
-        raise last
-    return None
+    """Download the current picture, or the replied-to picture when this message has none."""
+    ref = resolve_image_reference(message)
+    if ref is None:
+        return None
+    logger.info("vision file source=%s tail=%s", ref.source, ref.file_id[-6:])
+    raw = await _fetch_file(context, ref.file_id)
+    return normalize_image(raw, ref.mime)
 
 
 async def _download(message, context):
