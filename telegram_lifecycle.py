@@ -426,6 +426,7 @@ class BotRuntime:
             "status": "ok" if self.state == READY else self.state.lower(),
             "mode": self.mode,
             "instance_id": self.instance_id,
+            "git_commit": (self.env.get("git_commit") or "unknown"),
         }
         return web.json_response(body)
 
