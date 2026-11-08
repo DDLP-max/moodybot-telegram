@@ -27,6 +27,8 @@ trial_users.json
 hs_err_pid*.log
 instance/
 data/inspector/
+data/conversations/
+data/x/
 
 # Large / local-only artifacts
 moodybot_log.txt

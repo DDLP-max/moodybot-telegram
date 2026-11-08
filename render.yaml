@@ -9,6 +9,12 @@ services:
     buildCommand: pip install -r requirements.txt && python build_system_prompt.py
     startCommand: python moodybot.py
     healthCheckPath: /health
+    # Dedup and the daily model cap live in SQLite. Render drops the
+    # instance filesystem on restart, so that file has to sit on this disk.
+    disk:
+      name: moodybot-x-state
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
@@ -22,3 +28,19 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
+      # X Activity API. Values live in the Render dashboard, not in git.
+      # X_REPLIES_ENABLED stays false until a dry run of /api/x/webhook succeeds.
+      - key: X_OAUTH2_CLIENT_SECRET
+        sync: false
+      - key: X_OAUTH1_CONSUMER_SECRET
+        sync: false
+      - key: X_BOT_USER_ID
+        sync: false
+      - key: X_USER_ACCESS_TOKEN
+        sync: false
+      - key: X_REPLIES_ENABLED
+        value: "false"
+      - key: X_DAILY_MODEL_CALL_LIMIT
+        value: "25"
+      - key: X_STATE_DIR
+        value: /var/data/x

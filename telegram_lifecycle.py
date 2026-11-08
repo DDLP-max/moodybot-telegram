@@ -449,6 +449,10 @@ class BotRuntime:
         http_app.router.add_post(WEBHOOK_PATH, self.handle_telegram_webhook)
         http_app.router.add_get("/health", self.handle_health)
         http_app.router.add_get("/", self.handle_health)
+        from x_integration.webhook import X_WEBHOOK_PATH, handle_x_crc, handle_x_event
+
+        http_app.router.add_get(X_WEBHOOK_PATH, handle_x_crc)
+        http_app.router.add_post(X_WEBHOOK_PATH, handle_x_event)
         return http_app
 
     async def _start_http_server(self) -> None:
