@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from x_integration.publish_once import execute_publish, send_reply, verify_posting_credential
+from x_integration.publish_once import _exit_code, execute_publish, send_reply, verify_posting_credential
 from x_integration.state import MentionLedger
 from x_integration.webhook import post_reply
 
@@ -376,6 +376,12 @@ def test_automatic_flags_block_the_one_shot():
     assert sent["n"] == 0
 
 
+def test_preview_exit_code_stays_zero():
+    assert _exit_code({"exit_code": 0}) == 0
+    assert _exit_code({"exit_code": 3}) == 3
+    assert _exit_code({}) == 2
+
+
 if __name__ == "__main__":
     test_preview_and_mismatch_do_not_post()
     test_rejected_credential_does_not_post()
@@ -385,4 +391,5 @@ if __name__ == "__main__":
     test_send_reply_posts_one_in_reply_to_and_does_not_retry_timeouts()
     test_credential_requires_moodybotai_and_tweet_write()
     test_automatic_flags_block_the_one_shot()
+    test_preview_exit_code_stays_zero()
     print("publish once ok")

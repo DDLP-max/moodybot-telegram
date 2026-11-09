@@ -44,7 +44,14 @@ def main(argv: Optional[list] = None) -> int:
         confirm=str(args.confirm or ""),
     )
     _print_result(result)
-    return int(result.get("exit_code") or 2)
+    return _exit_code(result)
+
+
+def _exit_code(result: dict) -> int:
+    code = result.get("exit_code")
+    if code is None:
+        return 2
+    return int(code)
 
 
 def execute_publish(

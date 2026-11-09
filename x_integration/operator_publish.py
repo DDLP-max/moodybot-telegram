@@ -28,7 +28,9 @@ def run_operator_publish(root: Optional[Path] = None, *, run_command: Optional[C
     directory = Path(root) if root is not None else state_dir()[0]
     marker = directory / MARKER_NAME
     if marker.is_file():
-        return _read_marker(marker)
+        previous = _read_marker(marker)
+        if previous.get("state") != "preview_failed":
+            return previous
     directory.mkdir(parents=True, exist_ok=True)
     _write_marker(marker, {"state": "started", "posted": False})
     stored = stored_draft(directory / DRY_RUN_FILENAME, POST_ID)
@@ -99,6 +101,8 @@ def _module_command(args: List[str]) -> dict:
         cwd=str(Path(__file__).resolve().parents[1]),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=90,
         env=os.environ.copy(),
         check=False,

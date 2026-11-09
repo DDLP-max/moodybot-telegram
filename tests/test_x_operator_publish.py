@@ -33,12 +33,16 @@ def _preview(stored: str) -> dict:
     }
 
 
-def test_failed_preview_does_not_publish_and_does_not_rerun():
+def test_preview_failure_can_be_retried():
     calls = []
 
     def run_command(args):
-        calls.append(args)
-        return {"exit_code": 2, "status": "refused", "posted": "false", "reason": "tweet_write_unverified"}
+        calls.append(list(args))
+        if len(calls) == 1:
+            return {"exit_code": 2, "status": "refused", "posted": "false", "reason": "tweet_write_unverified"}
+        if "--confirm" not in args:
+            return _preview(DRAFT)
+        return {"exit_code": 0, "status": "posted", "posted": "true", "x_reply_id": "555", "post_id": POST_ID}
 
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -48,10 +52,9 @@ def test_failed_preview_does_not_publish_and_does_not_rerun():
         assert (root / "approved-reply.txt").read_text(encoding="utf-8") == DRAFT
     assert first["state"] == "preview_failed"
     assert first["posted"] is False
-    assert len(calls) == 1
-    assert "--confirm" not in calls[0]
-    assert second["rerun"] is False
-    assert len(calls) == 1
+    assert second["posted"] is True
+    assert second["x_reply_id"] == "555"
+    assert len(calls) == 3
 
 
 def test_passing_preview_publishes_once():
@@ -105,7 +108,7 @@ def test_ambiguous_publish_is_not_rerun():
 
 
 if __name__ == "__main__":
-    test_failed_preview_does_not_publish_and_does_not_rerun()
+    test_preview_failure_can_be_retried()
     test_passing_preview_publishes_once()
     test_ambiguous_publish_is_not_rerun()
     print("operator publish ok")
