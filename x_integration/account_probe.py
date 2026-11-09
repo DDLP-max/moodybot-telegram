@@ -42,8 +42,17 @@ def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
                 me_status, username, user_id, me_problem = _users_me(token)
     mentions_status = 0
     mentions_title = ""
+    mentions_problem: dict = {}
+    mentions_returned = None
+    mentions_rate_limit: dict = {}
     if me_status == 200 and user_id and token:
-        mentions_status, mentions_title = _mentions(user_id, token)
+        (
+            mentions_status,
+            mentions_title,
+            mentions_problem,
+            mentions_returned,
+            mentions_rate_limit,
+        ) = _mentions(user_id, token)
     result = {
         "state": "done",
         "users_me_status": me_status,
@@ -57,6 +66,9 @@ def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
         "mentions_status": mentions_status,
         "mentions_permitted": mentions_status == 200,
         "mentions_title": mentions_title,
+        "mentions_problem": mentions_problem,
+        "mentions_returned": mentions_returned,
+        "mentions_rate_limit": mentions_rate_limit,
         "refresh_configured": refresh_configured,
         "refresh_used": refresh_used,
         "refresh_status": refresh_status,
@@ -145,7 +157,7 @@ def _users_me(token: str) -> tuple[int, str, str, dict]:
     return response.status_code, str(data.get("username") or ""), str(data.get("id") or ""), {}
 
 
-def _mentions(user_id: str, token: str) -> tuple[int, str]:
+def _mentions(user_id: str, token: str) -> tuple[int, str, dict, object, dict]:
     import httpx
 
     try:
@@ -157,12 +169,24 @@ def _mentions(user_id: str, token: str) -> tuple[int, str]:
         )
     except httpx.HTTPError:
         logger.warning("X mentions read failed before a response")
-        return 0, ""
-    title = ""
+        return 0, "", {}, None, {}
+    rate_limit = _rate_limit(response)
     if response.status_code != 200:
-        title = _error_title(response)
-        logger.info("X mentions http=%s title=%s", response.status_code, title or "-")
-    return response.status_code, title
+        problem = _problem(response, token)
+        title = problem.get("title") or _error_title(response)
+        logger.info(
+            "X mentions http=%s reason=%s",
+            response.status_code,
+            problem.get("reason") or title or "-",
+        )
+        return response.status_code, title, problem, None, rate_limit
+    try:
+        payload = response.json() or {}
+    except ValueError:
+        return response.status_code, "", {}, None, rate_limit
+    data = payload.get("data") if isinstance(payload, dict) else None
+    returned = len(data) if isinstance(data, list) else 0
+    return response.status_code, "", {}, returned, rate_limit
 
 
 def _problem(response, token: str) -> dict:
@@ -183,6 +207,26 @@ def _problem(response, token: str) -> dict:
     client_id = payload.get("client_id")
     if isinstance(client_id, (int, str)) and str(client_id).isdigit():
         kept["client_id"] = str(client_id)
+    return kept
+
+
+def _rate_limit(response) -> dict:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return {}
+    kept = {}
+    names = {
+        "x-rate-limit-limit": "limit",
+        "x-rate-limit-remaining": "remaining",
+        "x-rate-limit-reset": "reset",
+    }
+    for source, name in names.items():
+        raw = headers.get(source) if hasattr(headers, "get") else None
+        if raw in (None, ""):
+            continue
+        text = str(raw).strip()
+        if text.isdigit():
+            kept[name] = int(text)
     return kept
 
 

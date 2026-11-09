@@ -49,7 +49,16 @@ def test_users_me_and_mentions_hide_the_token():
             return Response(200, {"data": {"username": "AskMoodyBot", "id": "42"}})
         assert url.endswith("/users/42/mentions")
         assert params["max_results"] == 5
-        return Response(200, {"data": []})
+        response = Response(
+            200,
+            {"data": [{"id": "9", "text": "secret mention text"}]},
+        )
+        response.headers = {
+            "x-rate-limit-limit": "450",
+            "x-rate-limit-remaining": "449",
+            "x-rate-limit-reset": "1700000000",
+        }
+        return response
 
     httpx.get = fake_get
     try:
@@ -64,11 +73,18 @@ def test_users_me_and_mentions_hide_the_token():
     assert result["user_id"] == "42"
     assert result["mentions_status"] == 200
     assert result["mentions_permitted"] is True
+    assert result["mentions_returned"] == 1
+    assert result["mentions_rate_limit"] == {
+        "limit": 450,
+        "remaining": 449,
+        "reset": 1700000000,
+    }
     assert result["replies_enabled"] is False
     assert result["poll_enabled"] is False
     assert result["refresh_used"] is False
     rendered = json.dumps(result)
     assert "access-secret-value" not in rendered
+    assert "secret mention text" not in rendered
 
 
 def test_forbidden_mentions_are_not_permitted():
@@ -106,6 +122,8 @@ def test_forbidden_mentions_are_not_permitted():
     assert result["mentions_status"] == 403
     assert result["mentions_permitted"] is False
     assert result["mentions_title"] == "Client Forbidden"
+    assert result["mentions_returned"] is None
+    assert result["mentions_problem"]["reason"] == "client-not-enrolled"
 
 
 def test_refresh_retries_users_me_and_stores_the_new_token():
