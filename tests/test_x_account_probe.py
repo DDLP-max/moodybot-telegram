@@ -17,6 +17,7 @@ def _clear():
         "X_OAUTH2_CLIENT_ID",
         "X_OAUTH2_CLIENT_SECRET",
         "X_OAUTH2_REFRESH_TOKEN",
+        "X_USER_REFRESH_TOKEN",
         "X_REPLIES_ENABLED",
         "X_POLL_ENABLED",
         "X_STATE_DIR",
@@ -290,10 +291,30 @@ def test_client_forbidden_problem_is_sanitized():
     assert "[redacted]" in problem["detail"]
 
 
+def test_user_refresh_token_alias_is_configured_without_calling_x():
+    os.environ["X_OAUTH2_CLIENT_ID"] = "client-id"
+    os.environ["X_OAUTH2_CLIENT_SECRET"] = "client-secret"
+    os.environ["X_USER_REFRESH_TOKEN"] = "refresh-secret"
+    os.environ.pop("X_OAUTH2_REFRESH_TOKEN", None)
+    os.environ.pop("X_USER_ACCESS_TOKEN", None)
+    os.environ["X_REPLIES_ENABLED"] = "false"
+    os.environ["X_POLL_ENABLED"] = "false"
+    try:
+        with TemporaryDirectory() as tmp:
+            os.environ["X_STATE_DIR"] = tmp
+            result = run_account_probe()
+    finally:
+        _clear()
+    assert result["refresh_configured"] is True
+    assert result["refresh_used"] is False
+    assert result["users_me_status"] == 0
+
+
 if __name__ == "__main__":
     test_users_me_and_mentions_hide_the_token()
     test_forbidden_mentions_are_not_permitted()
     test_refresh_retries_users_me_and_stores_the_new_token()
     test_refresh_without_credentials_does_not_call_x()
     test_client_forbidden_problem_is_sanitized()
+    test_user_refresh_token_alias_is_configured_without_calling_x()
     print("account probe ok")

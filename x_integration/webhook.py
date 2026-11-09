@@ -138,9 +138,13 @@ def post_reply(in_reply_to_tweet_id: str, text: str) -> None:
     """
     if not replies_enabled():
         raise RuntimeError("X replies are disabled")
+    from x_integration.post_length import fits_post
+
     token = (__import__("os").environ.get("X_USER_ACCESS_TOKEN") or "").strip()
     if not token or not in_reply_to_tweet_id or not text.strip():
         raise RuntimeError("X reply is not configured")
+    if not fits_post(text):
+        raise RuntimeError("X reply is too long")
     import httpx
 
     response = httpx.post(

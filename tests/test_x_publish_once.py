@@ -464,6 +464,42 @@ def test_rejection_keeps_the_sanitized_problem_and_an_old_failure_stays():
     assert saved["problem"] == {}
 
 
+def test_overlong_draft_is_refused_before_any_post():
+    sent = {"n": 0}
+
+    def send(*_args, **_kwargs):
+        sent["n"] += 1
+        raise AssertionError("an over-long reply must not be posted")
+
+    long_draft = ("word " * 70).strip() + " \U0001f943"
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        production, draft_db = _ready(root)
+        conn = __import__("sqlite3").connect(draft_db)
+        conn.execute(
+            "UPDATE events SET reply_text = ? WHERE event_id = ?",
+            (long_draft, f"dry-run:{POST_ID}"),
+        )
+        conn.commit()
+        conn.close()
+        refused = execute_publish(
+            post_id=POST_ID,
+            draft_text=long_draft,
+            confirm=f"POST:{POST_ID}",
+            production=production,
+            draft_db=draft_db,
+            verify=_credential(),
+            send=send,
+            token="access-secret-value",
+        )
+        assert production.publication(POST_ID) is None
+    assert sent["n"] == 0
+    assert refused["status"] == "refused"
+    assert refused["reason"] == "reply_too_long"
+    assert refused["posted"] is False
+    assert refused["weighted_length"] > 280
+
+
 if __name__ == "__main__":
     test_preview_and_mismatch_do_not_post()
     test_rejected_credential_does_not_post()
@@ -475,4 +511,5 @@ if __name__ == "__main__":
     test_automatic_flags_block_the_one_shot()
     test_preview_exit_code_stays_zero()
     test_rejection_keeps_the_sanitized_problem_and_an_old_failure_stays()
+    test_overlong_draft_is_refused_before_any_post()
     print("publish once ok")

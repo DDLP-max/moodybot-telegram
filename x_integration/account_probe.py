@@ -95,7 +95,7 @@ def refresh_access_token(ledger: Optional[MentionLedger] = None) -> tuple[int, s
     book = ledger or ledger_from_env()
     client_id = _env("X_OAUTH2_CLIENT_ID")
     client_secret = _env("X_OAUTH2_CLIENT_SECRET")
-    refresh = book.cached_refresh_token() or _env("X_OAUTH2_REFRESH_TOKEN")
+    refresh = _refresh_token(book)
     if not client_id or not client_secret or not refresh:
         return 0, ""
     import httpx
@@ -260,7 +260,16 @@ def _refresh_configured(ledger: MentionLedger) -> bool:
     return bool(
         _env("X_OAUTH2_CLIENT_ID")
         and _env("X_OAUTH2_CLIENT_SECRET")
-        and (ledger.cached_refresh_token() or _env("X_OAUTH2_REFRESH_TOKEN"))
+        and _refresh_token(ledger)
+    )
+
+
+def _refresh_token(ledger: MentionLedger) -> str:
+    """The dashboard key is X_OAUTH2_REFRESH_TOKEN. Honor the user-token alias too."""
+    return (
+        ledger.cached_refresh_token()
+        or _env("X_OAUTH2_REFRESH_TOKEN")
+        or _env("X_USER_REFRESH_TOKEN")
     )
 
 

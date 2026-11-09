@@ -83,6 +83,7 @@ def draft_mention_reply(
         messages = build_openrouter_messages(runtime, user_input, history=prior)
     else:
         messages = build_openrouter_messages(runtime, user_input)
+    messages = _with_post_limit(messages)
     raw = (complete or openrouter_complete)(messages)
     from generation_gate import reject_reason, settle_authored_interior
 
@@ -112,11 +113,50 @@ def draft_mention_reply(
         prompt_hash=runtime.prompt_hash,
     )
     text_out = moodybot.safe_emoji(finalized.text)
+    from x_integration.post_length import POST_LIMIT, fit_x_post, weighted_length
+
+    if weighted_length(text_out) > POST_LIMIT:
+        caller = complete or openrouter_complete
+
+        def _shorten(current: str) -> str:
+            rewritten = caller(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Shorten this reply so it fits one X post. "
+                            "The hard limit is 280 weighted characters: emoji count as two, "
+                            "and a link counts as 23. Keep the same point and the closing "
+                            "emoji when it still fits. Return only the reply."
+                        ),
+                    },
+                    {"role": "user", "content": current},
+                ]
+            )
+            return moodybot.safe_emoji(moodybot.clean_response(rewritten))
+
+        text_out = fit_x_post(text_out, _shorten)
     try:
         live_log.append_exchange(key, user_input, text_out)
     except Exception:
         logger.warning("X conversation log failed")
     return text_out
+
+
+def _with_post_limit(messages: List[dict]) -> List[dict]:
+    """Tell the existing engine the post cap. The last user turn stays last."""
+    note = {
+        "role": "system",
+        "content": (
+            "This reply will be posted on X. Hard limit: 280 weighted characters. "
+            "Emoji count as two characters. A link counts as 23. "
+            "One post, one paragraph. Stop before the limit."
+        ),
+    }
+    prepared = list(messages)
+    if prepared and prepared[-1].get("role") == "user":
+        return prepared[:-1] + [note, prepared[-1]]
+    return prepared + [note]
 
 
 def openrouter_complete(messages: List[dict]) -> str:

@@ -215,6 +215,41 @@ def test_dry_run_uses_the_finalizer_and_does_not_call_the_model():
         os.environ.pop("X_REPLIES_ENABLED", None)
 
 
+def test_overlong_reply_is_cut_to_a_standard_post():
+    import conversation_context
+    from x_integration.post_length import fits_post
+
+    original = conversation_context.conversation_log
+    os.environ["X_REPLIES_ENABLED"] = "false"
+    long_reply = ("The same point, said again so the post cannot fit. " * 12).strip()
+    calls = {"n": 0}
+    try:
+        with TemporaryDirectory() as tmp:
+            conversation_context.conversation_log = ConversationLog(Path(tmp))
+
+            def _complete(messages):
+                calls["n"] += 1
+                system = " ".join(
+                    str(item.get("content") or "")
+                    for item in messages
+                    if item.get("role") == "system"
+                )
+                if "Shorten this reply" in system:
+                    return "The same point, said once. \U0001f943"
+                return long_reply
+
+            text = draft_mention_reply(
+                "@moodybot what do you think of Carla Gugino?",
+                "conv-long",
+                complete=_complete,
+            )
+    finally:
+        conversation_context.conversation_log = original
+        os.environ.pop("X_REPLIES_ENABLED", None)
+    assert fits_post(text)
+    assert text
+
+
 def test_model_call_does_not_block_the_event_loop():
     os.environ["X_OAUTH2_CLIENT_SECRET"] = SECRET
     app = _runtime_app()
@@ -315,6 +350,7 @@ if __name__ == "__main__":
     test_dry_run_dedup_loop_and_spend_never_post()
     test_chat_is_not_a_mention_and_retry_then_dies()
     test_dry_run_uses_the_finalizer_and_does_not_call_the_model()
+    test_overlong_reply_is_cut_to_a_standard_post()
     test_model_call_does_not_block_the_event_loop()
     test_dedup_and_spend_survive_restart_and_concurrent_writers()
     bind_ledger(None)

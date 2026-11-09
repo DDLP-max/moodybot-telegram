@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from x_integration.dry_run import CONFIRMED_USER_ID, CONFIRMED_USERNAME, DRY_RUN_FILENAME
+from x_integration.post_length import POST_LIMIT, weighted_length
 from x_integration.state import MentionLedger, ledger_from_env, state_dir
 
 TWEETS_URL = "https://api.x.com/2/tweets"
@@ -92,6 +93,11 @@ def execute_publish(
         result["reason"] = "draft_mismatch"
         return _finish_flags(result, book, since_before, calls_before, replies_before, poll_before)
     result["draft_sha256"] = hashlib.sha256(stored.encode("utf-8")).hexdigest()
+    length = weighted_length(stored)
+    result["weighted_length"] = length
+    if length > POST_LIMIT:
+        result["reason"] = "reply_too_long"
+        return _finish_flags(result, book, since_before, calls_before, replies_before, poll_before)
     access = token if token is not None else (os.environ.get("X_USER_ACCESS_TOKEN") or "")
     access = access.strip()
     if not access:
@@ -252,6 +258,16 @@ def send_reply(token: str, post_id: str, text: str) -> dict:
     """POST one reply. Transport failures stay ambiguous and are not retried."""
     import httpx
 
+    from x_integration.post_length import fits_post
+
+    if not fits_post(text):
+        return {
+            "outcome": "failed",
+            "http_status": 0,
+            "detail": "reply_too_long",
+            "problem": {"reason": "reply_too_long", "weighted_length": weighted_length(text)},
+            "x_reply_id": "",
+        }
     try:
         response = httpx.post(
             TWEETS_URL,
