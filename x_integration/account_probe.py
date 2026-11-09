@@ -29,16 +29,17 @@ def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
     me_status = 0
     username = ""
     user_id = ""
+    me_title = ""
     refresh_status = 0
     refresh_used = False
     if token:
-        me_status, username, user_id = _users_me(token)
+        me_status, username, user_id, me_title = _users_me(token)
         if me_status == 401 and refresh_configured:
             refresh_status, refreshed = refresh_access_token(book)
             refresh_used = True
             if refreshed:
                 token = refreshed
-                me_status, username, user_id = _users_me(token)
+                me_status, username, user_id, me_title = _users_me(token)
     mentions_status = 0
     mentions_title = ""
     if me_status == 200 and user_id and token:
@@ -46,6 +47,7 @@ def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
     result = {
         "state": "done",
         "users_me_status": me_status,
+        "users_me_title": me_title,
         "username": username,
         "user_id": user_id,
         "mentions_status": mentions_status,
@@ -111,7 +113,7 @@ def refresh_access_token(ledger: Optional[MentionLedger] = None) -> tuple[int, s
     return response.status_code, access
 
 
-def _users_me(token: str) -> tuple[int, str, str]:
+def _users_me(token: str) -> tuple[int, str, str, str]:
     import httpx
 
     try:
@@ -123,15 +125,16 @@ def _users_me(token: str) -> tuple[int, str, str]:
         )
     except httpx.HTTPError:
         logger.warning("X users/me failed before a response")
-        return 0, "", ""
+        return 0, "", "", ""
     if response.status_code != 200:
-        logger.info("X users/me http=%s", response.status_code)
-        return response.status_code, "", ""
+        title = _error_title(response)
+        logger.info("X users/me http=%s title=%s", response.status_code, title or "-")
+        return response.status_code, "", "", title
     try:
         data = (response.json() or {}).get("data") or {}
     except ValueError:
-        return response.status_code, "", ""
-    return response.status_code, str(data.get("username") or ""), str(data.get("id") or "")
+        return response.status_code, "", "", ""
+    return response.status_code, str(data.get("username") or ""), str(data.get("id") or ""), ""
 
 
 def _mentions(user_id: str, token: str) -> tuple[int, str]:
