@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from x_integration.operator_publish import POST_ID, run_operator_publish
+from x_integration.operator_publish import MARKER_NAME, POST_ID, run_operator_publish
 from x_integration.state import MentionLedger
 
 DRAFT = "Approved reply text. 🥃"
@@ -107,8 +107,33 @@ def test_ambiguous_publish_is_not_rerun():
     assert len(calls) == 2
 
 
+def test_finished_failure_is_read_without_posting_again():
+    calls = []
+
+    def run_command(args):
+        calls.append(args)
+        return _preview(DRAFT)
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        book = MentionLedger(root / "mentions.sqlite")
+        book.claim_publication(POST_ID, DRAFT)
+        book.finish_publication(POST_ID, status="failed", http_status=403, detail="Forbidden")
+        (root / MARKER_NAME).write_text(
+            json.dumps({"state": "finished", "posted": False, "publish_status": "failed"}),
+            encoding="utf-8",
+        )
+        result = run_operator_publish(root, run_command=run_command)
+    assert calls == []
+    assert result["rerun"] is False
+    assert result["http_status"] == 403
+    assert result["detail"] == "Forbidden"
+    assert result["ledger_status"] == "failed"
+
+
 if __name__ == "__main__":
     test_preview_failure_can_be_retried()
     test_passing_preview_publishes_once()
     test_ambiguous_publish_is_not_rerun()
+    test_finished_failure_is_read_without_posting_again()
     print("operator publish ok")

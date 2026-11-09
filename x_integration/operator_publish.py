@@ -30,7 +30,7 @@ def run_operator_publish(root: Optional[Path] = None, *, run_command: Optional[C
     if marker.is_file():
         previous = _read_marker(marker)
         if previous.get("state") != "preview_failed":
-            return previous
+            return _with_publication(previous, directory)
     directory.mkdir(parents=True, exist_ok=True)
     _write_marker(marker, {"state": "started", "posted": False})
     stored = stored_draft(directory / DRY_RUN_FILENAME, POST_ID)
@@ -128,6 +128,23 @@ def _parse_output(stdout: str) -> dict:
     if reply is not None:
         fields["reply_text"] = "\n".join(reply)
     return fields
+
+
+def _with_publication(result: dict, directory: Path) -> dict:
+    """Read the recorded post outcome. Does not call X."""
+    database = directory / "mentions.sqlite"
+    if not database.is_file():
+        return result
+    from x_integration.state import MentionLedger
+
+    row = MentionLedger(database).publication(POST_ID)
+    if not row:
+        return result
+    recorded = dict(result)
+    recorded["http_status"] = row.get("http_status") or 0
+    recorded["detail"] = row.get("detail") or ""
+    recorded["ledger_status"] = row.get("status") or ""
+    return recorded
 
 
 def _read_marker(path: Path) -> dict:
