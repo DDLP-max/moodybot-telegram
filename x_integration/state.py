@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Optional
 
 
 MAX_ATTEMPTS = 3
+LEDGER_FILENAME = "mentions.sqlite"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -39,6 +41,22 @@ CREATE TABLE IF NOT EXISTS spend (
 CREATE TABLE IF NOT EXISTS replied_posts (
     post_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS poll_state (
+    name TEXT PRIMARY KEY,
+    since_id TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS probe_marker (
+    name TEXT PRIMARY KEY,
+    marker TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_cache (
+    name TEXT PRIMARY KEY,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 
@@ -160,6 +178,124 @@ class MentionLedger:
                 conn.close()
         return row is not None
 
+    def get_since_id(self) -> str:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT since_id FROM poll_state WHERE name = 'mentions'"
+                ).fetchone()
+            finally:
+                conn.close()
+        return str(row[0]) if row and row[0] else ""
+
+    def remember_restart_marker(self) -> tuple[bool, str]:
+        """Return whether a marker was already on disk, and the marker itself."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT marker FROM probe_marker WHERE name = 'restart'"
+                ).fetchone()
+                if row and row[0]:
+                    conn.execute("COMMIT")
+                    return True, str(row[0])
+                marker = uuid.uuid4().hex[:12]
+                conn.execute(
+                    """
+                    INSERT INTO probe_marker (name, marker, updated_at)
+                    VALUES ('restart', ?, ?)
+                    """,
+                    (marker, _now()),
+                )
+                conn.execute("COMMIT")
+                return False, marker
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def cached_access_token(self) -> str:
+        return self._cached_oauth("access_token")
+
+    def cached_refresh_token(self) -> str:
+        return self._cached_oauth("refresh_token")
+
+    def store_oauth_tokens(self, access_token: str, refresh_token: str) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO oauth_cache (name, access_token, refresh_token, updated_at)
+                    VALUES ('user', ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        access_token = excluded.access_token,
+                        refresh_token = excluded.refresh_token,
+                        updated_at = excluded.updated_at
+                    """,
+                    (access_token, refresh_token, _now()),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def _cached_oauth(self, column: str) -> str:
+        if column not in {"access_token", "refresh_token"}:
+            return ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    f"SELECT {column} FROM oauth_cache WHERE name = 'user'"
+                ).fetchone()
+            finally:
+                conn.close()
+        return str(row[0]) if row and row[0] else ""
+
+    def set_since_id(self, since_id: str) -> None:
+        current = self.get_since_id()
+        if current and int(since_id) <= int(current):
+            return
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO poll_state (name, since_id, updated_at)
+                    VALUES ('mentions', ?, ?)
+                    ON CONFLICT(name) DO UPDATE
+                    SET since_id = excluded.since_id, updated_at = excluded.updated_at
+                    """,
+                    (since_id, _now()),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def model_calls_today(self) -> int:
+        day = datetime.now(timezone.utc).date().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT model_calls FROM spend WHERE day = ?",
+                    (day,),
+                ).fetchone()
+            finally:
+                conn.close()
+        return int(row[0]) if row else 0
+
     def reserve_model_call(self, limit: int) -> bool:
         """Count one model attempt. False when today's budget is spent."""
         day = datetime.now(timezone.utc).date().isoformat()
@@ -213,11 +349,21 @@ class MentionLedger:
         return conn
 
 
+def state_dir() -> tuple[Path, str]:
+    """Return the ledger directory and whether X_STATE_DIR set it."""
+    raw = (os.environ.get("X_STATE_DIR") or "").strip()
+    if raw:
+        return Path(raw), "environment"
+    return Path(__file__).resolve().parents[1] / "data" / "x", "default"
+
+
+def ledger_path() -> Path:
+    root, _source = state_dir()
+    return root / LEDGER_FILENAME
+
+
 def ledger_from_env() -> MentionLedger:
-    root = (os.environ.get("X_STATE_DIR") or "").strip()
-    if not root:
-        root = str(Path(__file__).resolve().parents[1] / "data" / "x")
-    return MentionLedger(Path(root) / "mentions.sqlite")
+    return MentionLedger(ledger_path())
 
 
 def daily_model_limit() -> int:

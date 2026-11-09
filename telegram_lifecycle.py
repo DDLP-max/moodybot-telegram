@@ -48,6 +48,10 @@ _TELEGRAM_BOT_URL = re.compile(
 )
 _BEARER = re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE)
 
+
+def _x_poll_enabled() -> bool:
+    return (os.environ.get("X_POLL_ENABLED") or "").strip().lower() == "true"
+
 _RUNTIME: Optional["BotRuntime"] = None
 _REDACTION_INSTALLED = False
 
@@ -265,6 +269,7 @@ class BotRuntime:
         self.process_started_at = clock()
         self.sigterm_at: Optional[float] = None
         self.env = render_env_snapshot()
+        self.x_probe = {"state": "pending"}
 
         self._http_runner: Optional[web.AppRunner] = None
         self._http_site: Optional[web.TCPSite] = None
@@ -441,6 +446,7 @@ class BotRuntime:
             "mode": self.mode,
             "instance_id": self.instance_id,
             "git_commit": (self.env.get("git_commit") or "unknown"),
+            "x_probe": self.x_probe,
         }
         return web.json_response(body)
 
@@ -554,6 +560,29 @@ class BotRuntime:
             self.env.get("git_commit") or "unknown",
         )
 
+    async def _run_x_probe(self) -> None:
+        from x_integration.account_probe import run_account_probe
+
+        try:
+            result = await asyncio.to_thread(run_account_probe)
+        except Exception:
+            self.log.exception("X account probe failed")
+            result = {"state": "error"}
+        self.x_probe = result
+        self._info(
+            "X account probe state=%s users_me=%s username=%s user_id=%s mentions=%s "
+            "permitted=%s dir=%s mounted=%s marker_survived=%s",
+            result.get("state"),
+            result.get("users_me_status"),
+            result.get("username") or "-",
+            result.get("user_id") or "-",
+            result.get("mentions_status"),
+            result.get("mentions_permitted"),
+            result.get("x_state_dir") or "-",
+            result.get("disk_mounted"),
+            result.get("marker_survived"),
+        )
+
     async def run(self, app: Any) -> None:
         install_log_redaction()
         bind_runtime(self)
@@ -575,6 +604,8 @@ class BotRuntime:
             self.mode,
         )
         initialized = False
+        poll_task = None
+        probe_task = None
         try:
             if self.install_signals_enabled:
                 self.install_signal_handlers()
@@ -595,8 +626,26 @@ class BotRuntime:
 
             self.state = READY
             self._info("MoodyBot ready")
+            probe_task = asyncio.create_task(self._run_x_probe())
+            if _x_poll_enabled():
+                from x_integration.poll import poll_loop
+
+                poll_task = asyncio.create_task(poll_loop(self._shutdown_event))
+                self._info("X mention poll armed")
             await self._shutdown_event.wait()
         finally:
+            if probe_task is not None:
+                probe_task.cancel()
+                try:
+                    await probe_task
+                except asyncio.CancelledError:
+                    pass
+            if poll_task is not None:
+                poll_task.cancel()
+                try:
+                    await poll_task
+                except asyncio.CancelledError:
+                    pass
             if initialized:
                 await self.shutdown_app(app)
             bind_runtime(None)

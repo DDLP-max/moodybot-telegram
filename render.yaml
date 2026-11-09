@@ -32,6 +32,10 @@ services:
       # X_REPLIES_ENABLED stays false until a dry run of /api/x/webhook succeeds.
       - key: X_OAUTH2_CLIENT_SECRET
         sync: false
+      - key: X_OAUTH2_CLIENT_ID
+        sync: false
+      - key: X_OAUTH2_REFRESH_TOKEN
+        sync: false
       - key: X_OAUTH1_CONSUMER_SECRET
         sync: false
       - key: X_BOT_USER_ID
@@ -44,3 +48,9 @@ services:
         value: "25"
       - key: X_STATE_DIR
         value: /var/data/x
+      # Personal projects cannot subscribe to post.mention.create.
+      # Polling stays off until a user token for @AskMoodyBot is confirmed.
+      - key: X_POLL_ENABLED
+        value: "false"
+      - key: X_POLL_INTERVAL_SECONDS
+        value: "300"
