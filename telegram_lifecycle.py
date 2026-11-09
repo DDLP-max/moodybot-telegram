@@ -270,6 +270,7 @@ class BotRuntime:
         self.sigterm_at: Optional[float] = None
         self.env = render_env_snapshot()
         self.x_probe = {"state": "pending"}
+        self.x_mentions = {"state": "pending"}
 
         self._http_runner: Optional[web.AppRunner] = None
         self._http_site: Optional[web.TCPSite] = None
@@ -447,6 +448,7 @@ class BotRuntime:
             "instance_id": self.instance_id,
             "git_commit": (self.env.get("git_commit") or "unknown"),
             "x_probe": self.x_probe,
+            "x_mentions": self.x_mentions,
         }
         return web.json_response(body)
 
@@ -569,6 +571,17 @@ class BotRuntime:
             self.log.exception("X account probe failed")
             result = {"state": "error"}
         self.x_probe = result
+        user_id = str(result.get("user_id") or "")
+        if result.get("users_me_status") == 200 and user_id:
+            try:
+                from x_integration.mention_inspect import inspect_recent_mentions
+
+                self.x_mentions = await asyncio.to_thread(inspect_recent_mentions, user_id)
+            except Exception:
+                self.log.exception("X mention inspect failed")
+                self.x_mentions = {"state": "error"}
+        else:
+            self.x_mentions = {"state": "skipped"}
         self._info(
             "X account probe state=%s users_me=%s username=%s user_id=%s mentions=%s "
             "permitted=%s dir=%s mounted=%s marker_survived=%s",
