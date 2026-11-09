@@ -9,6 +9,7 @@ persistent disk mount; the default path does not survive an instance restart.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import threading
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS publications (
     status TEXT NOT NULL,
     http_status INTEGER NOT NULL DEFAULT 0,
     detail TEXT NOT NULL DEFAULT '',
+    problem_json TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -87,6 +89,7 @@ class MentionLedger:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA)
+            _ensure_problem_column(conn)
             conn.commit()
         finally:
             conn.close()
@@ -183,7 +186,7 @@ class MentionLedger:
                 row = conn.execute(
                     """
                     SELECT post_id, reply_text, x_reply_id, status, http_status,
-                           detail, created_at, updated_at
+                           detail, problem_json, created_at, updated_at
                     FROM publications WHERE post_id = ?
                     """,
                     (post_id,),
@@ -199,8 +202,9 @@ class MentionLedger:
             "status": row[3],
             "http_status": row[4],
             "detail": row[5],
-            "created_at": row[6],
-            "updated_at": row[7],
+            "problem": _load_problem(row[6]),
+            "created_at": row[7],
+            "updated_at": row[8],
         }
 
     def claim_publication(self, post_id: str, reply_text: str) -> str:
@@ -236,7 +240,7 @@ class MentionLedger:
                         """
                         UPDATE publications
                         SET reply_text = ?, x_reply_id = '', status = 'pending',
-                            http_status = 0, detail = '', updated_at = ?
+                            http_status = 0, detail = '', problem_json = '', updated_at = ?
                         WHERE post_id = ? AND status = 'failed'
                         """,
                         (reply_text, now, post_id),
@@ -259,6 +263,7 @@ class MentionLedger:
         x_reply_id: str = "",
         http_status: int = 0,
         detail: str = "",
+        problem: Optional[dict] = None,
     ) -> None:
         if status not in {"posted", "failed", "ambiguous"}:
             raise ValueError("publication status must be posted, failed, or ambiguous")
@@ -279,10 +284,18 @@ class MentionLedger:
                     """
                     UPDATE publications
                     SET status = ?, x_reply_id = ?, http_status = ?, detail = ?,
-                        updated_at = ?
+                        problem_json = ?, updated_at = ?
                     WHERE post_id = ? AND status = 'pending'
                     """,
-                    (status, x_reply_id, int(http_status), safe_detail, now, post_id),
+                    (
+                        status,
+                        x_reply_id,
+                        int(http_status),
+                        safe_detail,
+                        _dump_problem(problem),
+                        now,
+                        post_id,
+                    ),
                 )
                 if status == "posted" and x_reply_id:
                     conn.execute(
@@ -514,6 +527,30 @@ def replies_enabled() -> bool:
 
 def bot_user_id() -> str:
     return (os.environ.get("X_BOT_USER_ID") or "").strip()
+
+
+def _ensure_problem_column(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA table_info(publications)").fetchall()
+    if rows and "problem_json" not in {row[1] for row in rows}:
+        conn.execute(
+            "ALTER TABLE publications ADD COLUMN problem_json TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _dump_problem(problem: Optional[dict]) -> str:
+    if not problem:
+        return ""
+    return json.dumps(problem, ensure_ascii=False, separators=(",", ":"))
+
+
+def _load_problem(raw: str) -> dict:
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def _now() -> str:

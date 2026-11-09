@@ -382,6 +382,88 @@ def test_preview_exit_code_stays_zero():
     assert _exit_code({}) == 2
 
 
+def test_rejection_keeps_the_sanitized_problem_and_an_old_failure_stays():
+    import sqlite3
+
+    class Response:
+        status_code = 403
+        headers = {"x-transaction-id": "txn-123"}
+
+        def json(self):
+            return {
+                "title": "Forbidden",
+                "detail": "token access-secret-value is not allowed to post",
+                "type": "about:blank",
+                "reason": "not-authorized",
+                "required_enrollment": "",
+                "status": 403,
+                "errors": [{"message": "access-secret-value", "code": 403}],
+            }
+
+    import httpx
+
+    original = httpx.post
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        assert json["reply"]["in_reply_to_tweet_id"] == POST_ID
+        return Response()
+
+    httpx.post = fake_post
+    try:
+        outcome = send_reply("access-secret-value", POST_ID, DRAFT)
+    finally:
+        httpx.post = original
+    assert outcome["detail"] == "Forbidden"
+    problem = outcome["problem"]
+    assert problem["title"] == "Forbidden"
+    assert problem["type"] == "about:blank"
+    assert problem["reason"] == "not-authorized"
+    assert problem["status"] == 403
+    assert problem["x_transaction_id"] == "txn-123"
+    assert "access-secret-value" not in json.dumps(problem)
+    assert "[redacted]" in problem["detail"]
+    assert problem["errors"][0]["message"] == "[redacted]"
+
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "mentions.sqlite"
+        conn = sqlite3.connect(path)
+        conn.execute(
+            """
+            CREATE TABLE publications (
+                post_id TEXT PRIMARY KEY,
+                reply_text TEXT NOT NULL,
+                x_reply_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                http_status INTEGER NOT NULL DEFAULT 0,
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO publications VALUES (?, ?, '', 'failed', 403, 'Forbidden', 't1', 't2')",
+            (POST_ID, DRAFT),
+        )
+        conn.commit()
+        conn.close()
+        book = MentionLedger(path)
+        book.finish_publication(
+            POST_ID,
+            status="failed",
+            http_status=500,
+            detail="replaced",
+            problem={"title": "replaced"},
+        )
+        saved = book.publication(POST_ID)
+    assert saved["status"] == "failed"
+    assert saved["detail"] == "Forbidden"
+    assert saved["http_status"] == 403
+    assert saved["created_at"] == "t1"
+    assert saved["updated_at"] == "t2"
+    assert saved["problem"] == {}
+
+
 if __name__ == "__main__":
     test_preview_and_mismatch_do_not_post()
     test_rejected_credential_does_not_post()
@@ -392,4 +474,5 @@ if __name__ == "__main__":
     test_credential_requires_moodybotai_and_tweet_write()
     test_automatic_flags_block_the_one_shot()
     test_preview_exit_code_stays_zero()
+    test_rejection_keeps_the_sanitized_problem_and_an_old_failure_stays()
     print("publish once ok")

@@ -142,6 +142,7 @@ def execute_publish(
         x_reply_id=reply_id if status == "posted" else "",
         http_status=int(outcome.get("http_status") or 0),
         detail=str(outcome.get("detail") or ""),
+        problem=outcome.get("problem") if isinstance(outcome.get("problem"), dict) else None,
     )
     saved = book.publication(post_id) or {}
     result.update(
@@ -153,6 +154,7 @@ def execute_publish(
             "x_reply_id": saved.get("x_reply_id") or "",
             "http_status": saved.get("http_status") or 0,
             "detail": saved.get("detail") or "",
+            "problem": saved.get("problem") or {},
             "created_at": saved.get("created_at") or "",
             "updated_at": saved.get("updated_at") or "",
             "reply_text": saved.get("reply_text") or "",
@@ -289,9 +291,37 @@ def send_reply(token: str, post_id: str, text: str) -> dict:
     return {
         "outcome": "failed",
         "http_status": response.status_code,
-        "detail": _problem(response, token),
+        "detail": _problem_title(response, token),
+        "problem": problem_record(response, token),
         "x_reply_id": "",
     }
+
+
+def problem_record(response, token: str) -> dict:
+    """Keep the X error fields and a request id. Drop the bearer if it appears."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    kept = {}
+    for key in ("type", "title", "detail", "reason", "errors", "required_enrollment", "status"):
+        if key not in payload or payload[key] in (None, ""):
+            continue
+        kept[key] = _sanitize_problem(payload[key], token)
+    headers = getattr(response, "headers", None)
+    transaction = ""
+    if headers is not None and hasattr(headers, "get"):
+        transaction = str(headers.get("x-transaction-id") or "")
+    if transaction:
+        kept["x_transaction_id"] = _sanitize_problem(transaction, token)
+    return kept
+
+
+def _problem_title(response, token: str) -> str:
+    record = problem_record(response, token)
+    return str(record.get("title") or record.get("detail") or "")[:240]
 
 
 def _scopes(headers) -> set:
@@ -307,18 +337,30 @@ def _scopes(headers) -> set:
     return {part.strip() for part in parts if part.strip()}
 
 
+def _sanitize_problem(value, token: str, depth: int = 0):
+    if depth > 4:
+        return ""
+    if isinstance(value, str):
+        text = " ".join(value.split())[:500]
+        if token and token in text:
+            text = text.replace(token, "[redacted]")
+        return text
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, list):
+        return [_sanitize_problem(item, token, depth + 1) for item in value[:10]]
+    if isinstance(value, dict):
+        kept = {}
+        for key, item in list(value.items())[:20]:
+            kept[str(key)[:80]] = _sanitize_problem(item, token, depth + 1)
+        return kept
+    return ""
+
+
 def _problem(response, token: str) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return ""
-    if not isinstance(payload, dict):
-        return ""
-    text = str(payload.get("title") or payload.get("detail") or "")
-    text = " ".join(text.split())[:240]
-    if token and token in text:
-        return "[redacted]"
-    return text
+    return _problem_title(response, token)
 
 
 def _flag_on(name: str) -> bool:

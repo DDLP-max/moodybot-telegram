@@ -144,6 +144,8 @@ def _with_publication(result: dict, directory: Path) -> dict:
     recorded["http_status"] = row.get("http_status") or 0
     recorded["detail"] = row.get("detail") or ""
     recorded["ledger_status"] = row.get("status") or ""
+    if row.get("problem"):
+        recorded["problem"] = row["problem"]
     return recorded
 
 
