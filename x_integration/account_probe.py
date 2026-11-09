@@ -29,17 +29,17 @@ def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
     me_status = 0
     username = ""
     user_id = ""
-    me_title = ""
+    me_problem: dict = {}
     refresh_status = 0
     refresh_used = False
     if token:
-        me_status, username, user_id, me_title = _users_me(token)
+        me_status, username, user_id, me_problem = _users_me(token)
         if me_status == 401 and refresh_configured:
             refresh_status, refreshed = refresh_access_token(book)
             refresh_used = True
             if refreshed:
                 token = refreshed
-                me_status, username, user_id, me_title = _users_me(token)
+                me_status, username, user_id, me_problem = _users_me(token)
     mentions_status = 0
     mentions_title = ""
     if me_status == 200 and user_id and token:
@@ -47,7 +47,11 @@ def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
     result = {
         "state": "done",
         "users_me_status": me_status,
-        "users_me_title": me_title,
+        "users_me_title": me_problem.get("title", ""),
+        "users_me_problem": me_problem,
+        "token_present": bool(token),
+        "token_shape": _token_shape(token),
+        "token_length": len(token),
         "username": username,
         "user_id": user_id,
         "mentions_status": mentions_status,
@@ -113,7 +117,7 @@ def refresh_access_token(ledger: Optional[MentionLedger] = None) -> tuple[int, s
     return response.status_code, access
 
 
-def _users_me(token: str) -> tuple[int, str, str, str]:
+def _users_me(token: str) -> tuple[int, str, str, dict]:
     import httpx
 
     try:
@@ -125,16 +129,20 @@ def _users_me(token: str) -> tuple[int, str, str, str]:
         )
     except httpx.HTTPError:
         logger.warning("X users/me failed before a response")
-        return 0, "", "", ""
+        return 0, "", "", {}
     if response.status_code != 200:
-        title = _error_title(response)
-        logger.info("X users/me http=%s title=%s", response.status_code, title or "-")
-        return response.status_code, "", "", title
+        problem = _problem(response, token)
+        logger.info(
+            "X users/me http=%s reason=%s",
+            response.status_code,
+            problem.get("reason") or problem.get("title") or "-",
+        )
+        return response.status_code, "", "", problem
     try:
         data = (response.json() or {}).get("data") or {}
     except ValueError:
-        return response.status_code, "", "", ""
-    return response.status_code, str(data.get("username") or ""), str(data.get("id") or ""), ""
+        return response.status_code, "", "", {}
+    return response.status_code, str(data.get("username") or ""), str(data.get("id") or ""), {}
 
 
 def _mentions(user_id: str, token: str) -> tuple[int, str]:
@@ -155,6 +163,38 @@ def _mentions(user_id: str, token: str) -> tuple[int, str]:
         title = _error_title(response)
         logger.info("X mentions http=%s title=%s", response.status_code, title or "-")
     return response.status_code, title
+
+
+def _problem(response, token: str) -> dict:
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    kept = {}
+    for key in ("title", "detail", "type", "reason", "required_enrollment", "status"):
+        if key not in payload or payload[key] in (None, ""):
+            continue
+        text = " ".join(str(payload[key]).split())[:240]
+        if token and token in text:
+            text = "[redacted]"
+        kept[key] = text
+    client_id = payload.get("client_id")
+    if isinstance(client_id, (int, str)) and str(client_id).isdigit():
+        kept["client_id"] = str(client_id)
+    return kept
+
+
+def _token_shape(token: str) -> str:
+    if not token:
+        return "missing"
+    parts = token.split(".")
+    if len(parts) == 3 and all(parts):
+        return "jwt"
+    if token.startswith("AAAA"):
+        return "app_bearer_prefix"
+    return "opaque"
 
 
 def _error_title(response) -> str:
@@ -187,10 +227,14 @@ def _env(name: str) -> str:
 def _redact(result: dict, token: str) -> dict:
     if not token:
         return result
-    cleaned = {}
-    for key, value in result.items():
-        if isinstance(value, str) and token in value:
-            cleaned[key] = value.replace(token, "")
-        else:
-            cleaned[key] = value
-    return cleaned
+
+    def walk(value):
+        if isinstance(value, str):
+            return value.replace(token, "[redacted]") if token in value else value
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    return walk(result)

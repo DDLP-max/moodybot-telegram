@@ -225,6 +225,51 @@ def test_refresh_without_credentials_does_not_call_x():
     assert result["mentions_status"] == 0
     assert result["refresh_configured"] is False
     assert result["username"] == ""
+    assert result["token_present"] is True
+    assert result["token_shape"] == "opaque"
+
+
+def test_client_forbidden_problem_is_sanitized():
+    os.environ["X_USER_ACCESS_TOKEN"] = "AAAA-secret-token-value"
+    os.environ["X_REPLIES_ENABLED"] = "false"
+    os.environ["X_POLL_ENABLED"] = "false"
+    import httpx
+
+    original = httpx.get
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        class Response:
+            status_code = 403
+
+            def json(self):
+                return {
+                    "client_id": "31339193",
+                    "title": "Client Forbidden",
+                    "detail": "Attached app is not enrolled. token=AAAA-secret-token-value",
+                    "reason": "client-not-enrolled",
+                    "required_enrollment": "Appropriate Level of API Access",
+                    "type": "https://api.x.com/2/problems/client-forbidden",
+                    "status": 403,
+                }
+
+        return Response()
+
+    httpx.get = fake_get
+    try:
+        with TemporaryDirectory() as tmp:
+            os.environ["X_STATE_DIR"] = tmp
+            result = run_account_probe()
+    finally:
+        httpx.get = original
+        _clear()
+    problem = result["users_me_problem"]
+    assert problem["reason"] == "client-not-enrolled"
+    assert problem["title"] == "Client Forbidden"
+    assert problem["client_id"] == "31339193"
+    assert result["token_shape"] == "app_bearer_prefix"
+    rendered = json.dumps(result)
+    assert "AAAA-secret-token-value" not in rendered
+    assert "[redacted]" in problem["detail"]
 
 
 if __name__ == "__main__":
@@ -232,4 +277,5 @@ if __name__ == "__main__":
     test_forbidden_mentions_are_not_permitted()
     test_refresh_retries_users_me_and_stores_the_new_token()
     test_refresh_without_credentials_does_not_call_x()
+    test_client_forbidden_problem_is_sanitized()
     print("account probe ok")
