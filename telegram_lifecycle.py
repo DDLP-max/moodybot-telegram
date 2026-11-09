@@ -225,6 +225,39 @@ def guard_handler(fn: Callable) -> Callable:
     return wrapped
 
 
+def _health_mentions(payload: Any) -> Any:
+    """Health stays public. Mention text does not."""
+    if not isinstance(payload, dict):
+        return payload
+    cleaned = dict(payload)
+    mentions = []
+    for item in payload.get("mentions") or []:
+        if not isinstance(item, dict):
+            continue
+        visible = {key: value for key, value in item.items() if key != "text"}
+        visible["text_length"] = len(str(item.get("text") or ""))
+        mentions.append(visible)
+    if "mentions" in cleaned:
+        cleaned["mentions"] = mentions
+    return cleaned
+
+
+def _health_dry_run(payload: Any) -> Any:
+    """Health stays public. The draft and the source post do not."""
+    if not isinstance(payload, dict):
+        return payload
+    cleaned = {key: value for key, value in payload.items() if key not in {"reply_text", "source_post"}}
+    stored = payload.get("stored")
+    if isinstance(stored, dict):
+        cleaned["stored"] = {key: value for key, value in stored.items() if key != "reply_text"}
+        cleaned["reply_stored"] = bool(stored.get("reply_text"))
+    source = payload.get("source_post")
+    if isinstance(source, dict):
+        cleaned["source_post_id"] = source.get("post_id") or ""
+        cleaned["source_author"] = source.get("author_username") or ""
+    return cleaned
+
+
 class BotRuntime:
     """Owns Application lifecycle + transport (webhook or local polling)."""
 
@@ -449,8 +482,8 @@ class BotRuntime:
             "instance_id": self.instance_id,
             "git_commit": (self.env.get("git_commit") or "unknown"),
             "x_probe": self.x_probe,
-            "x_mentions": self.x_mentions,
-            "x_dry_run": self.x_dry_run,
+            "x_mentions": _health_mentions(self.x_mentions),
+            "x_dry_run": _health_dry_run(self.x_dry_run),
         }
         return web.json_response(body)
 
