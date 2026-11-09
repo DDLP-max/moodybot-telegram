@@ -305,6 +305,7 @@ class BotRuntime:
         self.x_probe = {"state": "pending"}
         self.x_mentions = {"state": "pending"}
         self.x_dry_run = {"state": "pending"}
+        self.x_publish = {"state": "pending"}
 
         self._http_runner: Optional[web.AppRunner] = None
         self._http_site: Optional[web.TCPSite] = None
@@ -484,6 +485,7 @@ class BotRuntime:
             "x_probe": self.x_probe,
             "x_mentions": _health_mentions(self.x_mentions),
             "x_dry_run": _health_dry_run(self.x_dry_run),
+            "x_publish": self.x_publish,
         }
         return web.json_response(body)
 
@@ -660,6 +662,24 @@ class BotRuntime:
             result.get("x_state_dir") or "-",
             result.get("disk_mounted"),
             result.get("marker_survived"),
+        )
+        try:
+            from x_integration.operator_publish import run_operator_publish
+
+            self.x_publish = await asyncio.to_thread(run_operator_publish)
+        except Exception:
+            self.log.exception("X one-shot publish failed")
+            self.x_publish = {"state": "error", "posted": False}
+        publish = self.x_publish
+        self._info(
+            "X publish state=%s posted=%s account=%s write=%s preview=%s publish=%s reply_id=%s",
+            publish.get("state"),
+            publish.get("posted"),
+            publish.get("account") or "-",
+            publish.get("write_evidence") or "-",
+            publish.get("preview_status") or "-",
+            publish.get("publish_status") or "-",
+            publish.get("x_reply_id") or "-",
         )
 
     async def run(self, app: Any) -> None:

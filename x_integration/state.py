@@ -58,6 +58,16 @@ CREATE TABLE IF NOT EXISTS oauth_cache (
     refresh_token TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS publications (
+    post_id TEXT PRIMARY KEY,
+    reply_text TEXT NOT NULL,
+    x_reply_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    http_status INTEGER NOT NULL DEFAULT 0,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -158,6 +168,129 @@ class MentionLedger:
                     conn.execute(
                         "INSERT OR IGNORE INTO replied_posts (post_id, event_id) VALUES (?, ?)",
                         (post_id, event_id),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def publication(self, post_id: str) -> Optional[dict]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT post_id, reply_text, x_reply_id, status, http_status,
+                           detail, created_at, updated_at
+                    FROM publications WHERE post_id = ?
+                    """,
+                    (post_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        if row is None:
+            return None
+        return {
+            "post_id": row[0],
+            "reply_text": row[1],
+            "x_reply_id": row[2],
+            "status": row[3],
+            "http_status": row[4],
+            "detail": row[5],
+            "created_at": row[6],
+            "updated_at": row[7],
+        }
+
+    def claim_publication(self, post_id: str, reply_text: str) -> str:
+        """Reserve one publish attempt. Only 'claimed' may call X.
+
+        posted, ambiguous, and pending block another attempt. A previous
+        definite failure can be claimed again by a new explicit command.
+        """
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT status FROM publications WHERE post_id = ?",
+                    (post_id,),
+                ).fetchone()
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO publications (
+                            post_id, reply_text, x_reply_id, status, http_status,
+                            detail, created_at, updated_at
+                        ) VALUES (?, ?, '', 'pending', 0, '', ?, ?)
+                        """,
+                        (post_id, reply_text, now, now),
+                    )
+                    conn.execute("COMMIT")
+                    return "claimed"
+                status = str(row[0])
+                if status == "failed":
+                    conn.execute(
+                        """
+                        UPDATE publications
+                        SET reply_text = ?, x_reply_id = '', status = 'pending',
+                            http_status = 0, detail = '', updated_at = ?
+                        WHERE post_id = ? AND status = 'failed'
+                        """,
+                        (reply_text, now, post_id),
+                    )
+                    conn.execute("COMMIT")
+                    return "claimed"
+                conn.execute("COMMIT")
+                return status
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def finish_publication(
+        self,
+        post_id: str,
+        *,
+        status: str,
+        x_reply_id: str = "",
+        http_status: int = 0,
+        detail: str = "",
+    ) -> None:
+        if status not in {"posted", "failed", "ambiguous"}:
+            raise ValueError("publication status must be posted, failed, or ambiguous")
+        now = _now()
+        safe_detail = " ".join(str(detail).split())[:240]
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT status FROM publications WHERE post_id = ?",
+                    (post_id,),
+                ).fetchone()
+                if current is None or current[0] != "pending":
+                    conn.execute("COMMIT")
+                    return
+                conn.execute(
+                    """
+                    UPDATE publications
+                    SET status = ?, x_reply_id = ?, http_status = ?, detail = ?,
+                        updated_at = ?
+                    WHERE post_id = ? AND status = 'pending'
+                    """,
+                    (status, x_reply_id, int(http_status), safe_detail, now, post_id),
+                )
+                if status == "posted" and x_reply_id:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO replied_posts (post_id, event_id)
+                        VALUES (?, ?)
+                        """,
+                        (post_id, f"publish:{post_id}"),
                     )
                 conn.execute("COMMIT")
             except Exception:
