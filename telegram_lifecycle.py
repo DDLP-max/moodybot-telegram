@@ -271,6 +271,7 @@ class BotRuntime:
         self.env = render_env_snapshot()
         self.x_probe = {"state": "pending"}
         self.x_mentions = {"state": "pending"}
+        self.x_dry_run = {"state": "pending"}
 
         self._http_runner: Optional[web.AppRunner] = None
         self._http_site: Optional[web.TCPSite] = None
@@ -449,6 +450,7 @@ class BotRuntime:
             "git_commit": (self.env.get("git_commit") or "unknown"),
             "x_probe": self.x_probe,
             "x_mentions": self.x_mentions,
+            "x_dry_run": self.x_dry_run,
         }
         return web.json_response(body)
 
@@ -582,6 +584,37 @@ class BotRuntime:
                 self.x_mentions = {"state": "error"}
         else:
             self.x_mentions = {"state": "skipped"}
+        if (
+            result.get("users_me_status") == 200
+            and result.get("username")
+            and user_id
+        ):
+            try:
+                from x_integration.dry_run import run_controlled_dry_run
+
+                self.x_dry_run = await asyncio.to_thread(
+                    run_controlled_dry_run,
+                    str(result.get("username") or ""),
+                    user_id,
+                )
+            except Exception:
+                self.log.exception("X dry run failed")
+                self.x_dry_run = {"state": "error"}
+        else:
+            self.x_dry_run = {"state": "skipped"}
+        dry = self.x_dry_run
+        self._info(
+            "X dry run state=%s post=%s first=%s replay=%s dedup=%s cap=%s "
+            "cursor_unchanged=%s spend_unchanged=%s",
+            dry.get("state"),
+            dry.get("post_id") or "-",
+            dry.get("first_status") or "-",
+            dry.get("second_status") or "-",
+            dry.get("deduplicated"),
+            dry.get("cap_blocks_next"),
+            dry.get("production_cursor_unchanged"),
+            dry.get("production_spend_unchanged"),
+        )
         self._info(
             "X account probe state=%s users_me=%s username=%s user_id=%s mentions=%s "
             "permitted=%s dir=%s mounted=%s marker_survived=%s",
