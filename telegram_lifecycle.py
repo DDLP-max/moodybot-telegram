@@ -306,6 +306,7 @@ class BotRuntime:
         self.x_mentions = {"state": "pending"}
         self.x_dry_run = {"state": "pending"}
         self.x_publish = {"state": "pending"}
+        self.x_live_test = {"state": "pending"}
 
         self._http_runner: Optional[web.AppRunner] = None
         self._http_site: Optional[web.TCPSite] = None
@@ -486,6 +487,7 @@ class BotRuntime:
             "x_mentions": _health_mentions(self.x_mentions),
             "x_dry_run": _health_dry_run(self.x_dry_run),
             "x_publish": self.x_publish,
+            "x_live_test": self.x_live_test,
         }
         return web.json_response(body)
 
@@ -680,6 +682,21 @@ class BotRuntime:
             publish.get("preview_status") or "-",
             publish.get("publish_status") or "-",
             publish.get("x_reply_id") or "-",
+        )
+        try:
+            from x_integration.live_reply import run_live_reply
+
+            self.x_live_test = await asyncio.to_thread(run_live_reply)
+        except Exception:
+            self.log.exception("X live reply failed")
+            self.x_live_test = {"state": "error", "posted": False}
+        live = self.x_live_test
+        self._info(
+            "X live reply state=%s posted=%s http=%s reply_id=%s",
+            live.get("state"),
+            live.get("posted"),
+            live.get("http_status") or 0,
+            live.get("x_reply_id") or "-",
         )
 
     async def run(self, app: Any) -> None:
