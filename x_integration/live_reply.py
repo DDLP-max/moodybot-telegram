@@ -18,13 +18,14 @@ from x_integration.events import Mention
 from x_integration.post_length import trim_to_post, weighted_length
 from x_integration.state import MentionLedger, state_dir
 
-POST_ID = "2119945360684744777"
+POST_ID = "2119950492617081251"
 PARENT_AUTHOR_ID = "2082957781293035520"
 PARENT_USERNAME = "MattCanham805"
 MARKER_NAME = f"live-reply-{POST_ID}.json"
 DRAFT_NAME = f"live-reply-{POST_ID}.sqlite"
 REPLY_LIMIT = 200
 _URL = re.compile(r"https?://\S+", re.IGNORECASE)
+_MENTION = re.compile(r"(?i)(?<!\w)@MoodyBotAI\b")
 
 
 def run_live_reply(
@@ -71,10 +72,22 @@ def run_live_reply(
                 "rerun": True,
             },
         )
-    if str(post.get("author_id") or "") != PARENT_AUTHOR_ID:
-        return _write_marker(marker, {"state": "refused", "reason": "unexpected_parent", "posted": False, "post_id": POST_ID})
-    if str(post.get("author_username") or "") not in {"", PARENT_USERNAME}:
-        return _write_marker(marker, {"state": "refused", "reason": "unexpected_parent", "posted": False, "post_id": POST_ID})
+    parent_text = str(post.get("text") or "")
+    if str(post.get("author_id") or "") != PARENT_AUTHOR_ID or str(post.get("author_username") or "") != PARENT_USERNAME:
+        return _write_marker(marker, {"state": "refused", "reason": "unexpected_parent", "posted": False, "post_id": POST_ID, "parent_text": parent_text})
+    if not _MENTION.search(parent_text):
+        return _write_marker(
+            marker,
+            {
+                "state": "refused",
+                "reason": "parent_not_mentioned",
+                "posted": False,
+                "post_id": POST_ID,
+                "parent_author_id": PARENT_AUTHOR_ID,
+                "parent_username": PARENT_USERNAME,
+                "parent_text": parent_text,
+            },
+        )
     draft_path = directory / DRAFT_NAME
     raw = (generate or _generate)(post, draft_path)
     reply = _plain_reply(raw)
@@ -87,6 +100,9 @@ def run_live_reply(
     outcome = (publish or _publish)(directory, reply)
     saved = _recorded(production) or {}
     result = _outcome(outcome, saved, reply)
+    result["parent_text"] = parent_text
+    result["parent_username"] = PARENT_USERNAME
+    result["parent_mentions_bot"] = True
     if result.get("posted") and result.get("x_reply_id"):
         result["retrieved"] = _safe_retrieve(retrieve, token, result["x_reply_id"])
     result["checks"] = _checks(result)
@@ -130,7 +146,11 @@ def _fetch_parent(post_id: str, token: str) -> dict:
     response = httpx.get(
         f"https://api.x.com/2/tweets/{post_id}",
         headers={"Authorization": f"Bearer {token}"},
-        params={"tweet.fields": "author_id,created_at,conversation_id,text"},
+        params={
+            "tweet.fields": "author_id,created_at,conversation_id,text,entities",
+            "expansions": "author_id",
+            "user.fields": "username",
+        },
         timeout=20,
     )
     try:
@@ -148,10 +168,17 @@ def _fetch_parent(post_id: str, token: str) -> dict:
         return {"status": response.status_code, "problem": problem}
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     text = data.get("text") if isinstance(data.get("text"), str) else ""
+    author_id = str(data.get("author_id") or "")
+    username = ""
+    includes = payload.get("includes") if isinstance(payload.get("includes"), dict) else {}
+    for user in includes.get("users") or []:
+        if isinstance(user, dict) and str(user.get("id") or "") == author_id:
+            username = str(user.get("username") or "")
+            break
     return {
         "status": 200,
-        "author_id": str(data.get("author_id") or ""),
-        "author_username": "",
+        "author_id": author_id,
+        "author_username": username,
         "created_at": str(data.get("created_at") or ""),
         "conversation_id": str(data.get("conversation_id") or post_id),
         "text": " ".join(text.split()),

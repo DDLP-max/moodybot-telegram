@@ -32,7 +32,7 @@ def _post():
         "status": 200,
         "author_id": PARENT_AUTHOR_ID,
         "author_username": "MattCanham805",
-        "text": "MoodyBot publishing test. Reply to this post.",
+        "text": "@MoodyBotAI publishing test. Reply to this post.",
         "conversation_id": POST_ID,
     }
 
@@ -196,6 +196,18 @@ def test_flags_and_the_wrong_parent_do_not_post():
         _clear()
     assert wrong["reason"] == "unexpected_parent"
     assert wrong["posted"] is False
+    _ready()
+    try:
+        with TemporaryDirectory() as tmp:
+            unmentioned = run_live_reply(
+                Path(tmp),
+                fetch_post=lambda *_a, **_k: {**_post(), "text": "publishing test. Reply to this post."},
+                publish=_boom,
+            )
+    finally:
+        _clear()
+    assert unmentioned["reason"] == "parent_not_mentioned"
+    assert unmentioned["posted"] is False
 
 
 def test_parent_read_uses_the_cached_access_token():
