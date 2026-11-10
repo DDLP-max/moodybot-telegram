@@ -18,6 +18,58 @@ MENTIONS_URL = "https://api.x.com/2/users/{user_id}/mentions"
 TOKEN_URL = "https://api.x.com/2/oauth2/token"
 
 
+def validated_user_token(ledger: Optional[MentionLedger] = None) -> dict:
+    """Select one user token, check it with users/me, and refresh only on 401.
+
+    The cache wins when it exists. The environment token is used only when
+    the cache is empty. A rejected cache token is not replaced by the
+    environment token. The returned token must not be logged or put on /health.
+    """
+    book = ledger or ledger_from_env()
+    cached = book.cached_access_token()
+    token = cached or _env("X_USER_ACCESS_TOKEN")
+    source = "cache" if cached else ("environment" if token else "")
+    if not token:
+        return {"ok": False, "token": "", "source": "", "http_status": 0, "username": "", "user_id": "", "reason": "missing"}
+    status, username, user_id, _problem = _users_me(token)
+    if status == 401 and _refresh_configured(book):
+        _refresh_status, refreshed = refresh_access_token(book)
+        if not refreshed:
+            return {
+                "ok": False,
+                "token": "",
+                "source": source,
+                "http_status": status,
+                "username": "",
+                "user_id": "",
+                "reason": "refresh_failed",
+            }
+        token = refreshed
+        source = "refresh"
+        status, username, user_id, _problem = _users_me(token)
+    from x_integration.dry_run import CONFIRMED_USER_ID, CONFIRMED_USERNAME
+
+    if status != 200 or username != CONFIRMED_USERNAME or user_id != CONFIRMED_USER_ID:
+        return {
+            "ok": False,
+            "token": "",
+            "source": source,
+            "http_status": status,
+            "username": username,
+            "user_id": user_id,
+            "reason": "rejected",
+        }
+    return {
+        "ok": True,
+        "token": token,
+        "source": source,
+        "http_status": 200,
+        "username": username,
+        "user_id": user_id,
+        "reason": "",
+    }
+
+
 def run_account_probe(ledger: Optional[MentionLedger] = None) -> dict:
     from x_integration.diagnose import report as disk_report
 

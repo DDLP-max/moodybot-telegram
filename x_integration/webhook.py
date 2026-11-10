@@ -92,6 +92,11 @@ async def handle_x_event(request: web.Request) -> web.Response:
 
 def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None) -> dict:
     book = ledger or get_ledger()
+    if replies_enabled() and book.automatic_reply_allowance()["remaining"] <= 0:
+        existing = book.publication(mention.post_id)
+        if existing and str(existing.get("status") or "") in {"posted", "ambiguous", "failed", "pending"}:
+            return {"status": "duplicate", "reason": str(existing.get("status") or "")}
+        return {"status": "publish_limit"}
     claim = book.claim(
         mention.event_id, mention.post_id, mention.author_id, mention.conversation_id
     )
@@ -113,14 +118,7 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
 
     reply = draft_mention_reply(mention.text, mention.conversation_id)
     if replies_enabled():
-        post_reply(mention.post_id, reply)
-        book.finish(
-            mention.event_id,
-            status="posted",
-            reply_text=reply,
-            post_id=mention.post_id,
-        )
-        return {"status": "posted"}
+        return _publish_automatic(book, mention, reply)
     book.finish(
         mention.event_id,
         status="dry_run",
@@ -130,7 +128,63 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
     return {"status": "dry_run", "posted": False}
 
 
-def post_reply(in_reply_to_tweet_id: str, text: str) -> None:
+def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dict:
+    """Post once. A write that X may have accepted is never sent again."""
+    from x_integration.account_probe import validated_user_token
+    from x_integration.publish_once import send_reply
+
+    slot = book.reserve_automatic_publication(mention.post_id, reply)
+    if slot == "cap":
+        return {"status": "publish_limit"}
+    if slot != "claimed":
+        if slot in {"posted", "ambiguous", "failed"}:
+            book.finish(
+                mention.event_id,
+                status=slot,
+                reply_text=reply,
+                skip_reason=slot,
+                post_id=mention.post_id,
+            )
+        return {"status": "duplicate", "reason": slot}
+    check = validated_user_token(book)
+    if not check.get("ok"):
+        book.release_automatic_reservation(mention.post_id)
+        return {
+            "status": "not_sent",
+            "reason": "token_invalid",
+            "http_status": int(check.get("http_status") or 0),
+        }
+    outcome = send_reply(str(check.get("token") or ""), mention.post_id, reply)
+    kind = str(outcome.get("outcome") or "ambiguous")
+    if kind == "failed" and int(outcome.get("http_status") or 0) == 0 and outcome.get("detail") == "reply_too_long":
+        book.release_automatic_reservation(mention.post_id)
+        return {"status": "not_sent", "reason": "reply_too_long"}
+    if kind not in {"posted", "failed", "ambiguous"}:
+        kind = "ambiguous"
+    problem = outcome.get("problem") if isinstance(outcome.get("problem"), dict) else None
+    book.finish_publication(
+        mention.post_id,
+        status=kind,
+        x_reply_id=str(outcome.get("x_reply_id") or ""),
+        http_status=int(outcome.get("http_status") or 0),
+        detail=str(outcome.get("detail") or ""),
+        problem=problem,
+    )
+    book.finish(
+        mention.event_id,
+        status=kind,
+        reply_text=reply,
+        skip_reason="" if kind == "posted" else kind,
+        post_id=mention.post_id,
+    )
+    return {
+        "status": kind,
+        "http_status": int(outcome.get("http_status") or 0),
+        "x_reply_id": str(outcome.get("x_reply_id") or ""),
+    }
+
+
+def post_reply(in_reply_to_tweet_id: str, text: str, token: str = "") -> None:
     """Live posting is refused until a dry run has succeeded and the flag is on.
 
     The flag is read by process_mention. This function is the only place a
@@ -138,22 +192,18 @@ def post_reply(in_reply_to_tweet_id: str, text: str) -> None:
     """
     if not replies_enabled():
         raise RuntimeError("X replies are disabled")
-    from x_integration.post_length import fits_post
+    access = (token or "").strip()
+    if not access:
+        from x_integration.account_probe import validated_user_token
 
-    token = (__import__("os").environ.get("X_USER_ACCESS_TOKEN") or "").strip()
-    if not token or not in_reply_to_tweet_id or not text.strip():
+        check = validated_user_token()
+        if not check.get("ok"):
+            raise RuntimeError("X reply token is not valid")
+        access = str(check.get("token") or "")
+    if not access or not in_reply_to_tweet_id or not text.strip():
         raise RuntimeError("X reply is not configured")
-    if not fits_post(text):
-        raise RuntimeError("X reply is too long")
-    import httpx
+    from x_integration.publish_once import send_reply
 
-    response = httpx.post(
-        "https://api.x.com/2/tweets",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "text": text,
-            "reply": {"in_reply_to_tweet_id": in_reply_to_tweet_id},
-        },
-        timeout=20,
-    )
-    response.raise_for_status()
+    outcome = send_reply(access, in_reply_to_tweet_id, text)
+    if outcome.get("outcome") != "posted":
+        raise RuntimeError(str(outcome.get("detail") or "X reply was not posted"))

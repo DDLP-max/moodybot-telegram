@@ -15,13 +15,23 @@ import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 
 MAX_ATTEMPTS = 3
 LEDGER_FILENAME = "mentions.sqlite"
+AUTOMATIC_REPLY_LIMIT = 5
+AUTOMATIC_REPLY_WINDOW = timedelta(hours=24)
+_TERMINAL_EVENT = frozenset({
+    "dry_run",
+    "posted",
+    "skipped",
+    "dead",
+    "ambiguous",
+    "failed",
+})
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -90,6 +100,7 @@ class MentionLedger:
         try:
             conn.executescript(_SCHEMA)
             _ensure_problem_column(conn)
+            _ensure_origin_column(conn)
             conn.commit()
         finally:
             conn.close()
@@ -117,7 +128,7 @@ class MentionLedger:
                     conn.execute("COMMIT")
                     return Claim(proceed=True, duplicate=False, dead=False, attempts=1)
                 status, attempts = row
-                if status in {"dry_run", "posted", "skipped", "dead"}:
+                if status in _TERMINAL_EVENT:
                     conn.execute("COMMIT")
                     return Claim(
                         proceed=False, duplicate=True, dead=status == "dead", attempts=attempts
@@ -311,6 +322,122 @@ class MentionLedger:
                 raise
             finally:
                 conn.close()
+
+    def automatic_reply_allowance(self) -> dict:
+        """Successful automatic replies in the rolling 24 hours.
+
+        Manual publication rows have an empty origin and are not counted.
+        Pending and ambiguous automatic rows are held so two workers cannot
+        both pass a cap that only looks at finished posts.
+        """
+        used, inflight = self._automatic_counts()
+        remaining = AUTOMATIC_REPLY_LIMIT - used - inflight
+        if remaining < 0:
+            remaining = 0
+        return {
+            "limit": AUTOMATIC_REPLY_LIMIT,
+            "used": used,
+            "inflight": inflight,
+            "remaining": remaining,
+            "window_hours": 24,
+        }
+
+    def reserve_automatic_publication(self, post_id: str, reply_text: str) -> str:
+        """Hold one automatic slot. Does not rewrite an existing row.
+
+        A failed or ambiguous automatic row stays as it is. Only a new row
+        may be claimed, and only while the rolling cap has room.
+        """
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT status FROM publications WHERE post_id = ?",
+                    (post_id,),
+                ).fetchone()
+                if row is not None:
+                    conn.execute("COMMIT")
+                    return str(row[0])
+                if not self._automatic_room(conn):
+                    conn.execute("COMMIT")
+                    return "cap"
+                conn.execute(
+                    """
+                    INSERT INTO publications (
+                        post_id, reply_text, x_reply_id, status, http_status,
+                        detail, problem_json, created_at, updated_at, origin
+                    ) VALUES (?, ?, '', 'pending', 0, '', '', ?, ?, 'automatic')
+                    """,
+                    (post_id, reply_text, now, now),
+                )
+                conn.execute("COMMIT")
+                return "claimed"
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def release_automatic_reservation(self, post_id: str) -> None:
+        """Drop a slot only when no write was attempted."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    DELETE FROM publications
+                    WHERE post_id = ? AND origin = 'automatic' AND status = 'pending'
+                    """,
+                    (post_id,),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def _automatic_counts(self) -> tuple[int, int]:
+        cutoff = (datetime.now(timezone.utc) - AUTOMATIC_REPLY_WINDOW).isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                used = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM publications
+                    WHERE origin = 'automatic' AND status = 'posted' AND created_at >= ?
+                    """,
+                    (cutoff,),
+                ).fetchone()[0]
+                inflight = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM publications
+                    WHERE origin = 'automatic' AND status IN ('pending', 'ambiguous')
+                    """,
+                ).fetchone()[0]
+            finally:
+                conn.close()
+        return int(used), int(inflight)
+
+    def _automatic_room(self, conn: sqlite3.Connection) -> bool:
+        cutoff = (datetime.now(timezone.utc) - AUTOMATIC_REPLY_WINDOW).isoformat()
+        used = conn.execute(
+            """
+            SELECT COUNT(*) FROM publications
+            WHERE origin = 'automatic' AND status = 'posted' AND created_at >= ?
+            """,
+            (cutoff,),
+        ).fetchone()[0]
+        inflight = conn.execute(
+            """
+            SELECT COUNT(*) FROM publications
+            WHERE origin = 'automatic' AND status IN ('pending', 'ambiguous')
+            """,
+        ).fetchone()[0]
+        return int(used) + int(inflight) < AUTOMATIC_REPLY_LIMIT
 
     def already_replied(self, post_id: str) -> bool:
         with self._lock:
@@ -534,6 +661,14 @@ def _ensure_problem_column(conn: sqlite3.Connection) -> None:
     if rows and "problem_json" not in {row[1] for row in rows}:
         conn.execute(
             "ALTER TABLE publications ADD COLUMN problem_json TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _ensure_origin_column(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA table_info(publications)").fetchall()
+    if rows and "origin" not in {row[1] for row in rows}:
+        conn.execute(
+            "ALTER TABLE publications ADD COLUMN origin TEXT NOT NULL DEFAULT ''"
         )
 
 

@@ -327,6 +327,12 @@ def test_reply_publish_shape_is_not_sent_while_disabled():
         captured["timeout"] = timeout
 
         class Response:
+            status_code = 201
+            headers = {}
+
+            def json(self):
+                return {"data": {"id": "reply-1"}}
+
             def raise_for_status(self):
                 return None
 
@@ -337,7 +343,7 @@ def test_reply_publish_shape_is_not_sent_while_disabled():
     original = httpx.post
     httpx.post = fake_post
     try:
-        post_reply("998877", "held")
+        post_reply("998877", "held", token="test-user-token")
     finally:
         httpx.post = original
         _clear_env()
@@ -425,28 +431,59 @@ def test_observation_reports_overlap_without_a_second_pass():
         _clear_env()
 
 
-def test_disabled_replies_do_not_start_the_publishing_loop():
+def test_observation_loop_runs_twice_without_publishing():
     calls, original_draft, original_post = _patch_draft()
     _use_env()
+    os.environ["X_POLL_INTERVAL_SECONDS"] = "60"
     try:
         async def _loop():
             import x_integration.poll as poll_mod
 
-            original = poll_mod.poll_once
+            original_once = poll_mod.poll_once
+            original_observe = poll_mod.observe_once
+            original_interval = poll_mod.poll_interval_seconds
+            seen = {"poll": 0, "observe": 0}
+            stop = asyncio.Event()
 
-            def once():
-                calls.append("loop")
-                return {"status": "ok", "drafted": 0}
+            def once(*_args, **_kwargs):
+                seen["poll"] += 1
+                return {"status": "ok", "drafted": 1}
+
+            def observe(*_args, **_kwargs):
+                seen["observe"] += 1
+                if seen["observe"] >= 2:
+                    stop.set()
+                return {
+                    "status": "ok",
+                    "discovered": 1,
+                    "queued": [{"post_id": "2119952806698520807", "author_id": "2082957781293035520"}],
+                    "filtered": [],
+                    "since_id": "2119952806698520806",
+                    "published": 0,
+                    "replies_enabled": False,
+                }
 
             poll_mod.poll_once = once
+            poll_mod.observe_once = observe
+            poll_mod.poll_interval_seconds = lambda: 0.01
+            recorded = []
             try:
-                await poll_loop(asyncio.Event())
+                await poll_loop(stop, record=recorded.append)
             finally:
-                poll_mod.poll_once = original
+                poll_mod.poll_once = original_once
+                poll_mod.observe_once = original_observe
+                poll_mod.poll_interval_seconds = original_interval
+            return seen, recorded
 
-        asyncio.run(_loop())
+        seen, recorded = asyncio.run(_loop())
+        assert seen == {"poll": 0, "observe": 2}
         assert calls == []
+        assert [item["cycle"] for item in recorded] == [1, 2]
+        assert recorded[0]["polled_at"] != recorded[1]["polled_at"]
+        assert recorded[1]["published"] == 0
+        assert recorded[1]["since_id"] == "2119952806698520806"
     finally:
+        os.environ.pop("X_POLL_INTERVAL_SECONDS", None)
         _restore_draft(original_draft, original_post)
         _clear_env()
 
@@ -461,5 +498,5 @@ if __name__ == "__main__":
     test_reply_publish_shape_is_not_sent_while_disabled()
     test_observation_queues_the_new_mention_and_does_not_draft()
     test_observation_reports_overlap_without_a_second_pass()
-    test_disabled_replies_do_not_start_the_publishing_loop()
+    test_observation_loop_runs_twice_without_publishing()
     print("mention poll ok")

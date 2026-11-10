@@ -225,6 +225,15 @@ def guard_handler(fn: Callable) -> Callable:
     return wrapped
 
 
+def _reply_allowance() -> dict:
+    try:
+        from x_integration.state import ledger_from_env
+
+        return ledger_from_env().automatic_reply_allowance()
+    except Exception:
+        return {"limit": 5, "used": None, "inflight": None, "remaining": None, "window_hours": 24}
+
+
 def _health_mentions(payload: Any) -> Any:
     """Health stays public. Mention text does not."""
     if not isinstance(payload, dict):
@@ -478,6 +487,36 @@ class BotRuntime:
             )
             flush_logs()
 
+    def _remember_poll(self, result: dict) -> None:
+        previous = self.x_poll if isinstance(self.x_poll, dict) else {}
+        incoming = dict(result)
+        if previous.get("polled_at") and previous.get("polled_at") != incoming.get("polled_at"):
+            incoming["previous_polled_at"] = previous.get("polled_at")
+            incoming["previous_cycle"] = previous.get("cycle")
+        kept = {}
+        for key in (
+            "state",
+            "status",
+            "discovered",
+            "queued",
+            "filtered",
+            "since_id",
+            "replies_enabled",
+            "published",
+            "drafted",
+            "cycle",
+            "polled_at",
+            "previous_polled_at",
+            "previous_cycle",
+            "token_source",
+            "users_me_status",
+            "username",
+            "http_status",
+        ):
+            if key in incoming:
+                kept[key] = incoming[key]
+        self.x_poll = kept
+
     async def handle_health(self, request: web.Request) -> web.Response:
         body = {
             "status": "ok" if self.state == READY else self.state.lower(),
@@ -490,6 +529,7 @@ class BotRuntime:
             "x_publish": self.x_publish,
             "x_live_test": self.x_live_test,
             "x_poll": self.x_poll,
+            "x_reply_allowance": _reply_allowance(),
         }
         return web.json_response(body)
 
@@ -700,21 +740,7 @@ class BotRuntime:
             live.get("http_status") or 0,
             live.get("x_reply_id") or "-",
         )
-        if _x_poll_enabled():
-            from x_integration.state import replies_enabled
-
-            if replies_enabled():
-                self.x_poll = {"state": "publishing", "replies_enabled": True}
-            else:
-                try:
-                    from x_integration.poll import observe_once
-
-                    self.x_poll = await asyncio.to_thread(observe_once)
-                    self.x_poll["state"] = "observed"
-                except Exception:
-                    self.log.exception("X mention observation failed")
-                    self.x_poll = {"state": "error", "replies_enabled": False}
-        else:
+        if not _x_poll_enabled():
             self.x_poll = {"state": "disabled", "replies_enabled": False}
         survey = self.x_poll
         self._info(
@@ -773,7 +799,9 @@ class BotRuntime:
             if _x_poll_enabled():
                 from x_integration.poll import poll_loop
 
-                poll_task = asyncio.create_task(poll_loop(self._shutdown_event))
+                poll_task = asyncio.create_task(
+                    poll_loop(self._shutdown_event, record=self._remember_poll)
+                )
                 self._info("X mention poll armed")
             await self._shutdown_event.wait()
         finally:

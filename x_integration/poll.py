@@ -62,6 +62,24 @@ def poll_interval_seconds() -> int:
     return value if value >= 60 else 60
 
 
+def _read_token(book: MentionLedger, fetch: Optional[Fetch]) -> tuple[str, dict]:
+    """Tests pass fetch and keep their own token. Production validates one token."""
+    if fetch is not None:
+        token = book.cached_access_token() or (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+        return token, {}
+    from x_integration.account_probe import validated_user_token
+
+    check = validated_user_token(book)
+    public = {
+        "token_source": check.get("source") or "",
+        "users_me_status": int(check.get("http_status") or 0),
+        "username": check.get("username") or "",
+    }
+    if not check.get("ok"):
+        return "", public
+    return str(check.get("token") or ""), public
+
+
 def poll_once(
     *,
     ledger: Optional[MentionLedger] = None,
@@ -71,9 +89,11 @@ def poll_once(
     """Read one bounded window. Does not post while replies are disabled."""
     book = ledger or ledger_from_env()
     user_id = bot_user_id()
-    token = book.cached_access_token() or (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+    token, token_meta = _read_token(book, fetch)
     if not user_id or not token:
-        return {"status": "not_configured", "drafted": 0, "since_id": book.get_since_id()}
+        stopped = {"status": "unauthorized" if token_meta else "not_configured", "drafted": 0, "since_id": book.get_since_id()}
+        stopped.update(token_meta)
+        return stopped
     since_id = book.get_since_id()
     fetcher = fetch or fetch_mentions
     collected: list[dict] = []
@@ -165,23 +185,26 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
 
     book = ledger or ledger_from_env()
     user_id = bot_user_id() or CONFIRMED_USER_ID
-    token = book.cached_access_token() or (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+    token, token_meta = _read_token(book, fetch)
     floor = str(int(ACTIVATION_POST_ID) - 1)
     current = book.get_since_id()
     if not current or int(current) < int(floor):
         book.set_since_id(floor)
     if not token:
-        return {
-            "status": "not_configured",
+        stopped = {
+            "status": "unauthorized" if token_meta else "not_configured",
             "discovered": 0,
             "queued": [],
             "filtered": [],
             "since_id": book.get_since_id(),
             "replies_enabled": _replies_on(),
+            "published": 0,
         }
+        stopped.update(token_meta)
+        return stopped
     result = (fetch or fetch_mentions)(user_id, token, "", "")
     if result.status != "ok":
-        return {
+        stopped = {
             "status": result.status,
             "http_status": result.http_status,
             "discovered": 0,
@@ -189,7 +212,10 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
             "filtered": [],
             "since_id": book.get_since_id(),
             "replies_enabled": _replies_on(),
+            "published": 0,
         }
+        stopped.update(token_meta)
+        return stopped
     queued = []
     filtered = []
     for tweet in _oldest_first(result.tweets):
@@ -198,14 +224,17 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
             queued.append({"post_id": item["post_id"], "author_id": item["author_id"]})
         else:
             filtered.append({"post_id": item["post_id"], "reason": item["reason"]})
-    return {
+    observed = {
         "status": "ok",
         "discovered": len(queued) + len(filtered),
         "queued": queued,
         "filtered": filtered[:30],
         "since_id": book.get_since_id(),
         "replies_enabled": _replies_on(),
+        "published": 0,
     }
+    observed.update(token_meta)
+    return observed
 
 
 def _classify_mention(book: MentionLedger, tweet: dict, user_id: str, floor: str) -> dict:
@@ -239,17 +268,19 @@ def _replies_on() -> bool:
     return replies_enabled()
 
 
-async def poll_loop(stop_event: asyncio.Event) -> None:
-    """Keep reading until stop, or until a read is refused.
+async def poll_loop(stop_event: asyncio.Event, record=None) -> None:
+    """Read on the poll interval.
 
-    Replies stay off during the observation pass. That pass does not draft,
-    so a later publishing pass can still claim the queued mention.
+    Replies off: observe only. That pass does not draft or post, so the
+    eligible mention stays claimable. Replies on: one publishing pass at a time.
     """
-    if not _replies_on():
-        logger.info("X mention poll is observing; replies are disabled")
-        return
+    from datetime import datetime, timezone
+
+    cycle = 0
     while not stop_event.is_set():
-        if not _POLL_LOCK.acquire(blocking=False):
+        cycle += 1
+        publishing = _replies_on()
+        if publishing and not _POLL_LOCK.acquire(blocking=False):
             logger.info("X mention poll skipped because a pass is already running")
             try:
                 await asyncio.wait_for(stop_event.wait(), poll_interval_seconds())
@@ -258,12 +289,15 @@ async def poll_loop(stop_event: asyncio.Event) -> None:
             continue
         try:
             try:
-                result = await asyncio.to_thread(poll_once)
+                if publishing:
+                    result = await asyncio.to_thread(poll_once)
+                else:
+                    result = await asyncio.to_thread(observe_once)
             except Exception:
                 logger.exception("X mention poll failed")
                 return
             status = str(result.get("status") or "")
-            if status == "unauthorized":
+            if publishing and status == "unauthorized":
                 from x_integration.account_probe import refresh_access_token
 
                 _http, refreshed = await asyncio.to_thread(refresh_access_token)
@@ -274,13 +308,21 @@ async def poll_loop(stop_event: asyncio.Event) -> None:
                         logger.exception("X mention poll failed after refresh")
                         return
                     status = str(result.get("status") or "")
+            result["cycle"] = cycle
+            result["polled_at"] = datetime.now(timezone.utc).isoformat()
+            result["state"] = "publishing" if publishing else "observed"
             logger.info(
-                "X mention poll status=%s drafted=%s",
+                "X mention poll cycle=%s status=%s discovered=%s drafted=%s",
+                cycle,
                 status,
+                result.get("discovered", 0),
                 result.get("drafted", 0),
             )
+            if record is not None:
+                record(dict(result))
         finally:
-            _POLL_LOCK.release()
+            if publishing:
+                _POLL_LOCK.release()
         if status in _STOP_STATUSES:
             return
         try:
@@ -319,6 +361,12 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             book.set_since_id(post_id)
             continue
         outcome = process_mention(mention, ledger=book)
+        if outcome.get("status") in {"not_sent", "publish_limit"}:
+            return {
+                "status": str(outcome.get("status")),
+                "drafted": drafted,
+                "since_id": book.get_since_id(),
+            }
         if outcome.get("status") == "dry_run":
             drafted += 1
         if outcome.get("reason") == "spend_limit":

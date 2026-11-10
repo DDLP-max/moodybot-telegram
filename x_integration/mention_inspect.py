@@ -21,7 +21,11 @@ def inspect_recent_mentions(user_id: str, *, token: Optional[str] = None) -> dic
         "production_since_id": book.get_since_id(),
         "production_model_calls_today": book.model_calls_today(),
     }
-    access = (token if token is not None else os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+    access = (
+        token
+        if token is not None
+        else book.cached_access_token() or (os.environ.get("X_USER_ACCESS_TOKEN") or "")
+    ).strip()
     if not access or not str(user_id).strip():
         return {
             "state": "not_configured",

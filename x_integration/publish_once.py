@@ -304,11 +304,20 @@ def send_reply(token: str, post_id: str, text: str) -> dict:
             "detail": "",
             "x_reply_id": reply_id,
         }
+    problem = problem_record(response, token)
+    if response.status_code >= 500:
+        return {
+            "outcome": "ambiguous",
+            "http_status": response.status_code,
+            "detail": str(problem.get("title") or "server_error"),
+            "problem": problem,
+            "x_reply_id": "",
+        }
     return {
         "outcome": "failed",
         "http_status": response.status_code,
         "detail": _problem_title(response, token),
-        "problem": problem_record(response, token),
+        "problem": problem,
         "x_reply_id": "",
     }
 
