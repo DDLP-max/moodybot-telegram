@@ -45,6 +45,10 @@ services:
         sync: false
       - key: X_REPLIES_ENABLED
         value: "false"
+      # Arms exactly one automatic POST. The ledger keeps that attempt
+      # after a restart. Leave false until the one-reply check is confirmed.
+      - key: X_ONE_REPLY_GATE
+        value: "false"
       - key: X_DAILY_MODEL_CALL_LIMIT
         value: "25"
       - key: X_STATE_DIR

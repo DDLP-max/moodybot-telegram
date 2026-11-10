@@ -361,7 +361,7 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             book.set_since_id(post_id)
             continue
         outcome = process_mention(mention, ledger=book)
-        if outcome.get("status") in {"not_sent", "publish_limit"}:
+        if outcome.get("status") in {"not_sent", "publish_limit", "activation_stopped"}:
             return {
                 "status": str(outcome.get("status")),
                 "drafted": drafted,

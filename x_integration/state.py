@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS publications (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS activation_gate (
+    name TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,
+    remaining INTEGER NOT NULL,
+    stop_reason TEXT NOT NULL DEFAULT '',
+    post_id TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -380,6 +388,156 @@ class MentionLedger:
             finally:
                 conn.close()
 
+    def activation_status(self) -> dict:
+        """One-reply gate. A missing row is armed only while the env flag is on."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT mode, remaining, stop_reason
+                    FROM activation_gate WHERE name = 'one_reply'
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+        if row is None:
+            if one_reply_gate_enabled():
+                return {"mode": "armed", "remaining": 1, "stop_reason": ""}
+            return {"mode": "off", "remaining": 1, "stop_reason": ""}
+        return {
+            "mode": str(row[0] or "stopped"),
+            "remaining": int(row[1]),
+            "stop_reason": str(row[2] or ""),
+        }
+
+    def activation_blocks_publish(self) -> bool:
+        status = self.activation_status()
+        return status["mode"] == "stopped" or int(status["remaining"]) <= 0
+
+    def claim_activation_attempt(self, post_id: str) -> str:
+        """Take the single automatic POST slot. The loser gets 'exhausted'."""
+        if not one_reply_gate_enabled():
+            return "inactive"
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT mode, remaining FROM activation_gate WHERE name = 'one_reply'
+                    """
+                ).fetchone()
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO activation_gate (
+                            name, mode, remaining, stop_reason, post_id, updated_at
+                        ) VALUES ('one_reply', 'stopped', 0, 'claimed', ?, ?)
+                        """,
+                        (post_id, now),
+                    )
+                    conn.execute("COMMIT")
+                    return "claimed"
+                if str(row[0]) == "stopped" or int(row[1]) != 1:
+                    conn.execute("COMMIT")
+                    return "exhausted"
+                updated = conn.execute(
+                    """
+                    UPDATE activation_gate
+                    SET mode = 'stopped', remaining = 0, stop_reason = 'claimed',
+                        post_id = ?, updated_at = ?
+                    WHERE name = 'one_reply' AND remaining = 1
+                    """,
+                    (post_id, now),
+                )
+                conn.execute("COMMIT")
+                return "claimed" if updated.rowcount == 1 else "exhausted"
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def stop_activation(self, reason: str, post_id: str = "") -> None:
+        """Stop the gate before a write. The first reason is kept."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT stop_reason FROM activation_gate WHERE name = 'one_reply'
+                    """
+                ).fetchone()
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO activation_gate (
+                            name, mode, remaining, stop_reason, post_id, updated_at
+                        ) VALUES ('one_reply', 'stopped', 0, ?, ?, ?)
+                        """,
+                        (reason, post_id, now),
+                    )
+                elif not str(row[0] or ""):
+                    conn.execute(
+                        """
+                        UPDATE activation_gate
+                        SET mode = 'stopped', remaining = 0, stop_reason = ?,
+                            post_id = CASE WHEN ? != '' THEN ? ELSE post_id END,
+                            updated_at = ?
+                        WHERE name = 'one_reply'
+                        """,
+                        (reason, post_id, post_id, now),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def finish_activation(self, reason: str) -> None:
+        """Record the write outcome. Remaining stays at zero."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    UPDATE activation_gate
+                    SET mode = 'stopped', stop_reason = ?, updated_at = ?
+                    WHERE name = 'one_reply' AND remaining = 0 AND stop_reason = 'claimed'
+                    """,
+                    (reason, now),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def release_pending_event(self, event_id: str) -> None:
+        """Drop an event that never reached a write, so the mention stays queued."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "DELETE FROM events WHERE event_id = ? AND status = 'pending'",
+                    (event_id,),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
     def release_automatic_reservation(self, post_id: str) -> None:
         """Drop a slot only when no write was attempted."""
         with self._lock:
@@ -650,6 +808,10 @@ def daily_model_limit() -> int:
 
 def replies_enabled() -> bool:
     return (os.environ.get("X_REPLIES_ENABLED") or "").strip().lower() == "true"
+
+
+def one_reply_gate_enabled() -> bool:
+    return (os.environ.get("X_ONE_REPLY_GATE") or "").strip().lower() == "true"
 
 
 def bot_user_id() -> str:

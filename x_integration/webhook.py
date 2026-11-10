@@ -25,6 +25,7 @@ from x_integration.state import (
     bot_user_id,
     daily_model_limit,
     ledger_from_env,
+    one_reply_gate_enabled,
     replies_enabled,
 )
 
@@ -92,6 +93,11 @@ async def handle_x_event(request: web.Request) -> web.Response:
 
 def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None) -> dict:
     book = ledger or get_ledger()
+    if replies_enabled() and book.activation_blocks_publish():
+        return {
+            "status": "activation_stopped",
+            "reason": book.activation_status()["stop_reason"],
+        }
     if replies_enabled() and book.automatic_reply_allowance()["remaining"] <= 0:
         existing = book.publication(mention.post_id)
         if existing and str(existing.get("status") or "") in {"posted", "ambiguous", "failed", "pending"}:
@@ -116,7 +122,18 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
         return {"status": "skipped", "reason": "spend_limit"}
     from x_integration.reply import draft_mention_reply
 
-    reply = draft_mention_reply(mention.text, mention.conversation_id)
+    try:
+        reply = draft_mention_reply(mention.text, mention.conversation_id)
+    except Exception:
+        if one_reply_gate_enabled():
+            book.stop_activation("generation_failed", mention.post_id)
+            book.release_pending_event(mention.event_id)
+            return {"status": "not_sent", "reason": "generation_failed"}
+        raise
+    if one_reply_gate_enabled() and not str(reply or "").strip():
+        book.stop_activation("generation_failed", mention.post_id)
+        book.release_pending_event(mention.event_id)
+        return {"status": "not_sent", "reason": "generation_failed"}
     if replies_enabled():
         return _publish_automatic(book, mention, reply)
     book.finish(
@@ -128,11 +145,24 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
     return {"status": "dry_run", "posted": False}
 
 
+def _activation_reason(kind: str, http_status: int) -> str:
+    if kind == "posted":
+        return "posted"
+    if kind == "ambiguous":
+        return "ambiguous"
+    if http_status == 403:
+        return "rejected"
+    if kind == "failed":
+        return "rejected"
+    return "ambiguous"
+
+
 def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dict:
     """Post once. A write that X may have accepted is never sent again."""
     from x_integration.account_probe import validated_user_token
     from x_integration.publish_once import send_reply
 
+    armed = one_reply_gate_enabled()
     slot = book.reserve_automatic_publication(mention.post_id, reply)
     if slot == "cap":
         return {"status": "publish_limit"}
@@ -149,15 +179,37 @@ def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dic
     check = validated_user_token(book)
     if not check.get("ok"):
         book.release_automatic_reservation(mention.post_id)
+        if armed:
+            book.stop_activation("authentication_failed", mention.post_id)
+            book.release_pending_event(mention.event_id)
         return {
             "status": "not_sent",
             "reason": "token_invalid",
             "http_status": int(check.get("http_status") or 0),
         }
+    if armed:
+        from x_integration.post_length import fits_post
+
+        if not fits_post(reply):
+            book.release_automatic_reservation(mention.post_id)
+            book.stop_activation("reply_too_long", mention.post_id)
+            book.release_pending_event(mention.event_id)
+            return {"status": "not_sent", "reason": "reply_too_long"}
+        if book.claim_activation_attempt(mention.post_id) != "claimed":
+            book.release_automatic_reservation(mention.post_id)
+            book.release_pending_event(mention.event_id)
+            return {
+                "status": "activation_stopped",
+                "reason": book.activation_status()["stop_reason"],
+            }
     outcome = send_reply(str(check.get("token") or ""), mention.post_id, reply)
     kind = str(outcome.get("outcome") or "ambiguous")
-    if kind == "failed" and int(outcome.get("http_status") or 0) == 0 and outcome.get("detail") == "reply_too_long":
+    http_status = int(outcome.get("http_status") or 0)
+    if kind == "failed" and http_status == 0 and outcome.get("detail") == "reply_too_long":
         book.release_automatic_reservation(mention.post_id)
+        if armed:
+            book.finish_activation("reply_too_long")
+            book.release_pending_event(mention.event_id)
         return {"status": "not_sent", "reason": "reply_too_long"}
     if kind not in {"posted", "failed", "ambiguous"}:
         kind = "ambiguous"
@@ -177,6 +229,8 @@ def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dic
         skip_reason="" if kind == "posted" else kind,
         post_id=mention.post_id,
     )
+    if armed:
+        book.finish_activation(_activation_reason(kind, http_status))
     return {
         "status": kind,
         "http_status": int(outcome.get("http_status") or 0),

@@ -225,6 +225,20 @@ def guard_handler(fn: Callable) -> Callable:
     return wrapped
 
 
+def _activation_gate() -> dict:
+    try:
+        from x_integration.state import ledger_from_env
+
+        status = ledger_from_env().activation_status()
+        return {
+            "mode": status.get("mode") or "off",
+            "remaining": status.get("remaining"),
+            "stop_reason": status.get("stop_reason") or "",
+        }
+    except Exception:
+        return {"mode": "off", "remaining": None, "stop_reason": ""}
+
+
 def _reply_allowance() -> dict:
     try:
         from x_integration.state import ledger_from_env
@@ -530,6 +544,7 @@ class BotRuntime:
             "x_live_test": self.x_live_test,
             "x_poll": self.x_poll,
             "x_reply_allowance": _reply_allowance(),
+            "x_activation": _activation_gate(),
         }
         return web.json_response(body)
 
