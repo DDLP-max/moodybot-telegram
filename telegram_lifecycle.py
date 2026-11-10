@@ -307,6 +307,7 @@ class BotRuntime:
         self.x_dry_run = {"state": "pending"}
         self.x_publish = {"state": "pending"}
         self.x_live_test = {"state": "pending"}
+        self.x_poll = {"state": "pending"}
 
         self._http_runner: Optional[web.AppRunner] = None
         self._http_site: Optional[web.TCPSite] = None
@@ -488,6 +489,7 @@ class BotRuntime:
             "x_dry_run": _health_dry_run(self.x_dry_run),
             "x_publish": self.x_publish,
             "x_live_test": self.x_live_test,
+            "x_poll": self.x_poll,
         }
         return web.json_response(body)
 
@@ -697,6 +699,31 @@ class BotRuntime:
             live.get("posted"),
             live.get("http_status") or 0,
             live.get("x_reply_id") or "-",
+        )
+        if _x_poll_enabled():
+            from x_integration.state import replies_enabled
+
+            if replies_enabled():
+                self.x_poll = {"state": "publishing", "replies_enabled": True}
+            else:
+                try:
+                    from x_integration.poll import observe_once
+
+                    self.x_poll = await asyncio.to_thread(observe_once)
+                    self.x_poll["state"] = "observed"
+                except Exception:
+                    self.log.exception("X mention observation failed")
+                    self.x_poll = {"state": "error", "replies_enabled": False}
+        else:
+            self.x_poll = {"state": "disabled", "replies_enabled": False}
+        survey = self.x_poll
+        self._info(
+            "X mention survey state=%s status=%s discovered=%s queued=%s since_id=%s",
+            survey.get("state"),
+            survey.get("status") or "-",
+            survey.get("discovered", 0),
+            len(survey.get("queued") or []),
+            survey.get("since_id") or "-",
         )
 
     async def run(self, app: Any) -> None:

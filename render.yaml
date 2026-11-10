@@ -38,8 +38,9 @@ services:
         sync: false
       - key: X_OAUTH1_CONSUMER_SECRET
         sync: false
+      # Public id of @MoodyBotAI. Polling reads this account's mentions.
       - key: X_BOT_USER_ID
-        sync: false
+        value: "1912252811469025282"
       - key: X_USER_ACCESS_TOKEN
         sync: false
       - key: X_REPLIES_ENABLED
@@ -48,9 +49,9 @@ services:
         value: "25"
       - key: X_STATE_DIR
         value: /var/data/x
-      # Personal projects cannot subscribe to post.mention.create.
-      # Polling stays off until a user token for @AskMoodyBot is confirmed.
+      # One observation pass runs while replies stay off. The loop does not
+      # publish until X_REPLIES_ENABLED is turned on after that pass.
       - key: X_POLL_ENABLED
-        value: "false"
+        value: "true"
       - key: X_POLL_INTERVAL_SECONDS
         value: "300"

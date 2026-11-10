@@ -217,6 +217,7 @@ def test_authorization_failure_stops_and_does_not_poll_again():
                     return {"status": "insufficient_credits", "drafted": 0}
 
                 poll_mod.poll_once = once
+                os.environ["X_REPLIES_ENABLED"] = "true"
                 try:
                     await poll_loop(asyncio.Event())
                 finally:
@@ -264,6 +265,7 @@ def test_rate_limit_stops_before_the_next_page():
                     return {"status": "rate_limited", "drafted": 0}
 
                 poll_mod.poll_once = once
+                os.environ["X_REPLIES_ENABLED"] = "true"
                 try:
                     await poll_loop(asyncio.Event())
                 finally:
@@ -348,6 +350,107 @@ def test_reply_publish_shape_is_not_sent_while_disabled():
     assert captured["timeout"] == 20
 
 
+def test_observation_queues_the_new_mention_and_does_not_draft():
+    from x_integration.poll import ACTIVATION_POST_ID, observe_once
+
+    _use_env()
+    try:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mentions.sqlite"
+            book = _book(path)
+            older = str(int(ACTIVATION_POST_ID) - 10)
+            newer = str(int(ACTIVATION_POST_ID) + 5)
+
+            def fetch(user_id, token, since_id, pagination):
+                assert since_id == ""
+                return FetchResult(
+                    status="ok",
+                    tweets=[
+                        _tweet(older, text="old @MoodyBotAI question about the week"),
+                        _tweet(
+                            str(int(ACTIVATION_POST_ID) + 1),
+                            author="bot-1",
+                            text="@MoodyBotAI this is mine",
+                        ),
+                        _tweet(
+                            ACTIVATION_POST_ID,
+                            author="2082957781293035520",
+                            text="Hey @MoodyBotAI what is one piece of advice",
+                        ),
+                        _tweet(
+                            newer,
+                            author="999",
+                            text="@MoodyBotAI",
+                        ),
+                        _tweet(
+                            str(int(ACTIVATION_POST_ID) + 9),
+                            author="888",
+                            text="no handle here at all",
+                        ),
+                    ],
+                )
+
+            result = observe_once(ledger=book, fetch=fetch)
+            assert result["status"] == "ok"
+            assert result["discovered"] == 5
+            assert result["queued"] == [
+                {"post_id": ACTIVATION_POST_ID, "author_id": "2082957781293035520"}
+            ]
+            reasons = {item["post_id"]: item["reason"] for item in result["filtered"]}
+            assert reasons[older] == "historical"
+            assert reasons[str(int(ACTIVATION_POST_ID) + 1)] == "own_post"
+            assert reasons[newer] == "spam"
+            assert reasons[str(int(ACTIVATION_POST_ID) + 9)] == "not_mentioned"
+            assert book.get_since_id() == str(int(ACTIVATION_POST_ID) - 1)
+            assert book.get(f"poll:{ACTIVATION_POST_ID}") is None
+            book.set_since_id(str(int(ACTIVATION_POST_ID) + 50))
+            again = observe_once(ledger=book, fetch=fetch)
+            assert again["since_id"] == str(int(ACTIVATION_POST_ID) + 50)
+    finally:
+        _clear_env()
+
+
+def test_observation_reports_overlap_without_a_second_pass():
+    from x_integration.poll import _POLL_LOCK, observe_once
+
+    _use_env()
+    held = _POLL_LOCK.acquire(blocking=False)
+    try:
+        result = observe_once()
+        assert result["status"] == "overlap"
+        assert result["queued"] == []
+    finally:
+        if held:
+            _POLL_LOCK.release()
+        _clear_env()
+
+
+def test_disabled_replies_do_not_start_the_publishing_loop():
+    calls, original_draft, original_post = _patch_draft()
+    _use_env()
+    try:
+        async def _loop():
+            import x_integration.poll as poll_mod
+
+            original = poll_mod.poll_once
+
+            def once():
+                calls.append("loop")
+                return {"status": "ok", "drafted": 0}
+
+            poll_mod.poll_once = once
+            try:
+                await poll_loop(asyncio.Event())
+            finally:
+                poll_mod.poll_once = original
+
+        asyncio.run(_loop())
+        assert calls == []
+    finally:
+        _restore_draft(original_draft, original_post)
+        _clear_env()
+
+
 if __name__ == "__main__":
     test_pagination_is_oldest_first_and_cursor_survives_restart()
     test_duplicate_post_id_and_own_post_do_not_draft_twice()
@@ -356,4 +459,7 @@ if __name__ == "__main__":
     test_rate_limit_stops_before_the_next_page()
     test_spend_cap_stops_without_consuming_the_next_mention()
     test_reply_publish_shape_is_not_sent_while_disabled()
+    test_observation_queues_the_new_mention_and_does_not_draft()
+    test_observation_reports_overlap_without_a_second_pass()
+    test_disabled_replies_do_not_start_the_publishing_loop()
     print("mention poll ok")

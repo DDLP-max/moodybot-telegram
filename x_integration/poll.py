@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import threading
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -27,11 +29,16 @@ logger = logging.getLogger("moodybot")
 MENTIONS_URL = "https://api.x.com/2/users/{user_id}/mentions"
 MAX_PAGES = 5
 MAX_RESULTS = 100
+# Mentions older than this post are history. The cursor starts just before it.
+ACTIVATION_POST_ID = "2119952806698520807"
+_MENTION = re.compile(r"(?i)(?<!\w)@MoodyBotAI\b")
+_POLL_LOCK = threading.Lock()
 _STOP_STATUSES = frozenset({
     "unauthorized",
     "rate_limited",
     "insufficient_credits",
     "not_configured",
+    "error",
 })
 
 
@@ -101,7 +108,9 @@ def fetch_mentions(
 
     params = {
         "max_results": MAX_RESULTS,
-        "tweet.fields": "author_id,conversation_id",
+        "tweet.fields": "author_id,conversation_id,text",
+        "expansions": "author_id",
+        "user.fields": "username",
     }
     if since_id:
         params["since_id"] = since_id
@@ -122,35 +131,156 @@ def fetch_mentions(
     data = payload.get("data") if isinstance(payload, dict) else None
     meta = payload.get("meta") if isinstance(payload, dict) else {}
     tweets = [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+    includes = payload.get("includes") if isinstance(payload, dict) else {}
+    users = {}
+    for user in (includes or {}).get("users") or []:
+        if isinstance(user, dict):
+            users[str(user.get("id") or "")] = str(user.get("username") or "")
+    for tweet in tweets:
+        tweet["author_username"] = users.get(str(tweet.get("author_id") or ""), "")
     next_token = str((meta or {}).get("next_token") or "")
     return FetchResult(status="ok", tweets=tweets, next_token=next_token, http_status=200)
 
 
-async def poll_loop(stop_event: asyncio.Event) -> None:
-    """Keep reading until stop, or until a read is refused."""
-    while not stop_event.is_set():
-        try:
-            result = await asyncio.to_thread(poll_once)
-        except Exception:
-            logger.exception("X mention poll failed")
-            return
-        status = str(result.get("status") or "")
-        if status == "unauthorized":
-            from x_integration.account_probe import refresh_access_token
+def observe_once(
+    *,
+    ledger: Optional[MentionLedger] = None,
+    fetch: Optional[Fetch] = None,
+) -> dict:
+    """Read mentions once. Does not draft, post, or move the cursor backward.
 
-            _http, refreshed = await asyncio.to_thread(refresh_access_token)
-            if refreshed:
-                try:
-                    result = await asyncio.to_thread(poll_once)
-                except Exception:
-                    logger.exception("X mention poll failed after refresh")
-                    return
-                status = str(result.get("status") or "")
-        logger.info(
-            "X mention poll status=%s drafted=%s",
-            status,
-            result.get("drafted", 0),
-        )
+    The cursor is advanced only up to the activation post, so older mentions
+    stay behind it and are not published later.
+    """
+    if not _POLL_LOCK.acquire(blocking=False):
+        return {"status": "overlap", "discovered": 0, "queued": [], "filtered": []}
+    try:
+        return _observe_once(ledger=ledger, fetch=fetch)
+    finally:
+        _POLL_LOCK.release()
+
+
+def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) -> dict:
+    from x_integration.dry_run import CONFIRMED_USER_ID
+
+    book = ledger or ledger_from_env()
+    user_id = bot_user_id() or CONFIRMED_USER_ID
+    token = book.cached_access_token() or (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+    floor = str(int(ACTIVATION_POST_ID) - 1)
+    current = book.get_since_id()
+    if not current or int(current) < int(floor):
+        book.set_since_id(floor)
+    if not token:
+        return {
+            "status": "not_configured",
+            "discovered": 0,
+            "queued": [],
+            "filtered": [],
+            "since_id": book.get_since_id(),
+            "replies_enabled": _replies_on(),
+        }
+    result = (fetch or fetch_mentions)(user_id, token, "", "")
+    if result.status != "ok":
+        return {
+            "status": result.status,
+            "http_status": result.http_status,
+            "discovered": 0,
+            "queued": [],
+            "filtered": [],
+            "since_id": book.get_since_id(),
+            "replies_enabled": _replies_on(),
+        }
+    queued = []
+    filtered = []
+    for tweet in _oldest_first(result.tweets):
+        item = _classify_mention(book, tweet, user_id, floor)
+        if item["queued"]:
+            queued.append({"post_id": item["post_id"], "author_id": item["author_id"]})
+        else:
+            filtered.append({"post_id": item["post_id"], "reason": item["reason"]})
+    return {
+        "status": "ok",
+        "discovered": len(queued) + len(filtered),
+        "queued": queued,
+        "filtered": filtered[:30],
+        "since_id": book.get_since_id(),
+        "replies_enabled": _replies_on(),
+    }
+
+
+def _classify_mention(book: MentionLedger, tweet: dict, user_id: str, floor: str) -> dict:
+    post_id = str(tweet.get("id") or "").strip()
+    author_id = str(tweet.get("author_id") or "").strip()
+    username = str(tweet.get("author_username") or "")
+    text = tweet.get("text") if isinstance(tweet.get("text"), str) else ""
+    reason = ""
+    if not post_id.isdigit():
+        reason = "invalid_id"
+    elif int(post_id) <= int(floor):
+        reason = "historical"
+    elif author_id == user_id:
+        reason = "own_post"
+    elif username.lower().endswith("bot") and author_id != user_id:
+        reason = "other_bot"
+    elif book.already_replied(post_id):
+        reason = "already_replied"
+    elif not _MENTION.search(text):
+        reason = "not_mentioned"
+    elif not _MENTION.sub(" ", text).split():
+        reason = "spam"
+    if reason:
+        return {"post_id": post_id, "author_id": author_id, "queued": False, "reason": reason}
+    return {"post_id": post_id, "author_id": author_id, "queued": True, "reason": ""}
+
+
+def _replies_on() -> bool:
+    from x_integration.state import replies_enabled
+
+    return replies_enabled()
+
+
+async def poll_loop(stop_event: asyncio.Event) -> None:
+    """Keep reading until stop, or until a read is refused.
+
+    Replies stay off during the observation pass. That pass does not draft,
+    so a later publishing pass can still claim the queued mention.
+    """
+    if not _replies_on():
+        logger.info("X mention poll is observing; replies are disabled")
+        return
+    while not stop_event.is_set():
+        if not _POLL_LOCK.acquire(blocking=False):
+            logger.info("X mention poll skipped because a pass is already running")
+            try:
+                await asyncio.wait_for(stop_event.wait(), poll_interval_seconds())
+            except asyncio.TimeoutError:
+                continue
+            continue
+        try:
+            try:
+                result = await asyncio.to_thread(poll_once)
+            except Exception:
+                logger.exception("X mention poll failed")
+                return
+            status = str(result.get("status") or "")
+            if status == "unauthorized":
+                from x_integration.account_probe import refresh_access_token
+
+                _http, refreshed = await asyncio.to_thread(refresh_access_token)
+                if refreshed:
+                    try:
+                        result = await asyncio.to_thread(poll_once)
+                    except Exception:
+                        logger.exception("X mention poll failed after refresh")
+                        return
+                    status = str(result.get("status") or "")
+            logger.info(
+                "X mention poll status=%s drafted=%s",
+                status,
+                result.get("drafted", 0),
+            )
+        finally:
+            _POLL_LOCK.release()
         if status in _STOP_STATUSES:
             return
         try:
