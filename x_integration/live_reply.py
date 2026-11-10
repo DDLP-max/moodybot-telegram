@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Callable, Optional
 
-from x_integration.dry_run import CONFIRMED_USER_ID, CONFIRMED_USERNAME, _fetch_post
+from x_integration.dry_run import CONFIRMED_USER_ID, CONFIRMED_USERNAME
 from x_integration.events import Mention
 from x_integration.post_length import trim_to_post, weighted_length
 from x_integration.state import MentionLedger, state_dir
@@ -50,11 +50,11 @@ def run_live_reply(
             return previous
     if _flags_on():
         return _write_marker(marker, {"state": "refused", "reason": "automatic_flags_enabled", "posted": False, "post_id": POST_ID})
-    token = (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+    token, token_source = _access_token(directory)
     if not token:
         return _write_marker(marker, {"state": "error", "reason": "token_missing", "posted": False, "post_id": POST_ID, "rerun": True})
     try:
-        post = (fetch_post or _fetch_post)(POST_ID, token)
+        post = (fetch_post or _fetch_parent)(POST_ID, token)
     except Exception:
         return _write_marker(marker, {"state": "error", "reason": "post_read_failed", "posted": False, "post_id": POST_ID, "rerun": True})
     if post.get("status") != 200:
@@ -67,6 +67,7 @@ def run_live_reply(
                 "post_id": POST_ID,
                 "post_status": post.get("status") or 0,
                 "problem": post.get("problem") or {},
+                "token_source": token_source,
                 "rerun": True,
             },
         )
@@ -111,13 +112,75 @@ def _generate(post: dict, draft_path: Path) -> str:
 def _publish(directory: Path, reply: str) -> dict:
     from x_integration.publish_once import execute_publish
 
+    token, _source = _access_token(directory)
     return execute_publish(
         post_id=POST_ID,
         draft_text=reply,
         confirm=f"POST:{POST_ID}",
         production=MentionLedger(directory / "mentions.sqlite"),
         draft_db=directory / DRAFT_NAME,
+        token=token,
     )
+
+
+def _fetch_parent(post_id: str, token: str) -> dict:
+    """Read the parent with the same token the account probe uses."""
+    import httpx
+
+    response = httpx.get(
+        f"https://api.x.com/2/tweets/{post_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"tweet.fields": "author_id,created_at,conversation_id,text"},
+        timeout=20,
+    )
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if response.status_code != 200 or not isinstance(payload, dict):
+        problem = _problem(payload, token)
+        challenge = ""
+        headers = getattr(response, "headers", None)
+        if headers is not None and hasattr(headers, "get"):
+            challenge = str(headers.get("www-authenticate") or "")
+        if challenge:
+            problem["www_authenticate"] = " ".join(challenge.split())[:300]
+        return {"status": response.status_code, "problem": problem}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    text = data.get("text") if isinstance(data.get("text"), str) else ""
+    return {
+        "status": 200,
+        "author_id": str(data.get("author_id") or ""),
+        "author_username": "",
+        "created_at": str(data.get("created_at") or ""),
+        "conversation_id": str(data.get("conversation_id") or post_id),
+        "text": " ".join(text.split()),
+    }
+
+
+def _access_token(directory: Path) -> tuple[str, str]:
+    cached = MentionLedger(directory / "mentions.sqlite").cached_access_token()
+    if cached:
+        return cached, "cache"
+    return (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip(), "env"
+
+
+def _problem(payload, token: str) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    kept = {}
+    for key in ("title", "detail", "type", "reason", "errors", "required_enrollment", "status"):
+        if payload.get(key) in (None, ""):
+            continue
+        value = payload.get(key)
+        if isinstance(value, str):
+            text = " ".join(value.split())[:500]
+            if token and token in text:
+                text = text.replace(token, "[redacted]")
+            kept[key] = text
+        else:
+            kept[key] = value
+    return kept
 
 
 def _store_draft(draft_path: Path, post: dict, reply: str) -> None:
@@ -241,7 +304,7 @@ def _with_retrieve_once(result: dict, directory: Path, retrieve: Optional[Callab
         recorded["checks"] = previous.get("checks") or _checks(recorded)
         return recorded
     if recorded.get("posted") and recorded.get("x_reply_id"):
-        token = (os.environ.get("X_USER_ACCESS_TOKEN") or "").strip()
+        token, _source = _access_token(directory)
         recorded["retrieved"] = _safe_retrieve(retrieve, token, recorded["x_reply_id"])
         recorded["checks"] = _checks(recorded)
         _write_marker(marker, recorded)

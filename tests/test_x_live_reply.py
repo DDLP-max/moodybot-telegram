@@ -198,8 +198,31 @@ def test_flags_and_the_wrong_parent_do_not_post():
     assert wrong["posted"] is False
 
 
+def test_parent_read_uses_the_cached_access_token():
+    _ready()
+    seen = {}
+
+    def fetch(_post_id, token):
+        seen["token"] = token
+        return {**_post(), "author_id": "1", "author_username": "someone"}
+
+    try:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            from x_integration.state import MentionLedger
+
+            MentionLedger(root / "mentions.sqlite").store_oauth_tokens("cached-token", "refresh-token")
+            result = run_live_reply(root, fetch_post=fetch, publish=_boom)
+    finally:
+        _clear()
+    assert seen["token"] == "cached-token"
+    assert result["posted"] is False
+    assert result["reason"] == "unexpected_parent"
+
+
 if __name__ == "__main__":
     test_rejection_is_recorded_once_and_not_retried()
     test_a_posted_reply_is_retrieved_and_not_sent_again()
     test_flags_and_the_wrong_parent_do_not_post()
+    test_parent_read_uses_the_cached_access_token()
     print("live reply ok")
