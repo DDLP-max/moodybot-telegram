@@ -13,7 +13,7 @@ from x_integration.state import MentionLedger
 from x_integration.webhook import post_reply
 
 
-def _tweet(post_id: str, author: str = "user-1", text: str = "hello @AskMoodyBot") -> dict:
+def _tweet(post_id: str, author: str = "user-1", text: str = "Hey @MoodyBotAI what should I do") -> dict:
     return {
         "id": post_id,
         "author_id": author,
@@ -41,6 +41,8 @@ def _clear_env():
         "X_REPLIES_ENABLED",
         "X_DAILY_MODEL_CALL_LIMIT",
         "X_POLL_ENABLED",
+        "X_OPERATING_MODE",
+        "X_ONE_REPLY_GATE",
     ):
         os.environ.pop(key, None)
 
@@ -218,6 +220,7 @@ def test_authorization_failure_stops_and_does_not_poll_again():
 
                 poll_mod.poll_once = once
                 os.environ["X_REPLIES_ENABLED"] = "true"
+                os.environ["X_OPERATING_MODE"] = "limited_beta"
                 try:
                     await poll_loop(asyncio.Event())
                 finally:
@@ -266,6 +269,7 @@ def test_rate_limit_stops_before_the_next_page():
 
                 poll_mod.poll_once = once
                 os.environ["X_REPLIES_ENABLED"] = "true"
+                os.environ["X_OPERATING_MODE"] = "limited_beta"
                 try:
                     await poll_loop(asyncio.Event())
                 finally:
@@ -405,7 +409,7 @@ def test_observation_queues_the_new_mention_and_does_not_draft():
             reasons = {item["post_id"]: item["reason"] for item in result["filtered"]}
             assert reasons[older] == "historical"
             assert reasons[str(int(ACTIVATION_POST_ID) + 1)] == "own_post"
-            assert reasons[newer] == "spam"
+            assert reasons[newer] == "empty"
             assert reasons[str(int(ACTIVATION_POST_ID) + 9)] == "not_mentioned"
             assert book.get_since_id() == str(int(ACTIVATION_POST_ID) - 1)
             assert book.get(f"poll:{ACTIVATION_POST_ID}") is None

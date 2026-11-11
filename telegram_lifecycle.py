@@ -239,6 +239,24 @@ def _activation_gate() -> dict:
         return {"mode": "off", "remaining": None, "stop_reason": ""}
 
 
+def _operating_mode() -> str:
+    try:
+        from x_integration.state import operating_mode
+
+        return operating_mode()
+    except Exception:
+        return "disabled"
+
+
+def _publish_halt() -> dict:
+    try:
+        from x_integration.state import ledger_from_env
+
+        return ledger_from_env().publish_halt_status()
+    except Exception:
+        return {"auth_failures": None, "unexpected_failures": None, "halt_reason": ""}
+
+
 def _reply_allowance() -> dict:
     try:
         from x_integration.state import ledger_from_env
@@ -545,6 +563,8 @@ class BotRuntime:
             "x_poll": self.x_poll,
             "x_reply_allowance": _reply_allowance(),
             "x_activation": _activation_gate(),
+            "x_operating_mode": _operating_mode(),
+            "x_publish_halt": _publish_halt(),
         }
         return web.json_response(body)
 

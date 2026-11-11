@@ -23,6 +23,7 @@ def _clear():
     for key in (
         "X_REPLIES_ENABLED",
         "X_ONE_REPLY_GATE",
+        "X_OPERATING_MODE",
         "X_BOT_USER_ID",
         "X_DAILY_MODEL_CALL_LIMIT",
         "X_USER_ACCESS_TOKEN",
@@ -34,6 +35,7 @@ def _clear():
 def _arm():
     os.environ["X_REPLIES_ENABLED"] = "true"
     os.environ["X_ONE_REPLY_GATE"] = "true"
+    os.environ["X_OPERATING_MODE"] = "one_reply_test"
     os.environ["X_BOT_USER_ID"] = "1912252811469025282"
     os.environ["X_DAILY_MODEL_CALL_LIMIT"] = "25"
 
@@ -43,13 +45,13 @@ def _tweets():
         {
             "id": FIRST,
             "author_id": "2082957781293035520",
-            "text": "Hey @MoodyBotAI one piece of advice",
+            "text": "Hey @MoodyBotAI what is one piece of advice",
             "conversation_id": FIRST,
         },
         {
             "id": SECOND,
             "author_id": "2081454353987297280",
-            "text": "Hey @MoodyBotAI another question",
+            "text": "Hey @MoodyBotAI what about this other question",
             "conversation_id": SECOND,
         },
     ]

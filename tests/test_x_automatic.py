@@ -22,6 +22,8 @@ def _clear():
         "X_OAUTH2_REFRESH_TOKEN",
         "X_BOT_USER_ID",
         "X_DAILY_MODEL_CALL_LIMIT",
+        "X_OPERATING_MODE",
+        "X_ONE_REPLY_GATE",
     ):
         os.environ.pop(key, None)
 
@@ -134,6 +136,7 @@ def test_sixth_automatic_reply_is_refused_before_a_write():
 
 def test_ambiguous_automatic_write_is_not_retried_or_rewritten():
     os.environ["X_REPLIES_ENABLED"] = "true"
+    os.environ["X_OPERATING_MODE"] = "limited_beta"
     os.environ["X_DAILY_MODEL_CALL_LIMIT"] = "5"
     posted = []
     try:
@@ -173,6 +176,7 @@ def test_ambiguous_automatic_write_is_not_retried_or_rewritten():
 
 def test_invalid_token_does_not_publish_and_releases_the_slot():
     os.environ["X_REPLIES_ENABLED"] = "true"
+    os.environ["X_OPERATING_MODE"] = "limited_beta"
     os.environ["X_USER_ACCESS_TOKEN"] = "stale-env-token"
     os.environ["X_DAILY_MODEL_CALL_LIMIT"] = "5"
     posted = []

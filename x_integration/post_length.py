@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 POST_LIMIT = 280
+AUTONOMOUS_LIMIT = 200
 _SCALE = 100
 _DEFAULT_WEIGHT = 200
 _URL_LENGTH = 23
@@ -39,21 +40,25 @@ def fits_post(text: str) -> bool:
     return weighted_length(text) <= POST_LIMIT
 
 
-def fit_x_post(text: str, shorten=None) -> str:
+def fits_autonomous(text: str) -> bool:
+    return weighted_length(text) <= AUTONOMOUS_LIMIT
+
+
+def fit_x_post(text: str, shorten=None, limit: int = POST_LIMIT) -> str:
     """Return a post that fits. `shorten` may rewrite once; trimming is the backstop."""
     cleaned = (text or "").strip()
-    if fits_post(cleaned):
+    if weighted_length(cleaned) <= limit:
         return cleaned
     if shorten is not None:
         try:
             rewritten = str(shorten(cleaned) or "").strip()
         except Exception:
             rewritten = ""
-        if rewritten and fits_post(rewritten):
+        if rewritten and weighted_length(rewritten) <= limit:
             return rewritten
         if rewritten and weighted_length(rewritten) < weighted_length(cleaned):
             cleaned = rewritten
-    return trim_to_post(cleaned)
+    return trim_to_post(cleaned, limit)
 
 
 def trim_to_post(text: str, limit: int = POST_LIMIT) -> str:

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -31,7 +30,6 @@ MAX_PAGES = 5
 MAX_RESULTS = 100
 # Mentions older than this post are history. The cursor starts just before it.
 ACTIVATION_POST_ID = "2119952806698520807"
-_MENTION = re.compile(r"(?i)(?<!\w)@MoodyBotAI\b")
 _POLL_LOCK = threading.Lock()
 _STOP_STATUSES = frozenset({
     "unauthorized",
@@ -128,8 +126,8 @@ def fetch_mentions(
 
     params = {
         "max_results": MAX_RESULTS,
-        "tweet.fields": "author_id,conversation_id,text",
-        "expansions": "author_id",
+        "tweet.fields": "author_id,conversation_id,text,referenced_tweets",
+        "expansions": "author_id,referenced_tweets.id",
         "user.fields": "username",
     }
     if since_id:
@@ -156,8 +154,21 @@ def fetch_mentions(
     for user in (includes or {}).get("users") or []:
         if isinstance(user, dict):
             users[str(user.get("id") or "")] = str(user.get("username") or "")
+    parents = {}
+    for parent in (includes or {}).get("tweets") or []:
+        if isinstance(parent, dict):
+            parents[str(parent.get("id") or "")] = parent
     for tweet in tweets:
         tweet["author_username"] = users.get(str(tweet.get("author_id") or ""), "")
+        parent_id = ""
+        for ref in tweet.get("referenced_tweets") or []:
+            if isinstance(ref, dict) and ref.get("type") == "replied_to":
+                parent_id = str(ref.get("id") or "")
+                break
+        parent = parents.get(parent_id) or {}
+        tweet["parent_id"] = parent_id
+        tweet["parent_author_id"] = str(parent.get("author_id") or "")
+        tweet["parent_text"] = parent.get("text") if isinstance(parent.get("text"), str) else ""
     next_token = str((meta or {}).get("next_token") or "")
     return FetchResult(status="ok", tweets=tweets, next_token=next_token, http_status=200)
 
@@ -220,15 +231,17 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
     filtered = []
     for tweet in _oldest_first(result.tweets):
         item = _classify_mention(book, tweet, user_id, floor)
+        if item["classification"] != "historical":
+            book.record_classification(item["post_id"], item["classification"], item["reason"])
         if item["queued"]:
             queued.append({"post_id": item["post_id"], "author_id": item["author_id"]})
         else:
-            filtered.append({"post_id": item["post_id"], "reason": item["reason"]})
+            filtered.append({"post_id": item["post_id"], "reason": item["classification"]})
     observed = {
         "status": "ok",
         "discovered": len(queued) + len(filtered),
         "queued": queued,
-        "filtered": filtered[:30],
+        "filtered": sorted(filtered, key=lambda item: item["reason"] == "historical")[:30],
         "since_id": book.get_since_id(),
         "replies_enabled": _replies_on(),
         "published": 0,
@@ -238,34 +251,42 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
 
 
 def _classify_mention(book: MentionLedger, tweet: dict, user_id: str, floor: str) -> dict:
+    from x_integration.eligibility import classify_mention
+
     post_id = str(tweet.get("id") or "").strip()
-    author_id = str(tweet.get("author_id") or "").strip()
-    username = str(tweet.get("author_username") or "")
-    text = tweet.get("text") if isinstance(tweet.get("text"), str) else ""
-    reason = ""
-    if not post_id.isdigit():
-        reason = "invalid_id"
-    elif int(post_id) <= int(floor):
-        reason = "historical"
-    elif author_id == user_id:
-        reason = "own_post"
-    elif username.lower().endswith("bot") and author_id != user_id:
-        reason = "other_bot"
-    elif book.already_replied(post_id):
-        reason = "already_replied"
-    elif not _MENTION.search(text):
-        reason = "not_mentioned"
-    elif not _MENTION.sub(" ", text).split():
-        reason = "spam"
-    if reason:
-        return {"post_id": post_id, "author_id": author_id, "queued": False, "reason": reason}
-    return {"post_id": post_id, "author_id": author_id, "queued": True, "reason": ""}
+    decision = classify_mention(
+        tweet,
+        user_id=user_id,
+        floor=floor,
+        already_replied=book.already_replied(post_id) if post_id else False,
+    )
+    decision["queued"] = bool(decision["eligible"])
+    return decision
 
 
 def _replies_on() -> bool:
     from x_integration.state import replies_enabled
 
     return replies_enabled()
+
+
+def _publishing_mode() -> bool:
+    """Publish only in an explicit mode. A consumed one-reply gate stays shut."""
+    from x_integration.state import (
+        ledger_from_env,
+        one_reply_gate_enabled,
+        operating_mode,
+        replies_enabled,
+    )
+
+    if not replies_enabled():
+        return False
+    mode = operating_mode()
+    if mode == "limited_beta":
+        return True
+    if mode == "one_reply_test" and one_reply_gate_enabled():
+        return not ledger_from_env().activation_blocks_publish()
+    return False
 
 
 async def poll_loop(stop_event: asyncio.Event, record=None) -> None:
@@ -279,7 +300,7 @@ async def poll_loop(stop_event: asyncio.Event, record=None) -> None:
     cycle = 0
     while not stop_event.is_set():
         cycle += 1
-        publishing = _replies_on()
+        publishing = _publishing_mode()
         if publishing and not _POLL_LOCK.acquire(blocking=False):
             logger.info("X mention poll skipped because a pass is already running")
             try:
@@ -350,6 +371,15 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             text=text.strip() or ".",
             conversation_id=str(tweet.get("conversation_id") or post_id),
         )
+        decision = _classify_mention(book, tweet, own or "", book.get_since_id() or "0")
+        if decision["classification"] != "historical":
+            book.record_classification(
+                post_id, decision["classification"], decision["reason"]
+            )
+        if not decision["eligible"]:
+            if decision["classification"] != "historical":
+                book.set_since_id(post_id)
+            continue
         needs_model = author_id != own and not book.already_replied(post_id) and bool(text.strip())
         if needs_model and book.model_calls_today() >= limit:
             return {
@@ -361,7 +391,13 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             book.set_since_id(post_id)
             continue
         outcome = process_mention(mention, ledger=book)
-        if outcome.get("status") in {"not_sent", "publish_limit", "activation_stopped"}:
+        if outcome.get("status") in {
+            "not_sent",
+            "publish_limit",
+            "activation_stopped",
+            "publish_halted",
+            "not_publishing",
+        }:
             return {
                 "status": str(outcome.get("status")),
                 "drafted": drafted,

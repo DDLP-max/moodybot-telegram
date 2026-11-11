@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Optional
 
 from aiohttp import web
@@ -26,6 +27,7 @@ from x_integration.state import (
     daily_model_limit,
     ledger_from_env,
     one_reply_gate_enabled,
+    operating_mode,
     replies_enabled,
 )
 
@@ -93,11 +95,20 @@ async def handle_x_event(request: web.Request) -> web.Response:
 
 def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None) -> dict:
     book = ledger or get_ledger()
-    if replies_enabled() and book.activation_blocks_publish():
-        return {
-            "status": "activation_stopped",
-            "reason": book.activation_status()["stop_reason"],
-        }
+    mode = operating_mode()
+    if replies_enabled():
+        if mode == "one_reply_test" and book.activation_blocks_publish():
+            return {
+                "status": "activation_stopped",
+                "reason": book.activation_status()["stop_reason"],
+            }
+        if mode == "limited_beta" and book.publish_halted():
+            return {
+                "status": "publish_halted",
+                "reason": book.publish_halt_status()["halt_reason"],
+            }
+        if mode not in {"one_reply_test", "limited_beta"}:
+            return {"status": "not_publishing", "reason": mode}
     if replies_enabled() and book.automatic_reply_allowance()["remaining"] <= 0:
         existing = book.publication(mention.post_id)
         if existing and str(existing.get("status") or "") in {"posted", "ambiguous", "failed", "pending"}:
@@ -125,12 +136,21 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
     try:
         reply = draft_mention_reply(mention.text, mention.conversation_id)
     except Exception:
-        if one_reply_gate_enabled():
+        if operating_mode() == "one_reply_test" and one_reply_gate_enabled():
             book.stop_activation("generation_failed", mention.post_id)
             book.release_pending_event(mention.event_id)
             return {"status": "not_sent", "reason": "generation_failed"}
+        if operating_mode() == "limited_beta":
+            book.record_classification(mention.post_id, "generation_failed", "generation_failed")
+            book.finish(
+                mention.event_id,
+                status="skipped",
+                skip_reason="generation_failed",
+                post_id=mention.post_id,
+            )
+            return {"status": "not_sent", "reason": "generation_failed"}
         raise
-    if one_reply_gate_enabled() and not str(reply or "").strip():
+    if operating_mode() == "one_reply_test" and one_reply_gate_enabled() and not str(reply or "").strip():
         book.stop_activation("generation_failed", mention.post_id)
         book.release_pending_event(mention.event_id)
         return {"status": "not_sent", "reason": "generation_failed"}
@@ -157,12 +177,51 @@ def _activation_reason(kind: str, http_status: int) -> str:
     return "ambiguous"
 
 
+_PARENT_MENTION = re.compile(r"(?i)(?<!\w)@MoodyBotAI\b")
+
+
+def _confirm_parent(token: str, post_id: str) -> dict:
+    """The parent must still exist and still authorize a reply."""
+    import httpx
+
+    try:
+        response = httpx.get(
+            f"https://api.x.com/2/tweets/{post_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"tweet.fields": "author_id,text,referenced_tweets"},
+            timeout=20,
+        )
+    except httpx.TimeoutException:
+        return {"ok": False, "reason": "unexpected", "http_status": 0}
+    except httpx.TransportError:
+        return {"ok": False, "reason": "unexpected", "http_status": 0}
+    status = response.status_code
+    if status == 404:
+        return {"ok": False, "reason": "unavailable", "http_status": status}
+    if status in {401, 403}:
+        return {"ok": False, "reason": "authorization", "http_status": status}
+    if status != 200:
+        return {"ok": False, "reason": "unexpected", "http_status": status}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {"ok": False, "reason": "unexpected", "http_status": status}
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    text = data.get("text") if isinstance(data, dict) and isinstance(data.get("text"), str) else ""
+    if _PARENT_MENTION.search(text):
+        return {"ok": True, "reason": "authorized", "http_status": status}
+    return {"ok": False, "reason": "not_authorized", "http_status": status}
+
+
 def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dict:
     """Post once. A write that X may have accepted is never sent again."""
     from x_integration.account_probe import validated_user_token
+    from x_integration.post_length import fits_autonomous
     from x_integration.publish_once import send_reply
 
-    armed = one_reply_gate_enabled()
+    mode = operating_mode()
+    armed = mode == "one_reply_test" and one_reply_gate_enabled()
+    beta = mode == "limited_beta"
     slot = book.reserve_automatic_publication(mention.post_id, reply)
     if slot == "cap":
         return {"status": "publish_limit"}
@@ -182,19 +241,47 @@ def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dic
         if armed:
             book.stop_activation("authentication_failed", mention.post_id)
             book.release_pending_event(mention.event_id)
+        elif beta:
+            book.note_publish_failure("authorization")
         return {
             "status": "not_sent",
             "reason": "token_invalid",
             "http_status": int(check.get("http_status") or 0),
         }
-    if armed:
-        from x_integration.post_length import fits_post
-
-        if not fits_post(reply):
-            book.release_automatic_reservation(mention.post_id)
+    if not fits_autonomous(reply):
+        book.release_automatic_reservation(mention.post_id)
+        if armed:
             book.stop_activation("reply_too_long", mention.post_id)
             book.release_pending_event(mention.event_id)
-            return {"status": "not_sent", "reason": "reply_too_long"}
+        else:
+            book.finish(
+                mention.event_id,
+                status="skipped",
+                reply_text=reply,
+                skip_reason="reply_too_long",
+                post_id=mention.post_id,
+            )
+        return {"status": "not_sent", "reason": "reply_too_long"}
+    if beta:
+        parent = _confirm_parent(str(check.get("token") or ""), mention.post_id)
+        if not parent.get("ok"):
+            book.release_automatic_reservation(mention.post_id)
+            reason = str(parent.get("reason") or "unavailable")
+            book.record_classification(mention.post_id, reason, reason)
+            if reason in {"authorization", "unexpected"}:
+                book.note_publish_failure(reason)
+            book.finish(
+                mention.event_id,
+                status="skipped",
+                skip_reason=reason,
+                post_id=mention.post_id,
+            )
+            return {
+                "status": "not_sent",
+                "reason": reason,
+                "http_status": int(parent.get("http_status") or 0),
+            }
+    if armed:
         if book.claim_activation_attempt(mention.post_id) != "claimed":
             book.release_automatic_reservation(mention.post_id)
             book.release_pending_event(mention.event_id)
@@ -231,6 +318,13 @@ def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dic
     )
     if armed:
         book.finish_activation(_activation_reason(kind, http_status))
+    if beta:
+        if kind == "posted":
+            book.note_publish_success()
+        elif kind == "ambiguous" or http_status >= 500:
+            book.note_publish_failure("unexpected")
+        elif http_status in {401, 403}:
+            book.note_publish_failure("authorization")
     return {
         "status": kind,
         "http_status": int(outcome.get("http_status") or 0),

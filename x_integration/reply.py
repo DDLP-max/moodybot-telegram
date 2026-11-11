@@ -113,9 +113,9 @@ def draft_mention_reply(
         prompt_hash=runtime.prompt_hash,
     )
     text_out = moodybot.safe_emoji(finalized.text)
-    from x_integration.post_length import POST_LIMIT, fit_x_post, weighted_length
+    from x_integration.post_length import AUTONOMOUS_LIMIT, fit_x_post, weighted_length
 
-    if weighted_length(text_out) > POST_LIMIT:
+    if weighted_length(text_out) > AUTONOMOUS_LIMIT:
         caller = complete or openrouter_complete
 
         def _shorten(current: str) -> str:
@@ -125,7 +125,7 @@ def draft_mention_reply(
                         "role": "system",
                         "content": (
                             "Shorten this reply so it fits one X post. "
-                            "The hard limit is 280 weighted characters: emoji count as two, "
+                            "The hard limit is 200 weighted characters: emoji count as two, "
                             "and a link counts as 23. Keep the same point and the closing "
                             "emoji when it still fits. Return only the reply."
                         ),
@@ -135,7 +135,7 @@ def draft_mention_reply(
             )
             return moodybot.safe_emoji(moodybot.clean_response(rewritten))
 
-        text_out = fit_x_post(text_out, _shorten)
+        text_out = fit_x_post(text_out, _shorten, AUTONOMOUS_LIMIT)
     try:
         live_log.append_exchange(key, user_input, text_out)
     except Exception:
@@ -148,7 +148,7 @@ def _with_post_limit(messages: List[dict]) -> List[dict]:
     note = {
         "role": "system",
         "content": (
-            "This reply will be posted on X. Hard limit: 280 weighted characters. "
+            "This reply will be posted on X. Hard limit: 200 weighted characters. "
             "Emoji count as two characters. A link counts as 23. "
             "One post, one paragraph. Stop before the limit."
         ),

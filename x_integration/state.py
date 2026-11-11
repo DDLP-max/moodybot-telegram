@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS activation_gate (
     post_id TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS mention_reviews (
+    post_id TEXT PRIMARY KEY,
+    classification TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS publish_safety (
+    name TEXT PRIMARY KEY,
+    auth_failures INTEGER NOT NULL DEFAULT 0,
+    unexpected_failures INTEGER NOT NULL DEFAULT 0,
+    halt_reason TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -521,6 +534,148 @@ class MentionLedger:
             finally:
                 conn.close()
 
+    def record_classification(self, post_id: str, classification: str, reason: str) -> None:
+        """Remember why a mention was or was not eligible. Does not touch publications."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO mention_reviews (
+                        post_id, classification, reason, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(post_id) DO UPDATE SET
+                        classification = excluded.classification,
+                        reason = excluded.reason,
+                        updated_at = excluded.updated_at
+                    """,
+                    (post_id, classification, reason, now),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def mention_review(self, post_id: str) -> Optional[dict]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT classification, reason FROM mention_reviews WHERE post_id = ?
+                    """,
+                    (post_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        if row is None:
+            return None
+        return {"classification": row[0], "reason": row[1]}
+
+    def publish_halted(self) -> bool:
+        return bool(self.publish_halt_status()["halt_reason"])
+
+    def publish_halt_status(self) -> dict:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT auth_failures, unexpected_failures, halt_reason
+                    FROM publish_safety WHERE name = 'automatic'
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+        if row is None:
+            return {"auth_failures": 0, "unexpected_failures": 0, "halt_reason": ""}
+        return {
+            "auth_failures": int(row[0]),
+            "unexpected_failures": int(row[1]),
+            "halt_reason": str(row[2] or ""),
+        }
+
+    def note_publish_failure(self, kind: str) -> str:
+        """Count a repeated authorization or unexpected failure. Two stops publishing."""
+        column = "auth_failures" if kind == "authorization" else "unexpected_failures"
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT auth_failures, unexpected_failures, halt_reason
+                    FROM publish_safety WHERE name = 'automatic'
+                    """
+                ).fetchone()
+                if row is None:
+                    auth, unexpected, halted = 0, 0, ""
+                    conn.execute(
+                        """
+                        INSERT INTO publish_safety (
+                            name, auth_failures, unexpected_failures, halt_reason, updated_at
+                        ) VALUES ('automatic', 0, 0, '', ?)
+                        """,
+                        (now,),
+                    )
+                else:
+                    auth, unexpected, halted = int(row[0]), int(row[1]), str(row[2] or "")
+                if halted:
+                    conn.execute("COMMIT")
+                    return halted
+                if column == "auth_failures":
+                    auth += 1
+                    halted = "authorization" if auth >= 2 else ""
+                else:
+                    unexpected += 1
+                    halted = "unexpected" if unexpected >= 2 else ""
+                conn.execute(
+                    """
+                    UPDATE publish_safety
+                    SET auth_failures = ?, unexpected_failures = ?, halt_reason = ?, updated_at = ?
+                    WHERE name = 'automatic'
+                    """,
+                    (auth, unexpected, halted, now),
+                )
+                conn.execute("COMMIT")
+                return halted
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def note_publish_success(self) -> None:
+        """A posted reply clears the consecutive counters. A halt stays halted."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT halt_reason FROM publish_safety WHERE name = 'automatic'"
+                ).fetchone()
+                if row is not None and not str(row[0] or ""):
+                    conn.execute(
+                        """
+                        UPDATE publish_safety
+                        SET auth_failures = 0, unexpected_failures = 0, updated_at = ?
+                        WHERE name = 'automatic'
+                        """,
+                        (now,),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
     def release_pending_event(self, event_id: str) -> None:
         """Drop an event that never reached a write, so the mention stays queued."""
         with self._lock:
@@ -812,6 +967,14 @@ def replies_enabled() -> bool:
 
 def one_reply_gate_enabled() -> bool:
     return (os.environ.get("X_ONE_REPLY_GATE") or "").strip().lower() == "true"
+
+
+def operating_mode() -> str:
+    """disabled, one_reply_test, or limited_beta. Anything else is disabled."""
+    raw = (os.environ.get("X_OPERATING_MODE") or "").strip().lower()
+    if raw in {"disabled", "one_reply_test", "limited_beta"}:
+        return raw
+    return "disabled"
 
 
 def bot_user_id() -> str:
