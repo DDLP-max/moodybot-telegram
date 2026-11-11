@@ -257,6 +257,15 @@ def _publish_halt() -> dict:
         return {"auth_failures": None, "unexpected_failures": None, "halt_reason": ""}
 
 
+def _engagement_summary() -> dict:
+    try:
+        from x_integration.state import ledger_from_env
+
+        return ledger_from_env().engagement_summary()
+    except Exception:
+        return {"shadow": True, "mentions": None}
+
+
 def _reply_allowance() -> dict:
     try:
         from x_integration.state import ledger_from_env
@@ -565,6 +574,7 @@ class BotRuntime:
             "x_activation": _activation_gate(),
             "x_operating_mode": _operating_mode(),
             "x_publish_halt": _publish_halt(),
+            "x_engagement": _engagement_summary(),
         }
         return web.json_response(body)
 

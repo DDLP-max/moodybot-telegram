@@ -101,6 +101,41 @@ CREATE TABLE IF NOT EXISTS publish_safety (
     halt_reason TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS engagement_decisions (
+    post_id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL DEFAULT '',
+    author_id TEXT NOT NULL DEFAULT '',
+    classification TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    respond INTEGER NOT NULL DEFAULT 0,
+    action TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT '',
+    objective TEXT NOT NULL DEFAULT '',
+    safety_flags TEXT NOT NULL DEFAULT '[]',
+    context_ids TEXT NOT NULL DEFAULT '[]',
+    model TEXT NOT NULL DEFAULT 'rules',
+    filter_classification TEXT NOT NULL DEFAULT '',
+    filter_reason TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversations (
+    conversation_id TEXT PRIMARY KEY,
+    participant_ids TEXT NOT NULL DEFAULT '[]',
+    post_ids TEXT NOT NULL DEFAULT '[]',
+    moodybot_reply_ids TEXT NOT NULL DEFAULT '[]',
+    last_classification TEXT NOT NULL DEFAULT '',
+    last_decision TEXT NOT NULL DEFAULT '',
+    last_outcome TEXT NOT NULL DEFAULT '',
+    last_interaction_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversation_slots (
+    post_id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -337,6 +372,7 @@ class MentionLedger:
                         """,
                         (post_id, f"publish:{post_id}"),
                     )
+                _sync_conversation_slot(conn, post_id, status, x_reply_id, now)
                 conn.execute("COMMIT")
             except Exception:
                 _rollback(conn)
@@ -363,13 +399,20 @@ class MentionLedger:
             "window_hours": 24,
         }
 
-    def reserve_automatic_publication(self, post_id: str, reply_text: str) -> str:
+    def reserve_automatic_publication(
+        self,
+        post_id: str,
+        reply_text: str,
+        conversation_id: str = "",
+    ) -> str:
         """Hold one automatic slot. Does not rewrite an existing row.
 
         A failed or ambiguous automatic row stays as it is. Only a new row
-        may be claimed, and only while the rolling cap has room.
+        may be claimed, and only while the rolling cap and the conversation
+        cap both have room. The two checks share this transaction.
         """
         now = _now()
+        conversation_id = str(conversation_id or "").strip()
         with self._lock:
             conn = self._connect()
             try:
@@ -384,6 +427,9 @@ class MentionLedger:
                 if not self._automatic_room(conn):
                     conn.execute("COMMIT")
                     return "cap"
+                if conversation_id and not _conversation_room(conn, conversation_id):
+                    conn.execute("COMMIT")
+                    return "conversation_cap"
                 conn.execute(
                     """
                     INSERT INTO publications (
@@ -393,6 +439,15 @@ class MentionLedger:
                     """,
                     (post_id, reply_text, now, now),
                 )
+                if conversation_id:
+                    conn.execute(
+                        """
+                        INSERT INTO conversation_slots (
+                            post_id, conversation_id, status, created_at
+                        ) VALUES (?, ?, 'pending', ?)
+                        """,
+                        (post_id, conversation_id, now),
+                    )
                 conn.execute("COMMIT")
                 return "claimed"
             except Exception:
@@ -576,6 +631,316 @@ class MentionLedger:
             return None
         return {"classification": row[0], "reason": row[1]}
 
+    def engagement_decision(self, post_id: str) -> Optional[dict]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT classification, reason, respond, action
+                    FROM engagement_decisions WHERE post_id = ?
+                    """,
+                    (post_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        if row is None:
+            return None
+        return {
+            "classification": row[0],
+            "reason": row[1],
+            "respond": bool(row[2]),
+            "action": row[3],
+        }
+
+    def record_engagement(
+        self,
+        decision: dict,
+        *,
+        filter_classification: str = "",
+        filter_reason: str = "",
+    ) -> None:
+        """Store one shadow decision. Does not touch publications or the cursor."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO engagement_decisions (
+                        post_id, conversation_id, author_id, classification,
+                        confidence, reason, respond, action, mode, objective,
+                        safety_flags, context_ids, model, filter_classification,
+                        filter_reason, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(post_id) DO UPDATE SET
+                        classification = excluded.classification,
+                        confidence = excluded.confidence,
+                        reason = excluded.reason,
+                        respond = excluded.respond,
+                        action = excluded.action,
+                        mode = excluded.mode,
+                        objective = excluded.objective,
+                        safety_flags = excluded.safety_flags,
+                        context_ids = excluded.context_ids,
+                        model = excluded.model,
+                        filter_classification = excluded.filter_classification,
+                        filter_reason = excluded.filter_reason,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        str(decision.get("post_id") or ""),
+                        str(decision.get("conversation_id") or ""),
+                        str(decision.get("author_id") or ""),
+                        str(decision.get("classification") or ""),
+                        float(decision.get("confidence") or 0),
+                        str(decision.get("reason") or ""),
+                        1 if decision.get("respond") else 0,
+                        str(decision.get("action") or ""),
+                        str(decision.get("mode") or ""),
+                        str(decision.get("objective") or ""),
+                        json.dumps(decision.get("safety_flags") or []),
+                        json.dumps(decision.get("context_ids") or []),
+                        str(decision.get("model") or "rules"),
+                        filter_classification,
+                        filter_reason,
+                        now,
+                    ),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def remember_conversation(
+        self,
+        *,
+        conversation_id: str,
+        author_id: str,
+        post_id: str,
+        classification: str,
+        action: str,
+        bot_id: str = "",
+    ) -> None:
+        """Ids and decisions only. Post text stays on X."""
+        if not conversation_id:
+            return
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT participant_ids, post_ids, moodybot_reply_ids
+                    FROM conversations WHERE conversation_id = ?
+                    """,
+                    (conversation_id,),
+                ).fetchone()
+                people = _id_list(row[0] if row else "[]")
+                posts = _id_list(row[1] if row else "[]")
+                replies = _id_list(row[2] if row else "[]")
+                if author_id and author_id not in people:
+                    people.append(author_id)
+                if bot_id and bot_id not in people:
+                    people.append(bot_id)
+                if post_id and post_id not in posts:
+                    posts.append(post_id)
+                people = people[-20:]
+                posts = posts[-30:]
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO conversations (
+                            conversation_id, participant_ids, post_ids,
+                            moodybot_reply_ids, last_classification, last_decision,
+                            last_outcome, last_interaction_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)
+                        """,
+                        (
+                            conversation_id,
+                            json.dumps(people),
+                            json.dumps(posts),
+                            json.dumps(replies),
+                            classification,
+                            action,
+                            now,
+                            now,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE conversations
+                        SET participant_ids = ?, post_ids = ?,
+                            last_classification = ?, last_decision = ?,
+                            last_interaction_at = ?, updated_at = ?
+                        WHERE conversation_id = ?
+                        """,
+                        (
+                            json.dumps(people),
+                            json.dumps(posts),
+                            classification,
+                            action,
+                            now,
+                            now,
+                            conversation_id,
+                        ),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def conversation_state(self, conversation_id: str) -> dict:
+        cutoff = (datetime.now(timezone.utc) - AUTOMATIC_REPLY_WINDOW).isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT last_interaction_at FROM conversations
+                    WHERE conversation_id = ?
+                    """,
+                    (conversation_id,),
+                ).fetchone()
+                used = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM conversation_slots
+                    WHERE conversation_id = ?
+                      AND status IN ('pending', 'posted', 'ambiguous')
+                      AND created_at >= ?
+                    """,
+                    (conversation_id, cutoff),
+                ).fetchone()[0]
+            finally:
+                conn.close()
+        return {
+            "last_interaction_at": str(row[0] or "") if row else "",
+            "bot_replies_24h": int(used),
+        }
+
+    def conversation_at_cap(self, conversation_id: str) -> bool:
+        if not str(conversation_id or "").strip():
+            return False
+        return self.conversation_state(conversation_id)["bot_replies_24h"] >= conversation_reply_limit()
+
+    def engagement_summary(self) -> dict:
+        """Counts only. No post text and no credentials."""
+        buckets = {
+            "DIRECT_REQUEST": "direct_requests",
+            "FOLLOW_UP": "follow_ups",
+            "CHALLENGE": "challenges",
+            "CONTRIBUTION": "contributions",
+            "AMBIENT": "ambient",
+            "SPAM": "spam",
+            "UNSAFE": "unsafe",
+        }
+        hidden_ambient = {"empty", "not_mentioned", "own_post", "historical", "invalid_id"}
+        summary = {
+            "shadow": True,
+            "mentions": 0,
+            "direct_requests": 0,
+            "follow_ups": 0,
+            "challenges": 0,
+            "contributions": 0,
+            "ambient": 0,
+            "spam": 0,
+            "unsafe": 0,
+            "would_reply": 0,
+            "observed": 0,
+            "skipped": 0,
+            "duplicates": 0,
+            "model_calls": 0,
+            "filter_disagreements": 0,
+            "last_publish_error": {"status": "", "http_status": 0},
+        }
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT classification, reason, respond, action, model,
+                           filter_classification
+                    FROM engagement_decisions
+                    """
+                ).fetchall()
+                error = conn.execute(
+                    """
+                    SELECT status, http_status FROM publications
+                    WHERE status IN ('failed', 'ambiguous')
+                    ORDER BY updated_at DESC LIMIT 1
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+        for classification, reason, respond, action, model, filt in rows:
+            if reason in {"historical", "invalid_id"}:
+                continue
+            summary["mentions"] += 1
+            key = buckets.get(str(classification))
+            if key and not (key == "ambient" and reason in hidden_ambient):
+                summary[key] += 1
+            if respond:
+                summary["would_reply"] += 1
+            if action == "observe":
+                summary["observed"] += 1
+            if action == "skip":
+                summary["skipped"] += 1
+            if reason == "duplicate_parent":
+                summary["duplicates"] += 1
+            if model not in {"", "rules"}:
+                summary["model_calls"] += 1
+            filter_reply = filt == "eligible"
+            if bool(respond) != filter_reply:
+                summary["filter_disagreements"] += 1
+        if error is not None:
+            summary["last_publish_error"] = {
+                "status": str(error[0] or ""),
+                "http_status": int(error[1] or 0),
+            }
+        return summary
+
+    def conversation_activity(self, limit: int = 20) -> list[dict]:
+        """Operator view. Not mounted on the public health route."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT d.post_id, d.conversation_id, d.classification, d.reason,
+                           d.action, d.objective, d.context_ids,
+                           p.status, p.x_reply_id, p.reply_text
+                    FROM engagement_decisions d
+                    LEFT JOIN publications p ON p.post_id = d.post_id
+                    ORDER BY d.updated_at DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+            finally:
+                conn.close()
+        activity = []
+        for row in rows:
+            activity.append({
+                "post_id": row[0],
+                "conversation_id": row[1],
+                "classification": row[2],
+                "reason": row[3],
+                "action": row[4],
+                "objective": row[5],
+                "context_ids": _id_list(row[6]),
+                "publication_status": row[7] or "",
+                "x_reply_id": row[8] or "",
+                "reply_text": row[9] or "",
+            })
+        return activity
+
     def publish_halted(self) -> bool:
         return bool(self.publish_halt_status()["halt_reason"])
 
@@ -703,6 +1068,13 @@ class MentionLedger:
                     """
                     DELETE FROM publications
                     WHERE post_id = ? AND origin = 'automatic' AND status = 'pending'
+                    """,
+                    (post_id,),
+                )
+                conn.execute(
+                    """
+                    DELETE FROM conversation_slots
+                    WHERE post_id = ? AND status = 'pending'
                     """,
                     (post_id,),
                 )
@@ -977,6 +1349,15 @@ def operating_mode() -> str:
     return "disabled"
 
 
+def conversation_reply_limit() -> int:
+    raw = (os.environ.get("X_CONVERSATION_REPLY_LIMIT") or "3").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 3
+    return value if 1 <= value <= 20 else 3
+
+
 def bot_user_id() -> str:
     return (os.environ.get("X_BOT_USER_ID") or "").strip()
 
@@ -1011,6 +1392,85 @@ def _load_problem(raw: str) -> dict:
     except json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _conversation_room(conn: sqlite3.Connection, conversation_id: str) -> bool:
+    cutoff = (datetime.now(timezone.utc) - AUTOMATIC_REPLY_WINDOW).isoformat()
+    used = conn.execute(
+        """
+        SELECT COUNT(*) FROM conversation_slots
+        WHERE conversation_id = ?
+          AND status IN ('pending', 'posted', 'ambiguous')
+          AND created_at >= ?
+        """,
+        (conversation_id, cutoff),
+    ).fetchone()[0]
+    return int(used) < conversation_reply_limit()
+
+
+def _sync_conversation_slot(
+    conn: sqlite3.Connection,
+    post_id: str,
+    status: str,
+    x_reply_id: str,
+    now: str,
+) -> None:
+    """Follow a pending publication. A failed write releases the conversation slot."""
+    if status in {"posted", "ambiguous"}:
+        conn.execute(
+            """
+            UPDATE conversation_slots
+            SET status = ?
+            WHERE post_id = ? AND status = 'pending'
+            """,
+            (status, post_id),
+        )
+        if status == "posted" and x_reply_id:
+            row = conn.execute(
+                """
+                SELECT conversation_id FROM conversation_slots WHERE post_id = ?
+                """,
+                (post_id,),
+            ).fetchone()
+            if row is not None:
+                current = conn.execute(
+                    """
+                    SELECT moodybot_reply_ids FROM conversations WHERE conversation_id = ?
+                    """,
+                    (row[0],),
+                ).fetchone()
+                if current is not None:
+                    replies = _id_list(current[0])
+                    replies.append(x_reply_id)
+                    conn.execute(
+                        """
+                        UPDATE conversations
+                        SET moodybot_reply_ids = ?, last_outcome = 'posted', updated_at = ?
+                        WHERE conversation_id = ?
+                        """,
+                        (json.dumps(replies[-20:]), now, row[0]),
+                    )
+        return
+    if status == "failed":
+        conn.execute(
+            "DELETE FROM conversation_slots WHERE post_id = ? AND status = 'pending'",
+            (post_id,),
+        )
+
+
+def _id_list(raw: str) -> list[str]:
+    try:
+        loaded = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(loaded, list):
+        return []
+    seen = []
+    for item in loaded:
+        value = str(item or "").strip()
+        if value and value not in seen:
+            seen.append(value)
+    return seen
 
 
 def _now() -> str:

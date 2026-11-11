@@ -114,6 +114,8 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
         if existing and str(existing.get("status") or "") in {"posted", "ambiguous", "failed", "pending"}:
             return {"status": "duplicate", "reason": str(existing.get("status") or "")}
         return {"status": "publish_limit"}
+    if replies_enabled() and book.conversation_at_cap(mention.conversation_id):
+        return {"status": "not_sent", "reason": "conversation_cap"}
     claim = book.claim(
         mention.event_id, mention.post_id, mention.author_id, mention.conversation_id
     )
@@ -128,6 +130,27 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
     if book.already_replied(mention.post_id):
         book.finish(mention.event_id, status="skipped", skip_reason="already_replied")
         return {"status": "skipped", "reason": "already_replied"}
+    from x_integration.engagement import UNSAFE, decide_engagement
+
+    safety = decide_engagement(
+        {
+            "id": mention.post_id,
+            "author_id": mention.author_id,
+            "text": mention.text,
+            "conversation_id": mention.conversation_id,
+        },
+        user_id=own or "",
+        floor="0",
+        already_replied=False,
+    )
+    if safety["classification"] == UNSAFE:
+        book.finish(
+            mention.event_id,
+            status="skipped",
+            skip_reason="safety_hold",
+            post_id=mention.post_id,
+        )
+        return {"status": "skipped", "reason": "safety_hold"}
     if not book.reserve_model_call(daily_model_limit()):
         book.finish(mention.event_id, status="skipped", skip_reason="spend_limit")
         return {"status": "skipped", "reason": "spend_limit"}
@@ -222,9 +245,14 @@ def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dic
     mode = operating_mode()
     armed = mode == "one_reply_test" and one_reply_gate_enabled()
     beta = mode == "limited_beta"
-    slot = book.reserve_automatic_publication(mention.post_id, reply)
+    slot = book.reserve_automatic_publication(
+        mention.post_id, reply, mention.conversation_id
+    )
     if slot == "cap":
         return {"status": "publish_limit"}
+    if slot == "conversation_cap":
+        book.release_pending_event(mention.event_id)
+        return {"status": "not_sent", "reason": "conversation_cap"}
     if slot != "claimed":
         if slot in {"posted", "ambiguous", "failed"}:
             book.finish(
