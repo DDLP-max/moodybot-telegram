@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 DIRECT_REQUEST = "DIRECT_REQUEST"
 FOLLOW_UP = "FOLLOW_UP"
 CHALLENGE = "CHALLENGE"
+DIRECT_CHALLENGE = "DIRECT_CHALLENGE"
 CONTRIBUTION = "CONTRIBUTION"
 AMBIENT = "AMBIENT"
 SPAM = "SPAM"
@@ -23,12 +24,13 @@ _CLASSES = frozenset({
     DIRECT_REQUEST,
     FOLLOW_UP,
     CHALLENGE,
+    DIRECT_CHALLENGE,
     CONTRIBUTION,
     AMBIENT,
     SPAM,
     UNSAFE,
 })
-_REPLY_CLASSES = frozenset({DIRECT_REQUEST, FOLLOW_UP, CHALLENGE})
+_REPLY_CLASSES = frozenset({DIRECT_REQUEST, FOLLOW_UP, CHALLENGE, DIRECT_CHALLENGE})
 _MENTION = re.compile(r"(?i)(?<!\w)@MoodyBotAI\b")
 _CRISIS = re.compile(
     r"(?i)\b(?:kill myself|killing myself|end my life|want to die|wanna die|"
@@ -70,6 +72,23 @@ _VOCATIVE = re.compile(
     r"(?i)(?:^|[\n.!?]\s*)(?:(?:hey|hi|ok|okay)\s+)?@MoodyBotAI\b[,:]?\s*(?P<clause>.*)$",
     re.S,
 )
+_INVITE = re.compile(
+    r"(?i)(?:"
+    r"\byour\s+(?:answer|turn)\b|"
+    r"\bsame\s+question\b|"
+    r"\bsecond\s+opinion\b|"
+    r"\bdo\s+you\s+agree\b|"
+    r"\bcan\s+you\s+verify\b|"
+    r"\bwhat(?:'s|\s+is)\s+your\s+answer\b|"
+    r"@MoodyBotAI(?:'s|’s)\s+take\b|"
+    r"\bhear\s+@MoodyBotAI(?:'s|’s)?\s+take\b|"
+    r"\bexplain\s+why\s+(?:he|she|they)(?:'s|\s+is|\s+are|'re)?\s+wrong\b"
+    r")"
+)
+_UNTRUSTED = re.compile(
+    r"(?i)\b(?:ignore (?:your|all|previous) (?:rules|instructions|safety)|"
+    r"enable publishing|reset the gate|post anyway|bypass)\b"
+)
 _DECISION_TTL = timedelta(hours=24)
 _GENERIC = re.compile(
     r"(?i)\b(?:stay patient|keep going|hang in|you(?:'ve| have) got|"
@@ -109,6 +128,7 @@ def decide_engagement(
     base = {
         "post_id": post_id,
         "author_id": author_id,
+        "author_username": username,
         "conversation_id": conversation_id,
         "context_ids": window["ids"],
         "safety_flags": [],
@@ -122,7 +142,7 @@ def decide_engagement(
         return _pack(base, AMBIENT, 1.0, "historical", False, "skip", "none", "none")
     if user_id and author_id == user_id:
         return _pack(base, AMBIENT, 1.0, "own_post", False, "skip", "none", "none")
-    if username.lower().endswith("bot") and author_id != user_id:
+    if username.lower().endswith("bot") and author_id != user_id and not _known_ai(author_id, username):
         return _pack(base, SPAM, 0.95, "bot_loop", False, "skip", "C", "none", ["bot_loop"])
     body = _body(text)
     words = re.findall(r"[A-Za-z0-9']+", body)
@@ -176,6 +196,7 @@ def decide_engagement(
         decision["action"] = "observe"
         decision["objective"] = "none"
         decision["reason"] = "empty_acknowledgment"
+    _apply_ai_loop(decision, tweet, username, conversation)
     return decision
 
 
@@ -185,7 +206,10 @@ def _intent(base: dict, text: str, body: str, words: list[str], window: dict) ->
     missing = window["missing_parent"]
     if _quoted_only(text):
         return _pack(base, AMBIENT, 0.95, "quotation", False, "observe", "C", "none")
-    if _THIRD_PARTY.search(text):
+    unquoted = _outside_quotes(text)
+    if _direct_invite(unquoted):
+        return _invitation(base, text, unquoted, window)
+    if _THIRD_PARTY.search(unquoted):
         return _pack(base, AMBIENT, 0.96, "not_requested", False, "observe", "C", "none")
     clause = _vocative_clause(text)
     if clause is not None and not re.search(r"[A-Za-z0-9]", clause):
@@ -280,7 +304,7 @@ def _ask_model(ruled: dict, text: str, window: dict, complete) -> dict:
                 "Classify one X mention of @MoodyBotAI. Return one JSON object "
                 "with classification, confidence, reason, objective. "
                 "classification is DIRECT_REQUEST, FOLLOW_UP, CHALLENGE, "
-                "CONTRIBUTION, AMBIENT, SPAM, or UNSAFE. "
+                "DIRECT_CHALLENGE, CONTRIBUTION, AMBIENT, SPAM, or UNSAFE. "
                 "A mention is not enough. Words such as why, how, what, or ask "
                 "inside a statement, a quotation, or a suggestion that someone "
                 "else consult MoodyBot are not requests. Use AMBIENT when the "
@@ -385,30 +409,40 @@ def _window(tweet: dict, context: dict | None, user_id: str) -> dict:
     posts = []
     seen = set()
 
-    def add(post_id: str, author_id: str, text: str) -> None:
+    def add(post_id: str, author_id: str, text: str, username: str = "") -> None:
         if not post_id or post_id in seen:
             return
         seen.add(post_id)
         posts.append({
             "id": post_id,
             "author_id": author_id,
+            "author_username": username,
             "author_is_bot": bool(user_id) and author_id == user_id,
             "text": text if isinstance(text, str) else "",
         })
 
     for item in supplied:
+        note_text, _complete, _source = read_post_text(item)
         add(
             str(item.get("id") or ""),
             str(item.get("author_id") or ""),
-            item.get("text") if isinstance(item.get("text"), str) else "",
+            note_text,
+            str(item.get("author_username") or ""),
         )
     parent_id = str(tweet.get("parent_id") or "")
     parent_text = tweet.get("parent_text") if isinstance(tweet.get("parent_text"), str) else ""
-    add(parent_id, str(tweet.get("parent_author_id") or ""), parent_text)
+    add(
+        parent_id,
+        str(tweet.get("parent_author_id") or ""),
+        parent_text,
+        str(tweet.get("parent_author_username") or ""),
+    )
+    current_name = str(tweet.get("author_username") or "")
     add(
         str(tweet.get("id") or ""),
         str(tweet.get("author_id") or ""),
         tweet.get("text") if isinstance(tweet.get("text"), str) else "",
+        current_name,
     )
     posts = posts[-_CONTEXT_LIMIT:]
     parent_author = str(tweet.get("parent_author_id") or "")
@@ -513,7 +547,7 @@ def allows_publish(decision: dict) -> bool:
     if not decision.get("respond"):
         return False
     flags = decision.get("safety_flags") or []
-    if "crisis" in flags or "truncated" in flags or "missing_context" in flags:
+    if "crisis" in flags or "truncated" in flags or "missing_context" in flags or "insufficient_context" in flags:
         return False
     try:
         confidence = float(decision.get("confidence"))
@@ -580,9 +614,16 @@ def filter_view(decision: dict) -> tuple[str, str]:
             DIRECT_REQUEST: "direct_request",
             FOLLOW_UP: "follow_up",
             CHALLENGE: "challenge",
+            DIRECT_CHALLENGE: "direct_challenge",
             CONTRIBUTION: "contribution",
         }.get(kind, "direct_request")
         return "eligible", mapped
+    if reason == "ai_loop":
+        return "not_requested", "ai_loop"
+    if reason == "repeated_question":
+        return "not_requested", "repeated_question"
+    if reason == "insufficient_context":
+        return "uncertain", "insufficient_context"
     if kind == CONTRIBUTION or reason in {"generic_encouragement", "contribution", "meaningful"}:
         return "not_requested", "contribution"
     if reason == "not_requested":
@@ -610,6 +651,86 @@ def _vocative_clause(text: str) -> str | None:
     if match is None:
         return None
     return match.group("clause").strip()
+
+
+def _direct_invite(text: str) -> bool:
+    return _MENTION.search(text) is not None and _INVITE.search(text) is not None
+
+
+def _known_ai(author_id: str, username: str) -> bool:
+    from x_integration.battle import author_is_ai
+
+    return author_is_ai(author_id, username)
+
+
+def _invitation(base: dict, text: str, unquoted: str, window: dict) -> dict:
+    from x_integration.battle import recover_question
+
+    prior = window["posts"][:-1]
+    recovered = recover_question(prior, unquoted)
+    flags = ["untrusted_quote"] if _UNTRUSTED.search(text) and not _UNTRUSTED.search(unquoted) else []
+    if _UNTRUSTED.search(unquoted):
+        return _pack(
+            base, AMBIENT, 0.97, "untrusted_instruction", False, "skip", "C", "none",
+            ["untrusted_quote"],
+        )
+    if _EVIDENCE.search(unquoted) or re.search(r"(?i)\bverify\b", unquoted):
+        flags.append("evidence")
+    if re.search(r"(?i)\bwrong\b", unquoted):
+        flags.append("do_not_assume")
+    objective = "separate_verified_from_uncertain" if "evidence" in flags else "answer_independently"
+    decision = _pack(
+        base, DIRECT_CHALLENGE, 0.93, "direct_challenge", True, "reply", "A", objective, flags
+    )
+    decision["original_question_id"] = recovered.get("question_id") or ""
+    decision["question_text"] = recovered.get("question_text") or ""
+    decision["grok_answer"] = recovered.get("grok_answer") or ""
+    decision["question_sufficient"] = bool(recovered.get("sufficient"))
+    if not recovered.get("sufficient"):
+        decision["respond"] = False
+        decision["action"] = "observe"
+        decision["reason"] = "insufficient_context"
+        decision["objective"] = "clarify"
+        decision["question_sufficient"] = False
+        flags = list(decision["safety_flags"])
+        flags.append("insufficient_context")
+        decision["safety_flags"] = flags
+    return decision
+
+
+def _apply_ai_loop(decision: dict, tweet: dict, username: str, conversation: dict | None) -> None:
+    """One AI invitation reply per conversation until a later human request."""
+    author_id = str(tweet.get("author_id") or "")
+    automated = bool(tweet.get("automated"))
+    from x_integration.battle import author_is_ai
+
+    ai = author_is_ai(author_id, username, automated)
+    if decision.get("classification") == DIRECT_CHALLENGE and not ai:
+        decision["loop_outcome"] = "human"
+    answered = []
+    if isinstance(conversation, dict):
+        answered = [str(item) for item in conversation.get("answered_question_ids") or []]
+    question_id = str(decision.get("original_question_id") or "")
+    if question_id and question_id in answered and decision.get("respond"):
+        decision["respond"] = False
+        decision["action"] = "skip"
+        decision["reason"] = "repeated_question"
+        decision["objective"] = "none"
+        decision["loop_outcome"] = "blocked"
+        return
+    if not ai or not decision.get("respond"):
+        return
+    used = bool(conversation and conversation.get("ai_invitation_used"))
+    human_after = bool(conversation and conversation.get("human_after_ai"))
+    if used and not human_after:
+        decision["respond"] = False
+        decision["action"] = "skip"
+        decision["reason"] = "ai_loop"
+        decision["objective"] = "none"
+        decision["loop_outcome"] = "blocked"
+        return
+    if decision.get("classification") == DIRECT_CHALLENGE:
+        decision["loop_outcome"] = "allowed"
 
 
 def _clause_request(clause: str) -> bool:

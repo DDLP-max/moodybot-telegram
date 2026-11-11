@@ -113,7 +113,11 @@ def poll_once(
             return {"status": "truncated", "drafted": 0, "since_id": since_id}
     if not collected:
         return {"status": "empty", "drafted": 0, "since_id": since_id}
-    return _apply(book, _oldest_first(collected))
+    lookups = [2]
+    prepared = []
+    for tweet in _oldest_first(collected):
+        prepared.append(_enrich_context(tweet, token, lookups) if fetch is None else tweet)
+    return _apply(book, prepared)
 
 
 def fetch_mentions(
@@ -319,7 +323,14 @@ def _record_shadow(book: MentionLedger, user_id: str, item: dict) -> None:
         classification=str(engagement.get("classification") or ""),
         action=str(engagement.get("action") or ""),
         bot_id=user_id,
+        author_username=str(engagement.get("author_username") or ""),
     )
+    if engagement.get("classification") == "DIRECT_CHALLENGE":
+        book.record_battle(
+            engagement,
+            inviting_account=str(engagement.get("author_id") or ""),
+            question_id=str(engagement.get("original_question_id") or ""),
+        )
 
 
 def _read_parent(tweet: dict, token: str, parent_id: str) -> dict:
@@ -540,6 +551,12 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             author_id=author_id,
             text=text.strip() or ".",
             conversation_id=str(tweet.get("conversation_id") or post_id),
+            parent_id=str(tweet.get("parent_id") or ""),
+            parent_text=tweet.get("parent_text") if isinstance(tweet.get("parent_text"), str) else "",
+            parent_author_id=str(tweet.get("parent_author_id") or ""),
+            author_username=str(tweet.get("author_username") or ""),
+            context_posts=tuple(tweet.get("context_posts") or ()),
+            automated=bool(tweet.get("automated")),
         )
         decision = _classify_mention(book, tweet, own or "", book.get_since_id() or "0")
         if decision["classification"] != "historical":

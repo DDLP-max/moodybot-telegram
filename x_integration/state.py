@@ -131,12 +131,25 @@ CREATE TABLE IF NOT EXISTS conversations (
     last_decision TEXT NOT NULL DEFAULT '',
     last_outcome TEXT NOT NULL DEFAULT '',
     last_interaction_at TEXT NOT NULL DEFAULT '',
+    human_request_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS conversation_slots (
     post_id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
     status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS battle_events (
+    post_id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL DEFAULT '',
+    inviting_account TEXT NOT NULL DEFAULT '',
+    question_id TEXT NOT NULL DEFAULT '',
+    response_id TEXT NOT NULL DEFAULT '',
+    classification TEXT NOT NULL DEFAULT '',
+    decision TEXT NOT NULL DEFAULT '',
+    loop_outcome TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 """
@@ -161,6 +174,7 @@ class MentionLedger:
             _ensure_problem_column(conn)
             _ensure_origin_column(conn)
             _ensure_engagement_columns(conn)
+            _ensure_battle_columns(conn)
             conn.commit()
         finally:
             conn.close()
@@ -376,6 +390,14 @@ class MentionLedger:
                         """,
                         (post_id, f"publish:{post_id}"),
                     )
+                    conn.execute(
+                        """
+                        UPDATE battle_events
+                        SET response_id = ?
+                        WHERE post_id = ? AND response_id = ''
+                        """,
+                        (x_reply_id, post_id),
+                    )
                 _sync_conversation_slot(conn, post_id, status, x_reply_id, now)
                 conn.execute("COMMIT")
             except Exception:
@@ -408,6 +430,10 @@ class MentionLedger:
         post_id: str,
         reply_text: str,
         conversation_id: str = "",
+        *,
+        ai_author: bool = False,
+        question_id: str = "",
+        inviting_account: str = "",
     ) -> str:
         """Hold one automatic slot. Does not rewrite an existing row.
 
@@ -434,6 +460,9 @@ class MentionLedger:
                 if conversation_id and not _conversation_room(conn, conversation_id):
                     conn.execute("COMMIT")
                     return "conversation_cap"
+                if ai_author and _battle_blocked(conn, conversation_id, question_id):
+                    conn.execute("COMMIT")
+                    return "ai_loop"
                 conn.execute(
                     """
                     INSERT INTO publications (
@@ -451,6 +480,24 @@ class MentionLedger:
                         ) VALUES (?, ?, 'pending', ?)
                         """,
                         (post_id, conversation_id, now),
+                    )
+                if ai_author:
+                    conn.execute(
+                        """
+                        INSERT INTO battle_events (
+                            post_id, conversation_id, inviting_account, question_id,
+                            response_id, classification, decision, loop_outcome,
+                            model, created_at
+                        ) VALUES (?, ?, ?, ?, '', 'DIRECT_CHALLENGE', 'reply', 'claimed', 'rules', ?)
+                        ON CONFLICT(post_id) DO UPDATE SET
+                            conversation_id = excluded.conversation_id,
+                            inviting_account = excluded.inviting_account,
+                            question_id = excluded.question_id,
+                            decision = 'reply',
+                            loop_outcome = 'claimed'
+                        WHERE battle_events.response_id = ''
+                        """,
+                        (post_id, conversation_id, inviting_account, question_id, now),
                     )
                 conn.execute("COMMIT")
                 return "claimed"
@@ -734,6 +781,7 @@ class MentionLedger:
         classification: str,
         action: str,
         bot_id: str = "",
+        author_username: str = "",
     ) -> None:
         """Ids and decisions only. Post text stays on X."""
         if not conversation_id:
@@ -800,6 +848,15 @@ class MentionLedger:
                             conversation_id,
                         ),
                     )
+                if _human_refresh(author_id, author_username, classification):
+                    conn.execute(
+                        """
+                        UPDATE conversations
+                        SET human_request_at = ?
+                        WHERE conversation_id = ?
+                        """,
+                        (now, conversation_id),
+                    )
                 conn.execute("COMMIT")
             except Exception:
                 _rollback(conn)
@@ -814,7 +871,7 @@ class MentionLedger:
             try:
                 row = conn.execute(
                     """
-                    SELECT last_interaction_at FROM conversations
+                    SELECT last_interaction_at, human_request_at FROM conversations
                     WHERE conversation_id = ?
                     """,
                     (conversation_id,),
@@ -828,11 +885,93 @@ class MentionLedger:
                     """,
                     (conversation_id, cutoff),
                 ).fetchone()[0]
+                claimed = conn.execute(
+                    """
+                    SELECT question_id, created_at FROM battle_events
+                    WHERE conversation_id = ? AND loop_outcome = 'claimed'
+                    ORDER BY created_at DESC
+                    """,
+                    (conversation_id,),
+                ).fetchall()
             finally:
                 conn.close()
+        latest = str(claimed[0][1] or "") if claimed else ""
+        human_at = str(row[1] or "") if row else ""
         return {
             "last_interaction_at": str(row[0] or "") if row else "",
             "bot_replies_24h": int(used),
+            "ai_invitation_used": bool(claimed),
+            "human_after_ai": bool(latest and human_at and human_at > latest),
+            "answered_question_ids": [str(item[0]) for item in claimed if item[0]],
+        }
+
+    def record_battle(self, decision: dict, *, inviting_account: str, question_id: str) -> None:
+        """One battle row. Post text stays out of the ledger. A claimed slot is not downgraded."""
+        if str(decision.get("classification") or "") != "DIRECT_CHALLENGE":
+            return
+        post_id = str(decision.get("post_id") or "").strip()
+        if not post_id:
+            return
+        outcome = str(decision.get("loop_outcome") or "")
+        if outcome == "allowed":
+            outcome = "observed"
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO battle_events (
+                        post_id, conversation_id, inviting_account, question_id,
+                        response_id, classification, decision, loop_outcome,
+                        model, created_at
+                    ) VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?)
+                    ON CONFLICT(post_id) DO UPDATE SET
+                        conversation_id = excluded.conversation_id,
+                        inviting_account = excluded.inviting_account,
+                        question_id = excluded.question_id,
+                        classification = excluded.classification,
+                        decision = excluded.decision,
+                        loop_outcome = excluded.loop_outcome,
+                        model = excluded.model
+                    WHERE battle_events.loop_outcome != 'claimed'
+                    """,
+                    (
+                        post_id,
+                        str(decision.get("conversation_id") or ""),
+                        str(inviting_account or ""),
+                        str(question_id or ""),
+                        str(decision.get("classification") or ""),
+                        str(decision.get("action") or ""),
+                        outcome,
+                        str(decision.get("model") or "rules"),
+                        now,
+                    ),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def battle_summary(self) -> dict:
+        """Counts only. No post text, account names, or credentials."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT loop_outcome, response_id, model FROM battle_events"
+                ).fetchall()
+            finally:
+                conn.close()
+        return {
+            "detected": len(rows),
+            "claimed": sum(1 for row in rows if row[0] == "claimed"),
+            "blocked": sum(1 for row in rows if row[0] == "blocked"),
+            "published": sum(1 for row in rows if str(row[1] or "")),
+            "model_calls": sum(1 for row in rows if str(row[2] or "") not in {"", "rules"}),
         }
 
     def conversation_at_cap(self, conversation_id: str) -> bool:
@@ -846,6 +985,7 @@ class MentionLedger:
             "DIRECT_REQUEST": "direct_requests",
             "FOLLOW_UP": "follow_ups",
             "CHALLENGE": "challenges",
+            "DIRECT_CHALLENGE": "direct_challenges",
             "CONTRIBUTION": "contributions",
             "AMBIENT": "ambient",
             "SPAM": "spam",
@@ -858,6 +998,7 @@ class MentionLedger:
             "direct_requests": 0,
             "follow_ups": 0,
             "challenges": 0,
+            "direct_challenges": 0,
             "contributions": 0,
             "ambient": 0,
             "spam": 0,
@@ -1112,6 +1253,13 @@ class MentionLedger:
                     """
                     DELETE FROM conversation_slots
                     WHERE post_id = ? AND status = 'pending'
+                    """,
+                    (post_id,),
+                )
+                conn.execute(
+                    """
+                    DELETE FROM battle_events
+                    WHERE post_id = ? AND response_id = '' AND loop_outcome = 'claimed'
                     """,
                     (post_id,),
                 )
@@ -1419,6 +1567,58 @@ def _ensure_engagement_columns(conn: sqlite3.Connection) -> None:
     ):
         if name not in names:
             conn.execute(ddl)
+
+
+def _ensure_battle_columns(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA table_info(conversations)").fetchall()
+    if rows and "human_request_at" not in {row[1] for row in rows}:
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN human_request_at TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _battle_blocked(conn: sqlite3.Connection, conversation_id: str, question_id: str) -> bool:
+    """A second AI invitation needs a newer human request. The same question stays closed."""
+    if not str(conversation_id or "").strip():
+        return True
+    if question_id:
+        same = conn.execute(
+            """
+            SELECT 1 FROM battle_events
+            WHERE conversation_id = ? AND question_id = ? AND loop_outcome = 'claimed'
+            """,
+            (conversation_id, question_id),
+        ).fetchone()
+        if same is not None:
+            return True
+    latest = conn.execute(
+        """
+        SELECT created_at FROM battle_events
+        WHERE conversation_id = ? AND loop_outcome = 'claimed'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        (conversation_id,),
+    ).fetchone()
+    if latest is None:
+        return False
+    human = conn.execute(
+        "SELECT human_request_at FROM conversations WHERE conversation_id = ?",
+        (conversation_id,),
+    ).fetchone()
+    human_at = str(human[0] or "") if human else ""
+    if human_at and human_at > str(latest[0] or ""):
+        return False
+    return True
+
+
+def _human_refresh(author_id: str, username: str, classification: str) -> bool:
+    if classification not in {"DIRECT_REQUEST", "FOLLOW_UP", "CHALLENGE", "DIRECT_CHALLENGE"}:
+        return False
+    from x_integration.battle import author_is_ai
+
+    if author_is_ai(author_id, username) or str(username or "").lower().endswith("bot"):
+        return False
+    return True
 
 
 def _ensure_origin_column(conn: sqlite3.Connection) -> None:

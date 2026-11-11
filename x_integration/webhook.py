@@ -159,9 +159,15 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
                 {
                     "id": mention.post_id,
                     "author_id": mention.author_id,
+                    "author_username": mention.author_username,
                     "text": mention.text,
                     "conversation_id": mention.conversation_id,
                     "text_complete": True,
+                    "parent_id": mention.parent_id,
+                    "parent_text": mention.parent_text,
+                    "parent_author_id": mention.parent_author_id,
+                    "automated": mention.automated,
+                    "context_posts": list(mention.context_posts),
                 },
                 user_id=own or "",
                 floor="0",
@@ -187,13 +193,23 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
                 "status": "skipped",
                 "reason": str(gate.get("filter_reason") or gate.get("reason") or "not_permitted"),
             }
+    else:
+        gate = {}
     if not book.reserve_model_call(daily_model_limit()):
         book.finish(mention.event_id, status="skipped", skip_reason="spend_limit")
         return {"status": "skipped", "reason": "spend_limit"}
     from x_integration.reply import draft_mention_reply
 
+    brief = ""
+    if gate.get("classification") == "DIRECT_CHALLENGE" and gate.get("question_text"):
+        from x_integration.battle import battle_brief
+
+        brief = battle_brief({"question_text": gate.get("question_text")})
     try:
-        reply = draft_mention_reply(mention.text, mention.conversation_id)
+        if brief:
+            reply = draft_mention_reply(mention.text, mention.conversation_id, brief=brief)
+        else:
+            reply = draft_mention_reply(mention.text, mention.conversation_id)
     except Exception:
         if operating_mode() == "one_reply_test" and one_reply_gate_enabled():
             book.stop_activation("generation_failed", mention.post_id)
@@ -214,7 +230,18 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
         book.release_pending_event(mention.event_id)
         return {"status": "not_sent", "reason": "generation_failed"}
     if replies_enabled():
-        return _publish_automatic(book, mention, reply)
+        from x_integration.battle import author_is_ai
+
+        ai = author_is_ai(
+            mention.author_id, mention.author_username, mention.automated
+        ) or mention.author_username.lower().endswith("bot")
+        return _publish_automatic(
+            book,
+            mention,
+            reply,
+            ai_author=bool(ai and gate.get("classification") == "DIRECT_CHALLENGE"),
+            question_id=str(gate.get("original_question_id") or ""),
+        )
     book.finish(
         mention.event_id,
         status="dry_run",
@@ -272,7 +299,14 @@ def _confirm_parent(token: str, post_id: str) -> dict:
     return {"ok": False, "reason": "not_authorized", "http_status": status}
 
 
-def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dict:
+def _publish_automatic(
+    book: MentionLedger,
+    mention: Mention,
+    reply: str,
+    *,
+    ai_author: bool = False,
+    question_id: str = "",
+) -> dict:
     """Post once. A write that X may have accepted is never sent again."""
     from x_integration.account_probe import validated_user_token
     from x_integration.post_length import fits_autonomous
@@ -282,13 +316,27 @@ def _publish_automatic(book: MentionLedger, mention: Mention, reply: str) -> dic
     armed = mode == "one_reply_test" and one_reply_gate_enabled()
     beta = mode == "limited_beta"
     slot = book.reserve_automatic_publication(
-        mention.post_id, reply, mention.conversation_id
+        mention.post_id,
+        reply,
+        mention.conversation_id,
+        ai_author=ai_author,
+        question_id=question_id,
+        inviting_account=mention.author_id,
     )
     if slot == "cap":
         return {"status": "publish_limit"}
     if slot == "conversation_cap":
         book.release_pending_event(mention.event_id)
         return {"status": "not_sent", "reason": "conversation_cap"}
+    if slot == "ai_loop":
+        book.finish(
+            mention.event_id,
+            status="skipped",
+            reply_text=reply,
+            skip_reason="ai_loop",
+            post_id=mention.post_id,
+        )
+        return {"status": "skipped", "reason": "ai_loop"}
     if slot != "claimed":
         if slot in {"posted", "ambiguous", "failed"}:
             book.finish(

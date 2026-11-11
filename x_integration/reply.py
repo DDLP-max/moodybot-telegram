@@ -30,8 +30,11 @@ def draft_mention_reply(
     conversation_id: str,
     *,
     complete: Optional[Complete] = None,
+    brief: str = "",
 ) -> str:
     """Plan and finalize one mention. `complete` stands in for the model in a dry run."""
+    if brief.strip():
+        text = brief.strip() + "\n\n" + (text or "")
     import moodybot
     from capability_detection import classify_social_mode
     from prompt_runtime import build_openrouter_messages, build_runtime_prompt

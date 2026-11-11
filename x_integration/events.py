@@ -29,6 +29,12 @@ class Mention:
     author_id: str
     text: str
     conversation_id: str
+    parent_id: str = ""
+    parent_text: str = ""
+    parent_author_id: str = ""
+    author_username: str = ""
+    context_posts: tuple = ()
+    automated: bool = False
 
 
 @dataclass(frozen=True)
