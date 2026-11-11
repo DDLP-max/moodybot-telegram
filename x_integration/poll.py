@@ -126,7 +126,7 @@ def fetch_mentions(
 
     params = {
         "max_results": MAX_RESULTS,
-        "tweet.fields": "author_id,conversation_id,text,referenced_tweets",
+        "tweet.fields": "author_id,conversation_id,text,referenced_tweets,note_tweet",
         "expansions": "author_id,referenced_tweets.id",
         "user.fields": "username",
     }
@@ -140,6 +140,17 @@ def fetch_mentions(
         params=params,
         timeout=20,
     )
+    if response.status_code == 400 and "note_tweet" in params["tweet.fields"]:
+        params["tweet.fields"] = "author_id,conversation_id,text,referenced_tweets"
+        response = httpx.get(
+            MENTIONS_URL.format(user_id=user_id),
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+            timeout=20,
+        )
+        note_failed = True
+    else:
+        note_failed = False
     body = response.text or ""
     status = _classify(response.status_code, body)
     if status != "ok":
@@ -168,7 +179,14 @@ def fetch_mentions(
         parent = parents.get(parent_id) or {}
         tweet["parent_id"] = parent_id
         tweet["parent_author_id"] = str(parent.get("author_id") or "")
-        tweet["parent_text"] = parent.get("text") if isinstance(parent.get("text"), str) else ""
+        parent_text = parent.get("text") if isinstance(parent.get("text"), str) else ""
+        parent_note = parent.get("note_tweet") if isinstance(parent.get("note_tweet"), dict) else {}
+        if isinstance(parent_note.get("text"), str) and parent_note.get("text").strip():
+            parent_text = parent_note.get("text")
+        tweet["parent_text"] = parent_text
+        from x_integration.engagement import attach_post_text
+
+        attach_post_text(tweet, note_failed=note_failed)
     next_token = str((meta or {}).get("next_token") or "")
     return FetchResult(status="ok", tweets=tweets, next_token=next_token, http_status=200)
 
@@ -232,12 +250,17 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
     lookups = [2]
     model_budget = [2]
     for tweet in _oldest_first(result.tweets):
-        item = _classify_mention(book, tweet, user_id, floor)
+        enriched = _enrich_context(tweet, token, lookups) if fetch is None else tweet
+        item = _classify_mention(
+            book,
+            enriched,
+            user_id,
+            floor,
+            complete=_shadow_complete(book, model_budget),
+        )
         if item["classification"] != "historical":
             book.record_classification(item["post_id"], item["classification"], item["reason"])
-            _record_shadow(
-                book, tweet, user_id, item, fetch is None, token, lookups, model_budget
-            )
+            _record_shadow(book, user_id, item)
         if item["queued"]:
             queued.append({"post_id": item["post_id"], "author_id": item["author_id"]})
         else:
@@ -255,25 +278,7 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
     return observed
 
 
-def _record_shadow(
-    book: MentionLedger,
-    tweet: dict,
-    user_id: str,
-    item: dict,
-    live: bool,
-    token: str,
-    lookups: list,
-    model_budget: list,
-) -> None:
-    """Record the conversation decision. Does not publish or move the cursor."""
-    post_id = str(item.get("post_id") or "")
-    if not post_id or book.engagement_decision(post_id):
-        return
-    enriched = _enrich_context(tweet, token, lookups) if live else tweet
-    from x_integration.engagement import decide_engagement
-
-    conversation_id = str(enriched.get("conversation_id") or post_id)
-
+def _shadow_complete(book: MentionLedger, model_budget: list):
     def complete(messages):
         if model_budget[0] <= 0:
             raise RuntimeError("shadow_budget")
@@ -286,32 +291,33 @@ def _record_shadow(
 
         return openrouter_complete(messages)
 
-    decision = decide_engagement(
-        enriched,
-        user_id=user_id,
-        floor="0",
-        already_replied=bool(book.already_replied(post_id)),
-        conversation=book.conversation_state(conversation_id),
-        complete=complete,
-    )
-    if decision.get("model") == "model":
+    return complete
+
+
+def _record_shadow(book: MentionLedger, user_id: str, item: dict) -> None:
+    """Record the same decision the filter used. Does not publish or move the cursor."""
+    post_id = str(item.get("post_id") or "")
+    engagement = item.get("engagement") if isinstance(item.get("engagement"), dict) else None
+    if not post_id or engagement is None:
+        return
+    if engagement.get("model") == "model":
         try:
             import moodybot
 
-            decision["model"] = moodybot.OPENROUTER_MODEL
+            engagement["model"] = moodybot.OPENROUTER_MODEL
         except Exception:
-            decision["model"] = "model"
+            engagement["model"] = "model"
     book.record_engagement(
-        decision,
+        engagement,
         filter_classification=str(item.get("classification") or ""),
         filter_reason=str(item.get("reason") or ""),
     )
     book.remember_conversation(
-        conversation_id=conversation_id,
-        author_id=str(decision.get("author_id") or ""),
+        conversation_id=str(engagement.get("conversation_id") or post_id),
+        author_id=str(engagement.get("author_id") or ""),
         post_id=post_id,
-        classification=str(decision.get("classification") or ""),
-        action=str(decision.get("action") or ""),
+        classification=str(engagement.get("classification") or ""),
+        action=str(engagement.get("action") or ""),
         bot_id=user_id,
     )
 
@@ -323,7 +329,7 @@ def _read_parent(tweet: dict, token: str, parent_id: str) -> dict:
         response = httpx.get(
             f"https://api.x.com/2/tweets/{parent_id}",
             headers={"Authorization": f"Bearer {token}"},
-            params={"tweet.fields": "author_id,conversation_id,text,referenced_tweets"},
+            params={"tweet.fields": "author_id,conversation_id,text,referenced_tweets,note_tweet"},
             timeout=20,
         )
     except (httpx.TimeoutException, httpx.TransportError):
@@ -335,7 +341,10 @@ def _read_parent(tweet: dict, token: str, parent_id: str) -> dict:
     except ValueError:
         return tweet
     if isinstance(data, dict):
-        if isinstance(data.get("text"), str):
+        note = data.get("note_tweet") if isinstance(data.get("note_tweet"), dict) else {}
+        if isinstance(note.get("text"), str) and note.get("text").strip():
+            tweet["parent_text"] = note.get("text")
+        elif isinstance(data.get("text"), str):
             tweet["parent_text"] = data.get("text") or ""
         if data.get("author_id"):
             tweet["parent_author_id"] = str(data.get("author_id"))
@@ -370,7 +379,7 @@ def _enrich_context(tweet: dict, token: str, lookups: list) -> dict:
             params={
                 "query": f"conversation_id:{conversation_id}",
                 "max_results": 10,
-                "tweet.fields": "author_id,conversation_id,text",
+                "tweet.fields": "author_id,conversation_id,text,note_tweet",
             },
             timeout=20,
         )
@@ -390,24 +399,35 @@ def _enrich_context(tweet: dict, token: str, lookups: list) -> dict:
         item_id = str(item.get("id") or "")
         if not item_id or item_id == current:
             continue
+        note = item.get("note_tweet") if isinstance(item.get("note_tweet"), dict) else {}
+        text = note.get("text") if isinstance(note.get("text"), str) and note.get("text").strip() else item.get("text")
         posts.append({
             "id": item_id,
             "author_id": str(item.get("author_id") or ""),
-            "text": item.get("text") if isinstance(item.get("text"), str) else "",
+            "text": text if isinstance(text, str) else "",
         })
     copied["context_posts"] = posts[-7:]
     return copied
 
 
-def _classify_mention(book: MentionLedger, tweet: dict, user_id: str, floor: str) -> dict:
+def _classify_mention(
+    book: MentionLedger,
+    tweet: dict,
+    user_id: str,
+    floor: str,
+    complete=None,
+) -> dict:
     from x_integration.eligibility import classify_mention
 
     post_id = str(tweet.get("id") or "").strip()
+    conversation_id = str(tweet.get("conversation_id") or post_id)
     decision = classify_mention(
         tweet,
         user_id=user_id,
         floor=floor,
         already_replied=book.already_replied(post_id) if post_id else False,
+        conversation=book.conversation_state(conversation_id) if post_id else None,
+        complete=complete,
     )
     decision["queued"] = bool(decision["eligible"])
     return decision
@@ -526,7 +546,7 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             book.record_classification(
                 post_id, decision["classification"], decision["reason"]
             )
-            _record_shadow(book, tweet, own or "", decision, False, "", [0], [0])
+            _record_shadow(book, own or "", decision)
         if not decision["eligible"]:
             if decision["classification"] != "historical" and not held:
                 book.set_since_id(post_id)

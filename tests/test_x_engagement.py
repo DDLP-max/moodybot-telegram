@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from x_integration.eligibility import classify_mention
 from x_integration.engagement import (
     CHALLENGE,
     CONTRIBUTION,
@@ -16,6 +17,7 @@ from x_integration.engagement import (
     FOLLOW_UP,
     SPAM,
     UNSAFE,
+    allows_publish,
     decide_engagement,
 )
 from x_integration.events import Mention
@@ -36,6 +38,14 @@ BUILD_TEXT = (
 MATT_TEXT = (
     "Hey @MoodyBotAI To all men who survived rock bottom, what's one piece of "
     "advice would you give a man who feels like giving up right  now?"
+)
+FALSE_POSITIVE = "2120316072348049783"
+FALSE_POSITIVE_TEXT = (
+    "@vlatdd @grok Ask @MoodyBotAI next time...\n\n"
+    "Most people don't actually want to be free or equal. They want someone to "
+    "tell them exactly what to believe, who to hate, and why their own mediocrity "
+    "is someone else's fault, so long as the story flatters them. The moment you "
+    "strip that away and"
 )
 ROOT = "2119934935947747449"
 
@@ -75,6 +85,82 @@ def _decide(tweet, **kwargs):
         conversation=kwargs.get("conversation"),
         complete=kwargs.get("complete"),
     )
+
+
+def _shared(tweet, **kwargs):
+    filtered = classify_mention(
+        tweet,
+        user_id=kwargs.get("user_id", BOT),
+        floor=kwargs.get("floor", "0"),
+        already_replied=kwargs.get("already_replied", False),
+        context=kwargs.get("context"),
+        conversation=kwargs.get("conversation"),
+        complete=kwargs.get("complete"),
+    )
+    decision = filtered["engagement"]
+    assert filtered["eligible"] is decision["publish"]
+    assert decision["respond"] is decision["publish"] or decision["action"] != "reply"
+    return decision, filtered
+
+
+def test_false_positive_recommendation_is_not_a_request():
+    tweet = _tweet(
+        FALSE_POSITIVE,
+        FALSE_POSITIVE_TEXT,
+        author="2082957781293035520",
+        username="MattCanham805",
+        parent="2120180727744545226",
+        parent_author="1943416351332200448",
+        conversation="2120180727744545226",
+    )
+    decision, filtered = _shared(tweet)
+    assert decision["action"] == "observe"
+    assert decision["respond"] is False
+    assert decision["reason"] == "not_requested"
+    assert filtered["eligible"] is False
+    assert filtered["classification"] == "not_requested"
+    assert _decide(_tweet("9101", "You should ask @MoodyBotAI"))["reason"] == "not_requested"
+    assert _decide(_tweet("9102", "Ask @MoodyBotAI next time"))["action"] == "observe"
+    combined = _decide(_tweet(
+        "9103",
+        "I wonder why people do this. Ask @MoodyBotAI next time.",
+    ))
+    assert combined["respond"] is False
+    assert combined["reason"] == "not_requested"
+    other = _decide(_tweet("9104", "@grok why does this keep happening? @MoodyBotAI"))
+    assert other["respond"] is False
+    assert other["action"] == "observe"
+    quoted = _decide(_tweet("9105", 'He said "ask @MoodyBotAI" and kept talking.'))
+    assert quoted["respond"] is False
+    direct, direct_filter = _shared(_tweet("9106", "@MoodyBotAI, why does this happen?"))
+    assert direct["classification"] == DIRECT_REQUEST
+    assert direct["respond"] is True
+    assert direct_filter["eligible"] is True
+    explain = _decide(_tweet("9107", "Hey @MoodyBotAI, explain this"))
+    assert explain["classification"] == DIRECT_REQUEST
+    assert explain["respond"] is True
+
+
+def test_truncated_text_and_stale_decision_do_not_publish():
+    truncated = _tweet("9200", "@MoodyBotAI, why does this happen?")
+    truncated["text_complete"] = False
+    decision = _decide(truncated)
+    assert decision["respond"] is False
+    assert decision["reason"] == "incomplete_text"
+    assert classify_mention(
+        truncated, user_id=BOT, floor="0", already_replied=False
+    )["eligible"] is False
+    stale = {
+        "classification": DIRECT_REQUEST,
+        "respond": True,
+        "confidence": 0.95,
+        "text_complete": True,
+        "safety_flags": [],
+        "decided_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(),
+    }
+    assert allows_publish(stale) is False
+    assert allows_publish({}) is False
+    assert allows_publish(None) is False
 
 
 def test_real_contribution_is_observed():
@@ -444,6 +530,8 @@ def test_conversation_cap_is_atomic_with_the_daily_cap():
 
 
 if __name__ == "__main__":
+    test_false_positive_recommendation_is_not_a_request()
+    test_truncated_text_and_stale_decision_do_not_publish()
     test_real_contribution_is_observed()
     test_direct_question_is_eligible()
     test_challenge_and_evidence_request_are_eligible()

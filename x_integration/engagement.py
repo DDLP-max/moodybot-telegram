@@ -50,18 +50,27 @@ _FOLLOW = re.compile(
     r"(?i)\b(?:say more|go on|elaborate|clarify|what do you mean|explain that|"
     r"defend that|expand on|another example|give an example|for example)\b"
 )
-_DIRECT = re.compile(
+_CLAUSE_REQUEST = re.compile(
     r"(?i)(?:"
     r"\bwhat(?:'s|\s+(?:is|are|should|do|would|can|about))\b|"
-    r"\bwhy\b|"
-    r"\bhow\s+(?:do|should|can|would|to|did|does)\b|"
+    r"\bwhy\s+(?:do|does|is|are|would|should|did|can)\b|"
+    r"\bhow\s+(?:do|does|should|can|would|to|did)\b|"
     r"\b(?:can|could|would|will)\s+you\b|"
     r"\bshould\s+i\b|"
-    r"\b(?:tell me|help me|weigh in)\b|"
-    r"\byour\s+(?:take|thoughts|advice|view|opinion)\b|"
+    r"\b(?:explain|tell me|help me|weigh in|clarify)\b|"
+    r"\byour\s+(?:take|thoughts|advice|view|opinion|source)\b|"
     r"\bplease\b"
     r")"
 )
+_THIRD_PARTY = re.compile(
+    r"(?i)(?:\b(?:you|someone|people|we|just|please|go)\s+)?"
+    r"(?:\bshould\s+)?\b(?:ask|asking|asked|tell|telling|consult|ping)\s+@MoodyBotAI\b"
+)
+_VOCATIVE = re.compile(
+    r"(?i)(?:^|[\n.!?]\s*)(?:(?:hey|hi|ok|okay)\s+)?@MoodyBotAI\b[,:]?\s*(?P<clause>.*)$",
+    re.S,
+)
+_DECISION_TTL = timedelta(hours=24)
 _GENERIC = re.compile(
     r"(?i)\b(?:stay patient|keep going|hang in|you(?:'ve| have) got|"
     r"don't give up|do not give up|one (?:small )?step|progress|momentum|"
@@ -95,7 +104,7 @@ def decide_engagement(
     author_id = str(tweet.get("author_id") or "").strip()
     username = str(tweet.get("author_username") or "")
     conversation_id = str(tweet.get("conversation_id") or post_id).strip()
-    text = tweet.get("text") if isinstance(tweet.get("text"), str) else ""
+    text, text_complete, text_source = read_post_text(tweet)
     window = _window(tweet, context, user_id)
     base = {
         "post_id": post_id,
@@ -104,6 +113,8 @@ def decide_engagement(
         "context_ids": window["ids"],
         "safety_flags": [],
         "model": "rules",
+        "text_complete": text_complete,
+        "text_source": text_source,
     }
     if not post_id.isdigit():
         return _pack(base, AMBIENT, 1.0, "invalid_id", False, "skip", "none", "none")
@@ -126,7 +137,18 @@ def decide_engagement(
     if _SPAM.search(body):
         return _pack(base, SPAM, 0.96, "spam", False, "skip", "C", "none", ["spam"])
 
-    decision = _intent(base, body, words, window)
+    decision = _intent(base, text, body, words, window)
+    if not text_complete:
+        flags = list(decision.get("safety_flags") or [])
+        if "truncated" not in flags:
+            flags.append("truncated")
+        decision["safety_flags"] = flags
+        decision["text_complete"] = False
+        if decision.get("respond"):
+            decision["respond"] = False
+            decision["action"] = "observe"
+            decision["reason"] = "incomplete_text"
+            decision["objective"] = "none"
     if decision.get("needs_model") and complete is not None:
         decision = _ask_model(decision, text, window, complete)
     decision.pop("needs_model", None)
@@ -157,36 +179,64 @@ def decide_engagement(
     return decision
 
 
-def _intent(base: dict, body: str, words: list[str], window: dict) -> dict:
+def _intent(base: dict, text: str, body: str, words: list[str], window: dict) -> dict:
+    """Request language counts only in a clause addressed to MoodyBot."""
     participating = window["participating"]
     missing = window["missing_parent"]
-    evidence = _EVIDENCE.search(body) is not None
-    if evidence or _CHALLENGE.search(body):
-        if missing and not evidence:
+    if _quoted_only(text):
+        return _pack(base, AMBIENT, 0.95, "quotation", False, "observe", "C", "none")
+    if _THIRD_PARTY.search(text):
+        return _pack(base, AMBIENT, 0.96, "not_requested", False, "observe", "C", "none")
+    clause = _vocative_clause(text)
+    if clause is not None and not re.search(r"[A-Za-z0-9]", clause):
+        return _pack(base, AMBIENT, 0.94, "not_requested", False, "observe", "C", "none")
+    if clause is None:
+        if _other_account_question(text) or not participating:
+            if missing and not _GENERIC.search(body):
+                return _pack(
+                    base, AMBIENT, 0.9, "missing_context", False, "observe", "C", "none",
+                    ["missing_context"],
+                )
+            if participating or _GENERIC.search(body) or _EXPERIENCE.search(body):
+                return _contribution(base, body, words, participating, missing)
+            return _pack(base, AMBIENT, 0.92, "not_requested", False, "observe", "C", "none")
+        return _contribution(base, body, words, participating, missing)
+    if (_EVIDENCE.search(clause) or _CHALLENGE.search(clause)):
+        if missing and not _EVIDENCE.search(clause):
             return _pack(
                 base, CHALLENGE, 0.45, "missing_context", False, "observe", "A",
-                "answer_substance", ["missing_context"], needs_model=False,
+                "answer_substance", ["missing_context"],
             )
-        flags = ["evidence"] if evidence else []
-        objective = "separate_verified_from_uncertain" if evidence else "answer_substance"
-        return _pack(base, CHALLENGE, 0.9, "challenge", True, "reply", "A", objective, flags)
-    if _FOLLOW.search(body) and (participating or missing):
+        flags = ["evidence"] if _EVIDENCE.search(clause) else []
+        objective = "separate_verified_from_uncertain" if flags else "answer_substance"
+        return _pack(base, CHALLENGE, 0.92, "challenge", True, "reply", "A", objective, flags)
+    if _FOLLOW.search(clause) and participating:
         if missing:
             return _pack(
                 base, FOLLOW_UP, 0.44, "missing_context", False, "observe", "A",
                 "elaborate", ["missing_context"],
             )
-        return _pack(base, FOLLOW_UP, 0.9, "follow_up", True, "reply", "A", "elaborate")
-    requested = _DIRECT.search(body) is not None or ("?" in body and len(words) >= 3)
-    if requested:
-        if missing and _DIRECT.search(body) is None:
-            return _pack(
-                base, DIRECT_REQUEST, 0.42, "missing_context", False, "observe", "A",
-                "answer_request", ["missing_context"],
-            )
+        return _pack(base, FOLLOW_UP, 0.92, "follow_up", True, "reply", "A", "elaborate")
+    if _clause_request(clause):
         return _pack(
-            base, DIRECT_REQUEST, 0.9, "direct_request", True, "reply", "A", "answer_request"
+            base, DIRECT_REQUEST, 0.93, "direct_request", True, "reply", "A", "answer_request"
         )
+    if missing and not participating:
+        return _pack(
+            base, AMBIENT, 0.7, "missing_context", False, "observe", "C", "none",
+            ["missing_context"],
+        )
+    return _contribution(base, body, words, participating, missing, addressed=True)
+
+
+def _contribution(
+    base: dict,
+    body: str,
+    words: list[str],
+    participating: bool,
+    missing: bool,
+    addressed: bool = False,
+) -> dict:
     generic = _GENERIC.search(body) is not None
     meaningful = _EXPERIENCE.search(body) is not None or _CORRECTION.search(body) is not None
     if generic and not meaningful:
@@ -201,15 +251,17 @@ def _intent(base: dict, body: str, words: list[str], window: dict) -> dict:
             ["missing_context"],
         )
     if participating or generic or meaningful:
-        return _pack(base, CONTRIBUTION, 0.8, "contribution", False, "observe", "B", "none")
+        return _pack(base, CONTRIBUTION, 0.84, "contribution", False, "observe", "B", "none")
     if missing:
         return _pack(
             base, AMBIENT, 0.4, "missing_context", False, "observe", "C", "none",
             ["missing_context"],
         )
-    return _pack(
-        base, AMBIENT, 0.5, "review", False, "observe", "C", "none", needs_model=True
-    )
+    if addressed:
+        return _pack(
+            base, AMBIENT, 0.5, "review", False, "observe", "C", "none", needs_model=True
+        )
+    return _pack(base, AMBIENT, 0.92, "not_requested", False, "observe", "C", "none")
 
 
 def _ask_model(ruled: dict, text: str, window: dict, complete) -> dict:
@@ -229,10 +281,12 @@ def _ask_model(ruled: dict, text: str, window: dict, complete) -> dict:
                 "with classification, confidence, reason, objective. "
                 "classification is DIRECT_REQUEST, FOLLOW_UP, CHALLENGE, "
                 "CONTRIBUTION, AMBIENT, SPAM, or UNSAFE. "
-                "A mention is not enough. Use AMBIENT when the person is not "
-                "addressing MoodyBot. Use UNSAFE for imminent self-harm and "
-                "do not joke. Use CHALLENGE when the person disputes a claim "
-                "or asks for evidence. Do not invent facts. If unsure, AMBIENT."
+                "A mention is not enough. Words such as why, how, what, or ask "
+                "inside a statement, a quotation, or a suggestion that someone "
+                "else consult MoodyBot are not requests. Use AMBIENT when the "
+                "person is not addressing MoodyBot. Use UNSAFE for imminent "
+                "self-harm and do not joke. Use CHALLENGE only for a dispute "
+                "aimed at MoodyBot. Do not invent facts. If unsure, AMBIENT."
             ),
         },
         {
@@ -278,7 +332,7 @@ def _ask_model(ruled: dict, text: str, window: dict, complete) -> dict:
     respond = False
     action = "observe"
     mode = "C"
-    if kind in _REPLY_CLASSES and confidence >= 0.6 and not window["missing_parent"]:
+    if kind in _REPLY_CLASSES and confidence >= reply_confidence_threshold() and not window["missing_parent"]:
         respond = True
         action = "reply"
         mode = "A"
@@ -357,7 +411,10 @@ def _window(tweet: dict, context: dict | None, user_id: str) -> dict:
         tweet.get("text") if isinstance(tweet.get("text"), str) else "",
     )
     posts = posts[-_CONTEXT_LIMIT:]
-    participating = any(post["author_is_bot"] for post in posts[:-1])
+    parent_author = str(tweet.get("parent_author_id") or "")
+    participating = any(post["author_is_bot"] for post in posts[:-1]) or (
+        bool(user_id) and parent_author == user_id
+    )
     missing_parent = bool(parent_id) and not parent_text.strip()
     return {
         "posts": posts,
@@ -397,6 +454,175 @@ def _stale(conversation: dict | None) -> bool:
 def _body(text: str) -> str:
     stripped = _MENTION.sub(" ", text)
     return re.sub(r"(?i)@\w+", " ", stripped)
+
+
+def read_post_text(tweet: dict) -> tuple[str, bool, str]:
+    """Prefer note text. A known truncation is not treated as the whole post."""
+    note = tweet.get("note_tweet") if isinstance(tweet.get("note_tweet"), dict) else {}
+    note_text = note.get("text") if isinstance(note.get("text"), str) else ""
+    preview = tweet.get("text") if isinstance(tweet.get("text"), str) else ""
+    if note_text.strip():
+        return note_text, True, "note_tweet"
+    if tweet.get("text_complete") is False or tweet.get("note_unavailable"):
+        return preview, False, "truncated"
+    return preview, True, str(tweet.get("text_source") or "text")
+
+
+def attach_post_text(tweet: dict, *, note_failed: bool = False) -> dict:
+    """Copy note text onto the post. A failed note read marks long text incomplete."""
+    _text, complete, source = read_post_text(tweet)
+    if source == "note_tweet":
+        tweet["text"] = _text
+        tweet["text_complete"] = True
+        tweet["text_source"] = "note_tweet"
+        return tweet
+    if note_failed or tweet.get("text_complete") is False:
+        tweet["text_complete"] = False
+        tweet["text_source"] = "truncated"
+        return tweet
+    if note_failed is False and len(str(tweet.get("text") or "")) >= 270 and tweet.get("note_unavailable"):
+        tweet["text_complete"] = False
+        tweet["text_source"] = "truncated"
+        return tweet
+    tweet["text_complete"] = True
+    tweet["text_source"] = "text"
+    return tweet
+
+
+def reply_confidence_threshold() -> float:
+    import os
+
+    raw = (os.environ.get("X_ENGAGEMENT_CONFIDENCE") or "0.8").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.8
+    if value <= 0 or value > 1:
+        return 0.8
+    return value
+
+
+def allows_publish(decision: dict) -> bool:
+    """One publish gate. Missing, stale, incomplete, or unsure decisions do not post."""
+    if not isinstance(decision, dict):
+        return False
+    if decision.get("text_complete") is False:
+        return False
+    if decision.get("classification") not in _REPLY_CLASSES | {CONTRIBUTION}:
+        return False
+    if not decision.get("respond"):
+        return False
+    flags = decision.get("safety_flags") or []
+    if "crisis" in flags or "truncated" in flags or "missing_context" in flags:
+        return False
+    try:
+        confidence = float(decision.get("confidence"))
+    except (TypeError, ValueError):
+        return False
+    if confidence < reply_confidence_threshold():
+        return False
+    raw = str(decision.get("decided_at") or "")
+    if raw:
+        try:
+            seen = datetime.fromisoformat(raw)
+        except ValueError:
+            return False
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - seen > _DECISION_TTL:
+            return False
+    return True
+
+
+def authoritative_decision(
+    tweet: dict,
+    *,
+    user_id: str,
+    floor: str,
+    already_replied: bool,
+    context: dict | None = None,
+    conversation: dict | None = None,
+    complete=None,
+) -> dict:
+    """The only reply decision used by observation and publishing."""
+    decision = decide_engagement(
+        tweet,
+        user_id=user_id,
+        floor=floor,
+        already_replied=already_replied,
+        context=context,
+        conversation=conversation,
+        complete=complete,
+    )
+    decision["decided_at"] = datetime.now(timezone.utc).isoformat()
+    decision["publish"] = allows_publish(decision)
+    if not decision["publish"] and decision.get("action") == "reply":
+        decision["respond"] = False
+        decision["action"] = "observe"
+    classification, reason = filter_view(decision)
+    decision["filter_classification"] = classification
+    decision["filter_reason"] = reason
+    decision["eligible"] = bool(decision["publish"])
+    return decision
+
+
+def filter_view(decision: dict) -> tuple[str, str]:
+    reason = str(decision.get("reason") or "")
+    kind = str(decision.get("classification") or "")
+    if reason == "bot_loop":
+        return "other_bot", "other_bot"
+    if reason == "duplicate_parent":
+        return "already_replied", "duplicate_parent"
+    if reason in {"invalid_id", "historical", "own_post", "empty", "spam", "not_mentioned"}:
+        return reason, reason
+    if decision.get("publish"):
+        mapped = {
+            DIRECT_REQUEST: "direct_request",
+            FOLLOW_UP: "follow_up",
+            CHALLENGE: "challenge",
+            CONTRIBUTION: "contribution",
+        }.get(kind, "direct_request")
+        return "eligible", mapped
+    if kind == CONTRIBUTION or reason in {"generic_encouragement", "contribution", "meaningful"}:
+        return "not_requested", "contribution"
+    if reason == "not_requested":
+        return "not_requested", "not_requested"
+    if reason == "quotation":
+        return "not_requested", "quotation"
+    if reason == "incomplete_text":
+        return "uncertain", "incomplete_text"
+    if reason == "missing_context":
+        return "uncertain", "missing_context"
+    return "uncertain", "review"
+
+
+def _outside_quotes(text: str) -> str:
+    return re.sub(r'"[^"]*"|“[^”]*”', " ", text)
+
+
+def _quoted_only(text: str) -> bool:
+    return _MENTION.search(text) is not None and _MENTION.search(_outside_quotes(text)) is None
+
+
+def _vocative_clause(text: str) -> str | None:
+    cleaned = _THIRD_PARTY.sub(" ", _outside_quotes(text)).strip()
+    match = _VOCATIVE.search(cleaned)
+    if match is None:
+        return None
+    return match.group("clause").strip()
+
+
+def _clause_request(clause: str) -> bool:
+    return _CLAUSE_REQUEST.search(clause) is not None
+
+
+def _other_account_question(text: str) -> bool:
+    match = re.match(r"(?i)\s*@(?!MoodyBotAI\b)\w+", text)
+    if match is None or _MENTION.search(text) is None:
+        return False
+    mention = _MENTION.search(text)
+    before = text[:mention.start()]
+    return "?" in before or _CLAUSE_REQUEST.search(before) is not None
 
 
 def _parse_model(raw: str) -> dict:

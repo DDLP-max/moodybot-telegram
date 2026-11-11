@@ -117,6 +117,9 @@ CREATE TABLE IF NOT EXISTS engagement_decisions (
     model TEXT NOT NULL DEFAULT 'rules',
     filter_classification TEXT NOT NULL DEFAULT '',
     filter_reason TEXT NOT NULL DEFAULT '',
+    text_complete INTEGER NOT NULL DEFAULT 1,
+    text_source TEXT NOT NULL DEFAULT '',
+    publish INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS conversations (
@@ -157,6 +160,7 @@ class MentionLedger:
             conn.executescript(_SCHEMA)
             _ensure_problem_column(conn)
             _ensure_origin_column(conn)
+            _ensure_engagement_columns(conn)
             conn.commit()
         finally:
             conn.close()
@@ -672,8 +676,8 @@ class MentionLedger:
                         post_id, conversation_id, author_id, classification,
                         confidence, reason, respond, action, mode, objective,
                         safety_flags, context_ids, model, filter_classification,
-                        filter_reason, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        filter_reason, text_complete, text_source, publish, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(post_id) DO UPDATE SET
                         classification = excluded.classification,
                         confidence = excluded.confidence,
@@ -687,6 +691,9 @@ class MentionLedger:
                         model = excluded.model,
                         filter_classification = excluded.filter_classification,
                         filter_reason = excluded.filter_reason,
+                        text_complete = excluded.text_complete,
+                        text_source = excluded.text_source,
+                        publish = excluded.publish,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -705,6 +712,9 @@ class MentionLedger:
                         str(decision.get("model") or "rules"),
                         filter_classification,
                         filter_reason,
+                        1 if decision.get("text_complete", True) else 0,
+                        str(decision.get("text_source") or ""),
+                        1 if decision.get("publish") else 0,
                         now,
                     ),
                 )
@@ -859,6 +869,7 @@ class MentionLedger:
             "model_calls": 0,
             "filter_disagreements": 0,
             "last_publish_error": {"status": "", "http_status": 0},
+            "recent": [],
         }
         with self._lock:
             conn = self._connect()
@@ -877,6 +888,17 @@ class MentionLedger:
                     ORDER BY updated_at DESC LIMIT 1
                     """
                 ).fetchone()
+                recent_rows = conn.execute(
+                    """
+                    SELECT post_id, classification, confidence, reason, action,
+                           publish, text_complete, text_source, filter_classification,
+                           filter_reason
+                    FROM engagement_decisions
+                    WHERE reason NOT IN ('historical', 'invalid_id')
+                    ORDER BY updated_at DESC
+                    LIMIT 10
+                    """
+                ).fetchall()
             finally:
                 conn.close()
         for classification, reason, respond, action, model, filt in rows:
@@ -904,6 +926,21 @@ class MentionLedger:
                 "status": str(error[0] or ""),
                 "http_status": int(error[1] or 0),
             }
+        summary["recent"] = [
+            {
+                "post_id": row[0],
+                "classification": row[1],
+                "confidence": row[2],
+                "reason": row[3],
+                "action": row[4],
+                "publish": bool(row[5]),
+                "text_complete": bool(row[6]),
+                "text_source": row[7] or "",
+                "filter_classification": row[8] or "",
+                "filter_reason": row[9] or "",
+            }
+            for row in recent_rows
+        ]
         return summary
 
     def conversation_activity(self, limit: int = 20) -> list[dict]:
@@ -1368,6 +1405,20 @@ def _ensure_problem_column(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE publications ADD COLUMN problem_json TEXT NOT NULL DEFAULT ''"
         )
+
+
+def _ensure_engagement_columns(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA table_info(engagement_decisions)").fetchall()
+    if not rows:
+        return
+    names = {row[1] for row in rows}
+    for name, ddl in (
+        ("text_complete", "ALTER TABLE engagement_decisions ADD COLUMN text_complete INTEGER NOT NULL DEFAULT 1"),
+        ("text_source", "ALTER TABLE engagement_decisions ADD COLUMN text_source TEXT NOT NULL DEFAULT ''"),
+        ("publish", "ALTER TABLE engagement_decisions ADD COLUMN publish INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if name not in names:
+            conn.execute(ddl)
 
 
 def _ensure_origin_column(conn: sqlite3.Connection) -> None:

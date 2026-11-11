@@ -151,6 +151,42 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
             post_id=mention.post_id,
         )
         return {"status": "skipped", "reason": "safety_hold"}
+    if replies_enabled():
+        from x_integration.engagement import authoritative_decision
+
+        try:
+            gate = authoritative_decision(
+                {
+                    "id": mention.post_id,
+                    "author_id": mention.author_id,
+                    "text": mention.text,
+                    "conversation_id": mention.conversation_id,
+                    "text_complete": True,
+                },
+                user_id=own or "",
+                floor="0",
+                already_replied=False,
+                conversation=book.conversation_state(mention.conversation_id),
+            )
+        except Exception:
+            book.finish(
+                mention.event_id,
+                status="skipped",
+                skip_reason="invalid_decision",
+                post_id=mention.post_id,
+            )
+            return {"status": "skipped", "reason": "invalid_decision"}
+        if not gate.get("publish"):
+            book.finish(
+                mention.event_id,
+                status="skipped",
+                skip_reason=str(gate.get("filter_reason") or gate.get("reason") or "not_permitted"),
+                post_id=mention.post_id,
+            )
+            return {
+                "status": "skipped",
+                "reason": str(gate.get("filter_reason") or gate.get("reason") or "not_permitted"),
+            }
     if not book.reserve_model_call(daily_model_limit()):
         book.finish(mention.event_id, status="skipped", skip_reason="spend_limit")
         return {"status": "skipped", "reason": "spend_limit"}
