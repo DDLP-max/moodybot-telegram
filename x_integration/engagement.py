@@ -242,9 +242,15 @@ def _intent(base: dict, text: str, body: str, words: list[str], window: dict) ->
             )
         return _pack(base, FOLLOW_UP, 0.92, "follow_up", True, "reply", "A", "elaborate")
     if _clause_request(clause):
-        return _pack(
+        decision = _pack(
             base, DIRECT_REQUEST, 0.93, "direct_request", True, "reply", "A", "answer_request"
         )
+        own_question = _self_contained_question(unquoted)
+        if own_question:
+            decision["question_text"] = own_question
+            decision["original_question_id"] = str(base.get("post_id") or "")
+            decision["question_sufficient"] = True
+        return decision
     if missing and not participating:
         return _pack(
             base, AMBIENT, 0.7, "missing_context", False, "observe", "C", "none",
@@ -657,6 +663,29 @@ def _direct_invite(text: str) -> bool:
     return _MENTION.search(text) is not None and _INVITE.search(text) is not None
 
 
+def _pointer_only(sentence: str) -> bool:
+    """A question that only points at another post, such as "your turn"."""
+    cleaned = _MENTION.sub(" ", sentence)
+    if _INVITE.search(cleaned) is None:
+        return False
+    leftover = _INVITE.sub(" ", cleaned)
+    return len(re.findall(r"[A-Za-z0-9']+", leftover)) < 3
+
+
+def _self_contained_question(text: str) -> str:
+    """The question in this post, outside quotes. A pointer is not a question."""
+    parts = re.split(r"[\n]+|(?<=[.!?])\s+", _outside_quotes(text))
+    kept = []
+    for part in parts:
+        if "?" not in part or _pointer_only(part):
+            continue
+        words = re.findall(r"[A-Za-z0-9']+", _MENTION.sub(" ", part))
+        if len(words) < 3:
+            continue
+        kept.append(" ".join(part.split()))
+    return " ".join(kept).strip()
+
+
 def _known_ai(author_id: str, username: str) -> bool:
     from x_integration.battle import author_is_ai
 
@@ -667,7 +696,17 @@ def _invitation(base: dict, text: str, unquoted: str, window: dict) -> dict:
     from x_integration.battle import recover_question
 
     prior = window["posts"][:-1]
-    recovered = recover_question(prior, unquoted)
+    own_question = _self_contained_question(unquoted)
+    if own_question:
+        recovered = {
+            "sufficient": True,
+            "question_id": str(base.get("post_id") or ""),
+            "question_text": own_question,
+            "grok_id": "",
+            "grok_answer": "",
+        }
+    else:
+        recovered = recover_question(prior, unquoted)
     flags = ["untrusted_quote"] if _UNTRUSTED.search(text) and not _UNTRUSTED.search(unquoted) else []
     if _UNTRUSTED.search(unquoted):
         return _pack(

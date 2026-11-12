@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from x_integration.battle import GROK_USER_ID, evaluate_fixture
-from x_integration.engagement import DIRECT_CHALLENGE
+from x_integration.engagement import DIRECT_CHALLENGE, authoritative_decision
 from x_integration.events import Mention
 from x_integration.state import MentionLedger
 
@@ -397,9 +397,88 @@ def test_publishing_path_allows_one_ai_invitation_then_a_human():
         _clear()
 
 
+ROUND_ONE_ID = "2120683565558251660"
+ROUND_ONE_AUTHOR = "2082957781293035520"
+ROUND_ONE_PARENT = "2120679791300866374"
+ROUND_ONE_TEXT = (
+    "@grok @MoodyBotAI @grok @MoodyBotAI Round one.\n\n"
+    "What's the difference between intelligence and wisdom, and why do so many "
+    "intelligent people make spectacularly stupid decisions?\n\n"
+    "Same question. Two answers. No corporate bullshit.\n\n"
+    "Let's see what you've got. \U0001f943"
+)
+
+
+def _round_one(**extra):
+    tweet = {
+        "id": ROUND_ONE_ID,
+        "author_id": ROUND_ONE_AUTHOR,
+        "author_username": "MattCanham805",
+        "text": ROUND_ONE_TEXT,
+        "conversation_id": ROUND_ONE_PARENT,
+        "parent_id": ROUND_ONE_PARENT,
+        "parent_author_id": GROK_USER_ID,
+        "parent_author_username": "grok",
+        "parent_text": "",
+        "text_complete": True,
+        "text_source": "text",
+    }
+    tweet.update(extra)
+    return tweet
+
+
+def test_round_one_question_does_not_need_an_earlier_post():
+    decision = authoritative_decision(
+        _round_one(),
+        user_id=BOT,
+        floor="0",
+        already_replied=False,
+    )
+    assert decision["classification"] == DIRECT_CHALLENGE
+    assert decision["confidence"] >= 0.8
+    assert decision["text_complete"] is True
+    assert decision["question_sufficient"] is True
+    assert decision["original_question_id"] == ROUND_ONE_ID
+    assert "intelligence and wisdom" in decision["question_text"]
+    assert decision["publish"] is True
+    assert decision["reason"] == "direct_challenge"
+    quoted = authoritative_decision(
+        _round_one(
+            id="2120683565558251661",
+            text=(
+                '@MoodyBotAI same question. "What\'s the difference between '
+                "intelligence and wisdom, and why do so many intelligent people "
+                'make spectacularly stupid decisions?"'
+            ),
+        ),
+        user_id=BOT,
+        floor="0",
+        already_replied=False,
+    )
+    assert quoted["publish"] is False
+    assert quoted["reason"] == "insufficient_context"
+    other = authoritative_decision(
+        _round_one(
+            id="2120683565558251662",
+            text=(
+                "@grok What's the difference between intelligence and wisdom, "
+                "and why do so many intelligent people make spectacularly stupid "
+                "decisions? @MoodyBotAI"
+            ),
+        ),
+        user_id=BOT,
+        floor="0",
+        already_replied=False,
+    )
+    assert other["publish"] is False
+    assert other["classification"] == "AMBIENT"
+    assert other["reason"] == "not_requested"
+
+
 if __name__ == "__main__":
     test_invitations_are_not_ordinary_mentions()
     test_variants_do_not_invent_or_loop()
     test_exact_copy_is_not_published()
     test_publishing_path_allows_one_ai_invitation_then_a_human()
+    test_round_one_question_does_not_need_an_earlier_post()
     print("battle ok")
