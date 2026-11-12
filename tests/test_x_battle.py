@@ -45,6 +45,8 @@ def _invite(text, invite_id="5003", author=GROK_USER_ID, username="grok", **extr
         "author_id": GROK_USER_ID,
         "author_username": "grok",
         "text": GROK_ANSWER,
+        "parent_id": "5001",
+        "conversation_id": "5001",
     }
     invitation = {
         "id": invite_id,
@@ -159,7 +161,7 @@ def test_invitations_are_not_ordinary_mentions():
             assert cases["H"]["publish"] is False
             assert cases["H"]["classification"] == "AMBIENT"
             assert cases["I"]["publish"] is False
-            assert cases["I"]["reason"] == "insufficient_context"
+            assert cases["I"]["reason"] == "missing_parent"
             assert cases["I"]["drafted"] is False
             assert cases["I"]["reply"] == ""
             assert "untrusted_quote" in cases["J"]["safety_flags"]
@@ -345,7 +347,17 @@ def test_publishing_path_allows_one_ai_invitation_then_a_human():
                 parent_id="6002",
                 parent_text=GROK_ANSWER,
                 parent_author_id=GROK_USER_ID,
-                context_posts=({"id": "6001", "author_id": HUMAN, "text": QUESTION},),
+                context_posts=(
+                    {"id": "6001", "author_id": HUMAN, "text": QUESTION, "conversation_id": "6001"},
+                    {
+                        "id": "6002",
+                        "author_id": GROK_USER_ID,
+                        "author_username": "grok",
+                        "text": GROK_ANSWER,
+                        "parent_id": "6001",
+                        "conversation_id": "6001",
+                    },
+                ),
             )
             from x_integration.webhook import process_mention
 
@@ -466,7 +478,7 @@ def test_round_one_question_does_not_need_an_earlier_post():
         already_replied=False,
     )
     assert quoted["publish"] is False
-    assert quoted["reason"] == "insufficient_context"
+    assert quoted["reason"] == "missing_parent"
     other = authoritative_decision(
         _round_one(
             id="2120683565558251662",

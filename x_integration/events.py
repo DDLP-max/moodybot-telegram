@@ -35,6 +35,7 @@ class Mention:
     author_username: str = ""
     context_posts: tuple = ()
     automated: bool = False
+    chain_stop: str = ""
 
 
 @dataclass(frozen=True)

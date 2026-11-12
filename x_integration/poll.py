@@ -113,7 +113,7 @@ def poll_once(
             return {"status": "truncated", "drafted": 0, "since_id": since_id}
     if not collected:
         return {"status": "empty", "drafted": 0, "since_id": since_id}
-    lookups = [2]
+    lookups = [4]
     prepared = []
     for tweet in _oldest_first(collected):
         prepared.append(_enrich_context(tweet, token, lookups) if fetch is None else tweet)
@@ -188,6 +188,12 @@ def fetch_mentions(
         if isinstance(parent_note.get("text"), str) and parent_note.get("text").strip():
             parent_text = parent_note.get("text")
         tweet["parent_text"] = parent_text
+        parent_parent_id = ""
+        for parent_ref in parent.get("referenced_tweets") or []:
+            if isinstance(parent_ref, dict) and parent_ref.get("type") == "replied_to":
+                parent_parent_id = str(parent_ref.get("id") or "")
+                break
+        tweet["parent_parent_id"] = parent_parent_id
         from x_integration.engagement import attach_post_text
 
         attach_post_text(tweet, note_failed=note_failed)
@@ -251,7 +257,7 @@ def _observe_once(*, ledger: Optional[MentionLedger], fetch: Optional[Fetch]) ->
         return stopped
     queued = []
     filtered = []
-    lookups = [2]
+    lookups = [4]
     model_budget = [2]
     for tweet in _oldest_first(result.tweets):
         enriched = _enrich_context(tweet, token, lookups) if fetch is None else tweet
@@ -333,91 +339,101 @@ def _record_shadow(book: MentionLedger, user_id: str, item: dict) -> None:
         )
 
 
-def _read_parent(tweet: dict, token: str, parent_id: str) -> dict:
+def _fetch_tweet(token: str, tweet_id: str) -> dict:
+    """One post lookup. Missing, deleted, and protected posts stay explicit."""
     import httpx
 
     try:
         response = httpx.get(
-            f"https://api.x.com/2/tweets/{parent_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"tweet.fields": "author_id,conversation_id,text,referenced_tweets,note_tweet"},
-            timeout=20,
-        )
-    except (httpx.TimeoutException, httpx.TransportError):
-        return tweet
-    if response.status_code != 200:
-        return tweet
-    try:
-        data = response.json().get("data") or {}
-    except ValueError:
-        return tweet
-    if isinstance(data, dict):
-        note = data.get("note_tweet") if isinstance(data.get("note_tweet"), dict) else {}
-        if isinstance(note.get("text"), str) and note.get("text").strip():
-            tweet["parent_text"] = note.get("text")
-        elif isinstance(data.get("text"), str):
-            tweet["parent_text"] = data.get("text") or ""
-        if data.get("author_id"):
-            tweet["parent_author_id"] = str(data.get("author_id"))
-    return tweet
-
-
-def _enrich_context(tweet: dict, token: str, lookups: list) -> dict:
-    """One parent read, then a bounded conversation window. Failures stay conservative."""
-    parent_id = str(tweet.get("parent_id") or "")
-    parent_text = tweet.get("parent_text") if isinstance(tweet.get("parent_text"), str) else ""
-    conversation_id = str(tweet.get("conversation_id") or "")
-    current_id = str(tweet.get("id") or "")
-    is_reply = bool(parent_id) or (conversation_id and conversation_id != current_id)
-    if not token or lookups[0] <= 0 or not is_reply:
-        return tweet
-    import httpx
-
-    copied = dict(tweet)
-    if parent_id and not parent_text.strip():
-        lookups[0] -= 1
-        copied = _read_parent(copied, token, parent_id)
-        if lookups[0] <= 0:
-            return copied
-    conversation_id = str(copied.get("conversation_id") or "")
-    if not conversation_id or lookups[0] <= 0:
-        return copied
-    lookups[0] -= 1
-    try:
-        found = httpx.get(
-            "https://api.x.com/2/tweets/search/recent",
+            f"https://api.x.com/2/tweets/{tweet_id}",
             headers={"Authorization": f"Bearer {token}"},
             params={
-                "query": f"conversation_id:{conversation_id}",
-                "max_results": 10,
-                "tweet.fields": "author_id,conversation_id,text,note_tweet",
+                "tweet.fields": "author_id,conversation_id,text,referenced_tweets,note_tweet",
+                "expansions": "author_id",
+                "user.fields": "username",
             },
             timeout=20,
         )
     except (httpx.TimeoutException, httpx.TransportError):
-        return copied
-    if found.status_code != 200:
-        return copied
+        return {"id": tweet_id, "status": "missing"}
+    if response.status_code == 404:
+        return {"id": tweet_id, "status": "deleted"}
+    if response.status_code == 403:
+        return {"id": tweet_id, "status": "protected"}
+    if response.status_code != 200:
+        return {"id": tweet_id, "status": "missing"}
     try:
-        payload = found.json()
+        body = response.json()
     except ValueError:
-        return copied
-    posts = []
-    current = str(copied.get("id") or "")
-    for item in payload.get("data") or []:
-        if not isinstance(item, dict):
-            continue
-        item_id = str(item.get("id") or "")
-        if not item_id or item_id == current:
-            continue
-        note = item.get("note_tweet") if isinstance(item.get("note_tweet"), dict) else {}
-        text = note.get("text") if isinstance(note.get("text"), str) and note.get("text").strip() else item.get("text")
-        posts.append({
-            "id": item_id,
-            "author_id": str(item.get("author_id") or ""),
-            "text": text if isinstance(text, str) else "",
-        })
-    copied["context_posts"] = posts[-7:]
+        return {"id": tweet_id, "status": "missing"}
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, dict):
+        return {"id": tweet_id, "status": "missing"}
+    names = {}
+    includes = body.get("includes") if isinstance(body.get("includes"), dict) else {}
+    for user in includes.get("users") or []:
+        if isinstance(user, dict):
+            names[str(user.get("id") or "")] = str(user.get("username") or "")
+    note = data.get("note_tweet") if isinstance(data.get("note_tweet"), dict) else {}
+    text = note.get("text") if isinstance(note.get("text"), str) and note.get("text").strip() else data.get("text")
+    parent_id = ""
+    for ref in data.get("referenced_tweets") or []:
+        if isinstance(ref, dict) and ref.get("type") == "replied_to":
+            parent_id = str(ref.get("id") or "")
+            break
+    author_id = str(data.get("author_id") or "")
+    return {
+        "id": str(data.get("id") or tweet_id),
+        "author_id": author_id,
+        "author_username": names.get(author_id, ""),
+        "text": text if isinstance(text, str) else "",
+        "conversation_id": str(data.get("conversation_id") or ""),
+        "parent_id": parent_id,
+        "text_complete": True,
+        "status": "ok",
+    }
+
+
+def _enrich_context(tweet: dict, token: str, lookups: list) -> dict:
+    """Walk the reply chain. A reply does not use a search dump as the question."""
+    from x_integration.battle import MAX_CHAIN_LOOKUPS, walk_reply_chain
+
+    parent_id = str(tweet.get("parent_id") or "")
+    if not token or lookups[0] <= 0 or not parent_id:
+        return tweet
+    copied = dict(tweet)
+    index = {}
+    parent_text = copied.get("parent_text") if isinstance(copied.get("parent_text"), str) else ""
+    parent_parent = str(copied.get("parent_parent_id") or "")
+    if parent_text.strip() and parent_parent:
+        index[parent_id] = {
+            "id": parent_id,
+            "author_id": str(copied.get("parent_author_id") or ""),
+            "author_username": str(copied.get("parent_author_username") or ""),
+            "text": parent_text,
+            "parent_id": parent_parent,
+            "conversation_id": str(copied.get("conversation_id") or ""),
+            "text_complete": copied.get("parent_text_complete", True) is not False,
+        }
+
+    def fetch(tweet_id: str) -> dict:
+        return _fetch_tweet(token, tweet_id)
+
+    chain = walk_reply_chain(
+        copied,
+        index,
+        fetch,
+        max_lookups=min(MAX_CHAIN_LOOKUPS, lookups[0]),
+    )
+    lookups[0] = max(0, lookups[0] - int(chain.get("lookups") or 0))
+    copied["context_posts"] = list(reversed(chain["posts"]))
+    if chain.get("stop"):
+        copied["chain_stop"] = chain["stop"]
+    if chain["posts"]:
+        nearest = chain["posts"][0]
+        if not parent_text.strip():
+            copied["parent_text"] = nearest.get("text") if isinstance(nearest.get("text"), str) else ""
+            copied["parent_author_id"] = str(nearest.get("author_id") or copied.get("parent_author_id") or "")
     return copied
 
 
@@ -557,6 +573,7 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
             author_username=str(tweet.get("author_username") or ""),
             context_posts=tuple(tweet.get("context_posts") or ()),
             automated=bool(tweet.get("automated")),
+            chain_stop=str(tweet.get("chain_stop") or ""),
         )
         decision = _classify_mention(book, tweet, own or "", book.get_since_id() or "0")
         if decision["classification"] != "historical":

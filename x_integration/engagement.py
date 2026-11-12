@@ -157,7 +157,7 @@ def decide_engagement(
     if _SPAM.search(body):
         return _pack(base, SPAM, 0.96, "spam", False, "skip", "C", "none", ["spam"])
 
-    decision = _intent(base, text, body, words, window)
+    decision = _intent(base, text, body, words, window, tweet)
     if not text_complete:
         flags = list(decision.get("safety_flags") or [])
         if "truncated" not in flags:
@@ -200,7 +200,7 @@ def decide_engagement(
     return decision
 
 
-def _intent(base: dict, text: str, body: str, words: list[str], window: dict) -> dict:
+def _intent(base: dict, text: str, body: str, words: list[str], window: dict, tweet: dict) -> dict:
     """Request language counts only in a clause addressed to MoodyBot."""
     participating = window["participating"]
     missing = window["missing_parent"]
@@ -208,7 +208,7 @@ def _intent(base: dict, text: str, body: str, words: list[str], window: dict) ->
         return _pack(base, AMBIENT, 0.95, "quotation", False, "observe", "C", "none")
     unquoted = _outside_quotes(text)
     if _direct_invite(unquoted):
-        return _invitation(base, text, unquoted, window)
+        return _invitation(base, text, unquoted, window, tweet)
     if _THIRD_PARTY.search(unquoted):
         return _pack(base, AMBIENT, 0.96, "not_requested", False, "observe", "C", "none")
     clause = _vocative_clause(text)
@@ -415,40 +415,58 @@ def _window(tweet: dict, context: dict | None, user_id: str) -> dict:
     posts = []
     seen = set()
 
-    def add(post_id: str, author_id: str, text: str, username: str = "") -> None:
+    def add(post_id: str, author_id: str, text: str, username: str = "", source: dict | None = None) -> None:
         if not post_id or post_id in seen:
             return
         seen.add(post_id)
-        posts.append({
+        post = {
             "id": post_id,
             "author_id": author_id,
             "author_username": username,
             "author_is_bot": bool(user_id) and author_id == user_id,
             "text": text if isinstance(text, str) else "",
-        })
+        }
+        if isinstance(source, dict):
+            post["parent_id"] = str(source.get("parent_id") or "")
+            post["conversation_id"] = str(source.get("conversation_id") or "")
+            post["text_complete"] = source.get("text_complete", True)
+            post["status"] = str(source.get("status") or "")
+            if isinstance(source.get("note_tweet"), dict):
+                post["note_tweet"] = source.get("note_tweet")
+        posts.append(post)
 
     for item in supplied:
-        note_text, _complete, _source = read_post_text(item)
+        note_text, complete, _source = read_post_text(item)
         add(
             str(item.get("id") or ""),
             str(item.get("author_id") or ""),
             note_text,
             str(item.get("author_username") or ""),
+            {**item, "text_complete": complete},
         )
     parent_id = str(tweet.get("parent_id") or "")
     parent_text = tweet.get("parent_text") if isinstance(tweet.get("parent_text"), str) else ""
-    add(
-        parent_id,
-        str(tweet.get("parent_author_id") or ""),
-        parent_text,
-        str(tweet.get("parent_author_username") or ""),
-    )
+    if parent_text.strip():
+        add(
+            parent_id,
+            str(tweet.get("parent_author_id") or ""),
+            parent_text,
+            str(tweet.get("parent_author_username") or ""),
+            {
+                "parent_id": str(tweet.get("parent_parent_id") or ""),
+                "conversation_id": str(tweet.get("conversation_id") or ""),
+                "text_complete": tweet.get("parent_text_complete", True),
+                "status": str(tweet.get("parent_status") or ""),
+            },
+        )
     current_name = str(tweet.get("author_username") or "")
+    current_text, current_complete, _current_source = read_post_text(tweet)
     add(
         str(tweet.get("id") or ""),
         str(tweet.get("author_id") or ""),
-        tweet.get("text") if isinstance(tweet.get("text"), str) else "",
+        current_text,
         current_name,
+        {**tweet, "text_complete": current_complete},
     )
     posts = posts[-_CONTEXT_LIMIT:]
     parent_author = str(tweet.get("parent_author_id") or "")
@@ -628,8 +646,18 @@ def filter_view(decision: dict) -> tuple[str, str]:
         return "not_requested", "ai_loop"
     if reason == "repeated_question":
         return "not_requested", "repeated_question"
-    if reason == "insufficient_context":
-        return "uncertain", "insufficient_context"
+    if reason in {
+        "insufficient_context",
+        "missing_parent",
+        "deleted_parent",
+        "protected_parent",
+        "cycle",
+        "depth_limit",
+        "lookup_budget",
+        "ambiguous_question",
+        "incomplete_text",
+    }:
+        return "uncertain", reason
     if kind == CONTRIBUTION or reason in {"generic_encouragement", "contribution", "meaningful"}:
         return "not_requested", "contribution"
     if reason == "not_requested":
@@ -691,35 +719,14 @@ def _known_ai(author_id: str, username: str) -> bool:
     return author_is_ai(author_id, username)
 
 
-def _invitation(base: dict, text: str, unquoted: str, window: dict) -> dict:
-    from x_integration.battle import recover_question
+def _invitation(base: dict, text: str, unquoted: str, window: dict, tweet: dict) -> dict:
+    from x_integration.battle import trace_question
 
-    prior = window["posts"][:-1]
-    from question_scope import extract_questions
-
-    found = extract_questions(
-        unquoted,
-        context_posts=prior,
-        source_post_id=str(base.get("post_id") or ""),
-        channel="x",
+    recovered = trace_question(
+        tweet,
+        window["posts"],
+        fetch=tweet.get("fetch_post") if callable(tweet.get("fetch_post")) else None,
     )
-    parent = recover_question(prior, unquoted)
-    if found["questions"] and not found["needs_context"]:
-        recovered = {
-            "sufficient": True,
-            "question_id": found.get("source_post_id") or str(base.get("post_id") or ""),
-            "question_text": " ".join(item["text"] for item in found["questions"]),
-            "grok_id": parent.get("grok_id") or "",
-            "grok_answer": parent.get("grok_answer") or "",
-        }
-    else:
-        recovered = {
-            "sufficient": False,
-            "question_id": "",
-            "question_text": "",
-            "grok_id": "",
-            "grok_answer": "",
-        }
     flags = ["untrusted_quote"] if _UNTRUSTED.search(text) and not _UNTRUSTED.search(unquoted) else []
     if _UNTRUSTED.search(unquoted):
         return _pack(
@@ -736,12 +743,16 @@ def _invitation(base: dict, text: str, unquoted: str, window: dict) -> dict:
     )
     decision["original_question_id"] = recovered.get("question_id") or ""
     decision["question_text"] = recovered.get("question_text") or ""
+    decision["question_author_id"] = recovered.get("question_author_id") or ""
+    decision["question_conversation_id"] = recovered.get("question_conversation_id") or ""
+    decision["reply_parent_id"] = recovered.get("reply_parent_id") or base.get("post_id") or ""
+    decision["question_origin"] = recovered.get("question_origin") or ""
     decision["grok_answer"] = recovered.get("grok_answer") or ""
     decision["question_sufficient"] = bool(recovered.get("sufficient"))
     if not recovered.get("sufficient"):
         decision["respond"] = False
         decision["action"] = "observe"
-        decision["reason"] = "insufficient_context"
+        decision["reason"] = recovered.get("reason") or "insufficient_context"
         decision["objective"] = "clarify"
         decision["question_sufficient"] = False
         flags = list(decision["safety_flags"])

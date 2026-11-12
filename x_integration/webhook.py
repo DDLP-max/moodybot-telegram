@@ -168,6 +168,7 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
                     "parent_author_id": mention.parent_author_id,
                     "automated": mention.automated,
                     "context_posts": list(mention.context_posts),
+                    "chain_stop": mention.chain_stop,
                 },
                 user_id=own or "",
                 floor="0",
@@ -206,7 +207,10 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
 
         brief = battle_brief({"question_text": gate.get("question_text")})
     try:
-        if brief:
+        question = str(gate.get("question_text") or "").strip()
+        if gate.get("classification") == "DIRECT_CHALLENGE" and question and gate.get("question_origin") == "earlier":
+            reply = draft_mention_reply(question, mention.conversation_id)
+        elif brief:
             reply = draft_mention_reply(mention.text, mention.conversation_id, brief=brief)
         else:
             reply = draft_mention_reply(mention.text, mention.conversation_id)
