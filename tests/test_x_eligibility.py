@@ -279,7 +279,7 @@ def test_overlong_autonomous_reply_is_not_sent_and_two_auth_failures_halt():
     original_send = publish_mod.send_reply
     original_draft = reply_mod.draft_mention_reply
     probe.validated_user_token = lambda book=None: {"ok": True, "token": "cached-access", "http_status": 200}
-    reply_mod.draft_mention_reply = lambda text, conversation_id, complete=None: "a" * 250
+    reply_mod.draft_mention_reply = lambda text, conversation_id, complete=None: "a" * 281
     publish_mod.send_reply = lambda token, post_id, text: sent.append(post_id)
     try:
         with TemporaryDirectory() as tmp:

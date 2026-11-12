@@ -281,6 +281,30 @@ def _engagement_summary() -> dict:
         return {"shadow": True, "mentions": None}
 
 
+def _generation_metrics() -> dict:
+    empty = {
+        "model_calls": None,
+        "input_tokens": None,
+        "output_tokens": None,
+        "estimated_usd": None,
+        "confirmed_usd": None,
+        "spend_usd": None,
+        "budget_usd": None,
+        "budget_remaining_usd": None,
+        "replies_attempted": None,
+        "replies_published": None,
+        "replies_failed": None,
+        "last_generation_error": "",
+        "last_publish_error": {"status": "", "http_status": 0, "reason": ""},
+    }
+    try:
+        from x_integration.state import ledger_from_env
+
+        return ledger_from_env().generation_summary()
+    except Exception:
+        return empty
+
+
 def _reply_allowance() -> dict:
     try:
         from x_integration.state import ledger_from_env
@@ -591,6 +615,7 @@ class BotRuntime:
             "x_publish_halt": _publish_halt(),
             "x_engagement": _engagement_summary(),
             "x_battle": _battle_metrics(),
+            "x_generation": _generation_metrics(),
         }
         return web.json_response(body)
 

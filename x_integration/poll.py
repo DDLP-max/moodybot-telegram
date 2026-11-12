@@ -478,7 +478,7 @@ def _publishing_mode() -> bool:
     if not replies_enabled():
         return False
     mode = operating_mode()
-    if mode == "limited_beta":
+    if mode in {"limited_beta", "live_test"}:
         return True
     if mode == "one_reply_test" and one_reply_gate_enabled():
         return not ledger_from_env().activation_blocks_publish()
@@ -586,7 +586,17 @@ def _apply(book: MentionLedger, tweets: list[dict]) -> dict:
                 book.set_since_id(post_id)
             continue
         needs_model = author_id != own and not book.already_replied(post_id) and bool(text.strip())
-        if needs_model and book.model_calls_today() >= limit:
+        from x_integration.state import operating_mode
+
+        if operating_mode() == "live_test":
+            if needs_model and not book.budget_allows_call():
+                book.note_generation_error("budget_exhausted")
+                return {
+                    "status": "budget_exhausted",
+                    "drafted": drafted,
+                    "since_id": book.get_since_id(),
+                }
+        elif needs_model and book.model_calls_today() >= limit:
             return {
                 "status": "spend_limit",
                 "drafted": drafted,

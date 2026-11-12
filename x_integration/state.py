@@ -152,6 +152,25 @@ CREATE TABLE IF NOT EXISTS battle_events (
     model TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS generation_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    reserved_usd REAL NOT NULL DEFAULT 0,
+    estimated_usd REAL NOT NULL DEFAULT 0,
+    confirmed_usd REAL NOT NULL DEFAULT 0,
+    charged_usd REAL NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS generation_notes (
+    name TEXT PRIMARY KEY,
+    detail TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -414,11 +433,12 @@ class MentionLedger:
         both pass a cap that only looks at finished posts.
         """
         used, inflight = self._automatic_counts()
-        remaining = AUTOMATIC_REPLY_LIMIT - used - inflight
+        cap = automatic_reply_limit()
+        remaining = cap - used - inflight
         if remaining < 0:
             remaining = 0
         return {
-            "limit": AUTOMATIC_REPLY_LIMIT,
+            "limit": cap,
             "used": used,
             "inflight": inflight,
             "remaining": remaining,
@@ -1270,6 +1290,241 @@ class MentionLedger:
             finally:
                 conn.close()
 
+    def charged_usd(self) -> float:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(charged_usd), 0) FROM generation_calls"
+                ).fetchone()
+            finally:
+                conn.close()
+        return float(row[0] or 0)
+
+    def budget_allows_call(self) -> bool:
+        if operating_mode() != "live_test":
+            return True
+        return self.charged_usd() + openrouter_call_reserve_usd() <= openrouter_budget_usd() + 1e-9
+
+    def generation_calls_for(self, post_id: str) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM generation_calls WHERE post_id = ?",
+                    (post_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        return int(row[0] or 0)
+
+    def note_generation_error(self, detail: str) -> None:
+        text = (detail or "").strip()[:120]
+        if not text:
+            return
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO generation_notes (name, detail, updated_at)
+                    VALUES ('last', ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET detail = excluded.detail, updated_at = excluded.updated_at
+                    """,
+                    (text, now),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def reserve_generation_call(self, post_id: str) -> Optional[int]:
+        """Hold a conservative cost before the provider request. None means stop."""
+        reserve = openrouter_call_reserve_usd()
+        budget = openrouter_budget_usd()
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                charged = float(
+                    conn.execute(
+                        "SELECT COALESCE(SUM(charged_usd), 0) FROM generation_calls"
+                    ).fetchone()[0]
+                    or 0
+                )
+                if charged + reserve > budget + 1e-9:
+                    conn.execute("COMMIT")
+                    return None
+                cursor = conn.execute(
+                    """
+                    INSERT INTO generation_calls (
+                        post_id, status, input_tokens, output_tokens,
+                        reserved_usd, estimated_usd, confirmed_usd, charged_usd,
+                        error, created_at, updated_at
+                    ) VALUES (?, 'reserved', 0, 0, ?, 0, 0, ?, '', ?, ?)
+                    """,
+                    (post_id or "", reserve, reserve, now, now),
+                )
+                conn.execute("COMMIT")
+                return int(cursor.lastrowid)
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def settle_generation_call(
+        self,
+        call_id: int,
+        *,
+        usage: Optional[dict] = None,
+        error: str = "",
+    ) -> None:
+        """Replace the in-flight hold with provider cost, or keep the hold."""
+        usage = usage if isinstance(usage, dict) else {}
+        prompt = _usage_tokens(usage, "prompt_tokens", "input_tokens")
+        completion = _usage_tokens(usage, "completion_tokens", "output_tokens")
+        confirmed = _usage_cost(usage)
+        now = _now()
+        reason = (error or "").strip()[:120]
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT reserved_usd FROM generation_calls WHERE id = ?",
+                    (int(call_id),),
+                ).fetchone()
+                if row is None:
+                    conn.execute("COMMIT")
+                    return
+                reserve = float(row[0] or 0)
+                if confirmed is not None and confirmed >= 0:
+                    status = "confirmed"
+                    estimated = 0.0
+                    confirmed_usd = confirmed
+                    charged = confirmed
+                elif prompt or completion:
+                    estimated = (
+                        prompt / 1_000_000 * openrouter_input_usd_per_million()
+                        + completion / 1_000_000 * openrouter_output_usd_per_million()
+                    )
+                    confirmed_usd = 0.0
+                    charged = estimated if estimated > reserve else reserve
+                    status = "estimated"
+                else:
+                    estimated = 0.0
+                    confirmed_usd = 0.0
+                    charged = reserve
+                    status = "unavailable"
+                conn.execute(
+                    """
+                    UPDATE generation_calls
+                    SET status = ?, input_tokens = ?, output_tokens = ?,
+                        estimated_usd = ?, confirmed_usd = ?, charged_usd = ?,
+                        error = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        status,
+                        prompt,
+                        completion,
+                        estimated,
+                        confirmed_usd,
+                        charged,
+                        reason,
+                        now,
+                        int(call_id),
+                    ),
+                )
+                if reason:
+                    conn.execute(
+                        """
+                        INSERT INTO generation_notes (name, detail, updated_at)
+                        VALUES ('last', ?, ?)
+                        ON CONFLICT(name) DO UPDATE SET
+                            detail = excluded.detail, updated_at = excluded.updated_at
+                        """,
+                        (reason, now),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                _rollback(conn)
+                raise
+            finally:
+                conn.close()
+
+    def generation_summary(self) -> dict:
+        """Public counters. No prompt text and no reply text."""
+        budget = openrouter_budget_usd()
+        with self._lock:
+            conn = self._connect()
+            try:
+                calls = conn.execute(
+                    """
+                    SELECT
+                        COALESCE(SUM(CASE WHEN status != 'blocked' THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(input_tokens), 0),
+                        COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(estimated_usd), 0),
+                        COALESCE(SUM(CASE WHEN status = 'confirmed' THEN confirmed_usd ELSE 0 END), 0),
+                        COALESCE(SUM(charged_usd), 0)
+                    FROM generation_calls
+                    """
+                ).fetchone()
+                replies = conn.execute(
+                    """
+                    SELECT
+                        COALESCE(SUM(CASE WHEN origin = 'automatic' AND status IN ('posted', 'failed', 'ambiguous') THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN origin = 'automatic' AND status = 'posted' THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN origin = 'automatic' AND status = 'failed' THEN 1 ELSE 0 END), 0)
+                    FROM publications
+                    """
+                ).fetchone()
+                publish_error = conn.execute(
+                    """
+                    SELECT status, http_status, detail FROM publications
+                    WHERE status IN ('failed', 'ambiguous')
+                    ORDER BY updated_at DESC LIMIT 1
+                    """
+                ).fetchone()
+                note = conn.execute(
+                    "SELECT detail FROM generation_notes WHERE name = 'last'"
+                ).fetchone()
+            finally:
+                conn.close()
+        spent = float(calls[5] or 0)
+        remaining = budget - spent
+        if remaining < 0:
+            remaining = 0.0
+        error = {"status": "", "http_status": 0, "reason": ""}
+        if publish_error is not None:
+            error = {
+                "status": str(publish_error[0] or ""),
+                "http_status": int(publish_error[1] or 0),
+                "reason": _public_reason(publish_error[2]),
+            }
+        return {
+            "model_calls": int(calls[0] or 0),
+            "input_tokens": int(calls[1] or 0),
+            "output_tokens": int(calls[2] or 0),
+            "estimated_usd": round(float(calls[3] or 0), 6),
+            "confirmed_usd": round(float(calls[4] or 0), 6),
+            "spend_usd": round(spent, 6),
+            "budget_usd": round(budget, 6),
+            "budget_remaining_usd": round(remaining, 6),
+            "replies_attempted": int(replies[0] or 0),
+            "replies_published": int(replies[1] or 0),
+            "replies_failed": int(replies[2] or 0),
+            "last_generation_error": str(note[0] or "") if note else "",
+            "last_publish_error": error,
+        }
+
     def _automatic_counts(self) -> tuple[int, int]:
         cutoff = (datetime.now(timezone.utc) - AUTOMATIC_REPLY_WINDOW).isoformat()
         with self._lock:
@@ -1307,7 +1562,7 @@ class MentionLedger:
             WHERE origin = 'automatic' AND status IN ('pending', 'ambiguous')
             """,
         ).fetchone()[0]
-        return int(used) + int(inflight) < AUTOMATIC_REPLY_LIMIT
+        return int(used) + int(inflight) < automatic_reply_limit()
 
     def already_replied(self, post_id: str) -> bool:
         with self._lock:
@@ -1527,11 +1782,83 @@ def one_reply_gate_enabled() -> bool:
 
 
 def operating_mode() -> str:
-    """disabled, one_reply_test, or limited_beta. Anything else is disabled."""
+    """disabled, one_reply_test, limited_beta, or live_test. Anything else is disabled."""
     raw = (os.environ.get("X_OPERATING_MODE") or "").strip().lower()
-    if raw in {"disabled", "one_reply_test", "limited_beta"}:
+    if raw in {"disabled", "one_reply_test", "limited_beta", "live_test"}:
         return raw
     return "disabled"
+
+
+def automatic_reply_limit() -> int:
+    """LIVE_TEST uses a configurable 24-hour cap. Other modes stay at five."""
+    if operating_mode() != "live_test":
+        return AUTOMATIC_REPLY_LIMIT
+    raw = (os.environ.get("X_LIVE_TEST_REPLY_LIMIT") or "100").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 100
+    return value if value > 0 else 100
+
+
+def _positive_float(name: str, default: float) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def openrouter_budget_usd() -> float:
+    return _positive_float("X_OPENROUTER_BUDGET_USD", 10.0)
+
+
+def openrouter_call_reserve_usd() -> float:
+    """Held before a call. Replaced by provider cost when OpenRouter returns it."""
+    return _positive_float("X_OPENROUTER_CALL_RESERVE_USD", 0.20)
+
+
+def openrouter_input_usd_per_million() -> float:
+    """High-context Grok 4.3 rate. Used only when the provider omits cost."""
+    return _positive_float("X_OPENROUTER_INPUT_USD_PER_MILLION", 2.50)
+
+
+def openrouter_output_usd_per_million() -> float:
+    return _positive_float("X_OPENROUTER_OUTPUT_USD_PER_MILLION", 5.0)
+
+
+def _usage_tokens(usage: dict, *names: str) -> int:
+    for name in names:
+        raw = usage.get(name)
+        if raw is None:
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
+def _usage_cost(usage: dict) -> Optional[float]:
+    if "cost" not in usage or usage.get("cost") is None:
+        return None
+    try:
+        return float(usage["cost"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _public_reason(detail: object) -> str:
+    text = str(detail or "").strip().replace("\n", " ")
+    lowered = text.lower()
+    if "bearer" in lowered or "sk-" in lowered or "api_key" in lowered or "api-key" in lowered:
+        return "redacted"
+    return text[:120]
 
 
 def conversation_reply_limit() -> int:

@@ -102,13 +102,16 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
                 "status": "activation_stopped",
                 "reason": book.activation_status()["stop_reason"],
             }
-        if mode == "limited_beta" and book.publish_halted():
+        if mode in {"limited_beta", "live_test"} and book.publish_halted():
             return {
                 "status": "publish_halted",
                 "reason": book.publish_halt_status()["halt_reason"],
             }
-        if mode not in {"one_reply_test", "limited_beta"}:
+        if mode not in {"one_reply_test", "limited_beta", "live_test"}:
             return {"status": "not_publishing", "reason": mode}
+    if replies_enabled() and mode == "live_test" and not book.budget_allows_call():
+        book.note_generation_error("budget_exhausted")
+        return {"status": "not_sent", "reason": "budget_exhausted"}
     if replies_enabled() and book.automatic_reply_allowance()["remaining"] <= 0:
         existing = book.publication(mention.post_id)
         if existing and str(existing.get("status") or "") in {"posted", "ambiguous", "failed", "pending"}:
@@ -196,39 +199,48 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
             }
     else:
         gate = {}
-    if not book.reserve_model_call(daily_model_limit()):
+    if operating_mode() != "live_test" and not book.reserve_model_call(daily_model_limit()):
         book.finish(mention.event_id, status="skipped", skip_reason="spend_limit")
         return {"status": "skipped", "reason": "spend_limit"}
-    from x_integration.reply import draft_mention_reply
+    from x_integration.reply import draft_mention_reply, generation_post
 
     brief = ""
     if gate.get("classification") == "DIRECT_CHALLENGE" and gate.get("question_text"):
         from x_integration.battle import battle_brief
 
         brief = battle_brief({"question_text": gate.get("question_text")})
+    token = generation_post.set(mention.post_id)
     try:
-        question = str(gate.get("question_text") or "").strip()
-        if gate.get("classification") == "DIRECT_CHALLENGE" and question and gate.get("question_origin") == "earlier":
-            reply = draft_mention_reply(question, mention.conversation_id)
-        elif brief:
-            reply = draft_mention_reply(mention.text, mention.conversation_id, brief=brief)
-        else:
-            reply = draft_mention_reply(mention.text, mention.conversation_id)
-    except Exception:
-        if operating_mode() == "one_reply_test" and one_reply_gate_enabled():
-            book.stop_activation("generation_failed", mention.post_id)
-            book.release_pending_event(mention.event_id)
-            return {"status": "not_sent", "reason": "generation_failed"}
-        if operating_mode() == "limited_beta":
-            book.record_classification(mention.post_id, "generation_failed", "generation_failed")
-            book.finish(
-                mention.event_id,
-                status="skipped",
-                skip_reason="generation_failed",
-                post_id=mention.post_id,
-            )
-            return {"status": "not_sent", "reason": "generation_failed"}
-        raise
+        try:
+            question = str(gate.get("question_text") or "").strip()
+            if gate.get("classification") == "DIRECT_CHALLENGE" and question and gate.get("question_origin") == "earlier":
+                reply = draft_mention_reply(question, mention.conversation_id)
+            elif brief:
+                reply = draft_mention_reply(mention.text, mention.conversation_id, brief=brief)
+            else:
+                reply = draft_mention_reply(mention.text, mention.conversation_id)
+        except Exception as exc:
+            code = _failure_code(exc)
+            if operating_mode() == "one_reply_test" and one_reply_gate_enabled():
+                book.stop_activation("generation_failed", mention.post_id)
+                book.release_pending_event(mention.event_id)
+                return {"status": "not_sent", "reason": "generation_failed"}
+            if operating_mode() in {"limited_beta", "live_test"}:
+                book.note_generation_error(code)
+                if code == "budget_exhausted" and book.generation_calls_for(mention.post_id) == 0:
+                    book.release_pending_event(mention.event_id)
+                    return {"status": "not_sent", "reason": code}
+                book.record_classification(mention.post_id, code, code)
+                book.finish(
+                    mention.event_id,
+                    status="skipped",
+                    skip_reason=code,
+                    post_id=mention.post_id,
+                )
+                return {"status": "not_sent", "reason": code}
+            raise
+    finally:
+        generation_post.reset(token)
     if operating_mode() == "one_reply_test" and one_reply_gate_enabled() and not str(reply or "").strip():
         book.stop_activation("generation_failed", mention.post_id)
         book.release_pending_event(mention.event_id)
@@ -253,6 +265,13 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
         post_id=mention.post_id,
     )
     return {"status": "dry_run", "posted": False}
+
+
+def _failure_code(exc: Exception) -> str:
+    text = str(exc).strip()
+    if text in {"budget_exhausted", "incomplete_answer", "reply_too_long", "generation_failed"}:
+        return text
+    return "generation_failed"
 
 
 def _activation_reason(kind: str, http_status: int) -> str:
@@ -318,7 +337,7 @@ def _publish_automatic(
 
     mode = operating_mode()
     armed = mode == "one_reply_test" and one_reply_gate_enabled()
-    beta = mode == "limited_beta"
+    beta = mode in {"limited_beta", "live_test"}
     slot = book.reserve_automatic_publication(
         mention.post_id,
         reply,

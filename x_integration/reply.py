@@ -6,8 +6,14 @@ the Telegram handler calls. This module does not post to X.
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Callable, List, Optional
+
+generation_post: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "x_generation_post",
+    default="",
+)
 
 logger = logging.getLogger("moodybot")
 
@@ -215,26 +221,56 @@ def _with_post_limit(messages: List[dict]) -> List[dict]:
     return prepared + [note]
 
 
+def _provider_error(exc: Exception) -> str:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int) and status > 0:
+        return f"openrouter_http_{status}"
+    name = type(exc).__name__.lower()
+    if "timeout" in name:
+        return "openrouter_timeout"
+    return "openrouter_transport"
+
+
 def openrouter_complete(messages: List[dict]) -> str:
     import httpx
     import moodybot
+    from x_integration.state import ledger_from_env, operating_mode
 
     if not moodybot.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
-    with httpx.Client(timeout=20) as client:
-        response = client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {moodybot.OPENROUTER_API_KEY}",
-                "HTTP-Referer": "https://moodybot.ai",
-                "X-Title": "MoodyBot",
-            },
-            json={
-                "model": moodybot.OPENROUTER_MODEL,
-                "messages": messages,
-                "max_tokens": 1000,
-            },
-        )
-    response.raise_for_status()
-    body = response.json()
+    track = operating_mode() == "live_test"
+    book = ledger_from_env() if track else None
+    call_id = None
+    if book is not None:
+        call_id = book.reserve_generation_call(generation_post.get())
+        if call_id is None:
+            book.note_generation_error("budget_exhausted")
+            raise RuntimeError("budget_exhausted")
+    try:
+        with httpx.Client(timeout=20) as client:
+            response = client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {moodybot.OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://moodybot.ai",
+                    "X-Title": "MoodyBot",
+                },
+                json={
+                    "model": moodybot.OPENROUTER_MODEL,
+                    "messages": messages,
+                    "max_tokens": 1000,
+                    "usage": {"include": True},
+                },
+            )
+        response.raise_for_status()
+        body = response.json()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        if call_id is not None and book is not None:
+            book.settle_generation_call(call_id, error=_provider_error(exc))
+        raise
+    usage = body.get("usage") if isinstance(body, dict) else None
+    if call_id is not None and book is not None:
+        book.settle_generation_call(call_id, usage=usage if isinstance(usage, dict) else {})
     return body["choices"][0]["message"]["content"]

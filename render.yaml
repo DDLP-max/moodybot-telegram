@@ -45,14 +45,22 @@ services:
         sync: false
       - key: X_REPLIES_ENABLED
         value: "false"
-      # disabled, one_reply_test, or limited_beta. Missing or unknown stays disabled.
-      # limited_beta also requires X_REPLIES_ENABLED=true before any post.
+      # disabled, one_reply_test, limited_beta, or live_test.
+      # Missing or unknown stays disabled. live_test does not use the one-reply gate.
+      # A git deploy does not change a value already set in the dashboard.
       - key: X_OPERATING_MODE
         value: disabled
-      # Arms exactly one automatic POST. The ledger keeps that attempt
-      # after a restart. Leave false until the one-reply check is confirmed.
+      # Arms exactly one automatic POST in one_reply_test. live_test ignores it.
       - key: X_ONE_REPLY_GATE
         value: "false"
+      # LIVE_TEST rolling cap. Other modes stay at 5 in code.
+      - key: X_LIVE_TEST_REPLY_LIMIT
+        value: "100"
+      # Dollar stop for LIVE_TEST. Provider cost replaces the per-call hold.
+      - key: X_OPENROUTER_BUDGET_USD
+        value: "10"
+      - key: X_OPENROUTER_CALL_RESERVE_USD
+        value: "0.20"
       - key: X_DAILY_MODEL_CALL_LIMIT
         value: "25"
       - key: X_STATE_DIR
