@@ -651,6 +651,9 @@ class BotRuntime:
         from x_integration.reply_audit import AUDIT_PATH, handle_reply_audit
 
         http_app.router.add_post(AUDIT_PATH, handle_reply_audit)
+        from x_integration.activity import ACTIVITY_PATH, handle_activity
+
+        http_app.router.add_post(ACTIVITY_PATH, handle_activity)
         return http_app
 
     async def _start_http_server(self) -> None:
