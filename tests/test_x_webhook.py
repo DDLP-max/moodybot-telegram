@@ -221,7 +221,9 @@ def test_overlong_reply_is_cut_to_a_standard_post():
 
     original = conversation_context.conversation_log
     os.environ["X_REPLIES_ENABLED"] = "false"
-    long_reply = ("The same point, said again so the post cannot fit. " * 12).strip()
+    long_reply = (
+        "Gugino already knows the room. The same point, said again so the post cannot fit. " * 8
+    ).strip()
     calls = {"n": 0}
     try:
         with TemporaryDirectory() as tmp:
@@ -234,8 +236,8 @@ def test_overlong_reply_is_cut_to_a_standard_post():
                     for item in messages
                     if item.get("role") == "system"
                 )
-                if "Shorten this reply" in system:
-                    return "The same point, said once. \U0001f943"
+                if "Cover every part" in system:
+                    return "Gugino already knows the room. \U0001f943"
                 return long_reply
 
             text = draft_mention_reply(
@@ -247,7 +249,8 @@ def test_overlong_reply_is_cut_to_a_standard_post():
         conversation_context.conversation_log = original
         os.environ.pop("X_REPLIES_ENABLED", None)
     assert fits_post(text)
-    assert text
+    assert "Gugino" in text
+    assert calls["n"] >= 2
 
 
 def test_model_call_does_not_block_the_event_loop():

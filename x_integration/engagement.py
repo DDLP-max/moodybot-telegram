@@ -673,17 +673,16 @@ def _pointer_only(sentence: str) -> bool:
 
 
 def _self_contained_question(text: str) -> str:
-    """The question in this post, outside quotes. A pointer is not a question."""
-    parts = re.split(r"[\n]+|(?<=[.!?])\s+", _outside_quotes(text))
-    kept = []
-    for part in parts:
-        if "?" not in part or _pointer_only(part):
-            continue
-        words = re.findall(r"[A-Za-z0-9']+", _MENTION.sub(" ", part))
-        if len(words) < 3:
-            continue
-        kept.append(" ".join(part.split()))
-    return " ".join(kept).strip()
+    """Questions stated in this post. A pointer still needs an earlier post."""
+    from question_scope import extract_questions
+
+    found = extract_questions(text, channel="x")
+    parts = [
+        item["text"]
+        for item in found["questions"]
+        if item.get("self_contained") and item.get("origin") == "current"
+    ]
+    return " ".join(parts)
 
 
 def _known_ai(author_id: str, username: str) -> bool:
@@ -696,17 +695,31 @@ def _invitation(base: dict, text: str, unquoted: str, window: dict) -> dict:
     from x_integration.battle import recover_question
 
     prior = window["posts"][:-1]
-    own_question = _self_contained_question(unquoted)
-    if own_question:
+    from question_scope import extract_questions
+
+    found = extract_questions(
+        unquoted,
+        context_posts=prior,
+        source_post_id=str(base.get("post_id") or ""),
+        channel="x",
+    )
+    parent = recover_question(prior, unquoted)
+    if found["questions"] and not found["needs_context"]:
         recovered = {
             "sufficient": True,
-            "question_id": str(base.get("post_id") or ""),
-            "question_text": own_question,
+            "question_id": found.get("source_post_id") or str(base.get("post_id") or ""),
+            "question_text": " ".join(item["text"] for item in found["questions"]),
+            "grok_id": parent.get("grok_id") or "",
+            "grok_answer": parent.get("grok_answer") or "",
+        }
+    else:
+        recovered = {
+            "sufficient": False,
+            "question_id": "",
+            "question_text": "",
             "grok_id": "",
             "grok_answer": "",
         }
-    else:
-        recovered = recover_question(prior, unquoted)
     flags = ["untrusted_quote"] if _UNTRUSTED.search(text) and not _UNTRUSTED.search(unquoted) else []
     if _UNTRUSTED.search(unquoted):
         return _pack(

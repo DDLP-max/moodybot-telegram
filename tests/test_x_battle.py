@@ -66,6 +66,8 @@ def _complete(messages):
         return "A hot dog is a sandwich with a better publicist."
     if "funnier" in blob.lower():
         return "Funnier is the one who answers the question."
+    if "tallest mountain" in blob.lower():
+        return "Everest is the tallest mountain on Earth."
     if "capital of France" in blob:
         return "Paris is the capital of France."
     return "Here is the direct answer."
@@ -440,6 +442,14 @@ def test_round_one_question_does_not_need_an_earlier_post():
     assert decision["question_sufficient"] is True
     assert decision["original_question_id"] == ROUND_ONE_ID
     assert "intelligence and wisdom" in decision["question_text"]
+    assert "stupid decisions" in decision["question_text"].lower()
+    from question_scope import extract_questions
+
+    found = extract_questions(ROUND_ONE_TEXT, source_post_id=ROUND_ONE_ID, channel="x")
+    assert found["count"] == 2
+    assert found["needs_context"] is False
+    assert found["questions"][0]["source_post_id"] == ROUND_ONE_ID
+    assert found["questions"][1]["origin"] == "current"
     assert decision["publish"] is True
     assert decision["reason"] == "direct_challenge"
     quoted = authoritative_decision(

@@ -33,6 +33,7 @@ def draft_mention_reply(
     brief: str = "",
 ) -> str:
     """Plan and finalize one mention. `complete` stands in for the model in a dry run."""
+    post_text = text
     if brief.strip():
         text = brief.strip() + "\n\n" + (text or "")
     import moodybot
@@ -88,7 +89,7 @@ def draft_mention_reply(
         messages = build_openrouter_messages(runtime, user_input)
     messages = _with_post_limit(messages)
     raw = (complete or openrouter_complete)(messages)
-    from generation_gate import reject_reason, settle_authored_interior
+    from generation_gate import reject_reason, retry_messages, settle_authored_interior
 
     structure = (
         getattr(plan, "routed_structure", None)
@@ -116,29 +117,78 @@ def draft_mention_reply(
         prompt_hash=runtime.prompt_hash,
     )
     text_out = moodybot.safe_emoji(finalized.text)
-    from x_integration.post_length import AUTONOMOUS_LIMIT, fit_x_post, weighted_length
+    from question_scope import assess_answer, extract_questions, revision_instruction, settle_reply
 
-    if weighted_length(text_out) > AUTONOMOUS_LIMIT:
-        caller = complete or openrouter_complete
+    try:
+        extraction = extract_questions(
+            post_text,
+            channel="x" if "@MoodyBotAI" in (post_text or "") else "direct",
+        )
+        if not extraction["questions"] and brief.strip():
+            extraction = extract_questions(brief, channel="direct")
+    except Exception as exc:
+        raise RuntimeError("incomplete_answer") from exc
+    if extraction["questions"]:
+        verdicts = assess_answer(extraction, text_out)
+        if any(item.get("verdict") != "answered" for item in verdicts):
+            revised = (complete or openrouter_complete)(
+                retry_messages(messages, revision_instruction(extraction, verdicts))
+            )
+            revised_content = moodybot.clean_response(moodybot.process_bot_output(revised))
+            revised_final = moodybot.finalize_response(
+                revised_content,
+                user_input,
+                plan,
+                selected_command=selected,
+                channel="x",
+                mode="dynamic",
+                prompt_hash=runtime.prompt_hash,
+            )
+            text_out = moodybot.safe_emoji(revised_final.text)
+        from x_integration.post_length import AUTONOMOUS_LIMIT
 
-        def _shorten(current: str) -> str:
-            rewritten = caller(
+        def _shorten(instruction: str) -> str:
+            rewritten = (complete or openrouter_complete)(
                 [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Shorten this reply so it fits one X post. "
-                            "The hard limit is 200 weighted characters: emoji count as two, "
-                            "and a link counts as 23. Keep the same point and the closing "
-                            "emoji when it still fits. Return only the reply."
-                        ),
-                    },
-                    {"role": "user", "content": current},
+                    {"role": "system", "content": instruction},
+                    {"role": "user", "content": text_out},
                 ]
             )
             return moodybot.safe_emoji(moodybot.clean_response(rewritten))
 
-        text_out = fit_x_post(text_out, _shorten, AUTONOMOUS_LIMIT)
+        settled = settle_reply(
+            extraction,
+            text_out,
+            limit=AUTONOMOUS_LIMIT,
+            shorten=_shorten,
+        )
+        if not settled["publish"]:
+            raise RuntimeError("incomplete_answer")
+        text_out = settled["text"]
+    else:
+        from x_integration.post_length import AUTONOMOUS_LIMIT, fit_x_post, weighted_length
+
+        if weighted_length(text_out) > AUTONOMOUS_LIMIT:
+            caller = complete or openrouter_complete
+
+            def _shorten_plain(current: str) -> str:
+                rewritten = caller(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Shorten this reply so it fits one X post. "
+                                "The hard limit is 200 weighted characters: emoji count as two, "
+                                "and a link counts as 23. Keep the same point and the closing "
+                                "emoji when it still fits. Return only the reply."
+                            ),
+                        },
+                        {"role": "user", "content": current},
+                    ]
+                )
+                return moodybot.safe_emoji(moodybot.clean_response(rewritten))
+
+            text_out = fit_x_post(text_out, _shorten_plain, AUTONOMOUS_LIMIT)
     try:
         live_log.append_exchange(key, user_input, text_out)
     except Exception:

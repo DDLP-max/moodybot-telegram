@@ -63,6 +63,19 @@ def retry_messages(
     ]
 
 
+def completeness_reason(user_message: str, draft: str) -> Optional[str]:
+    """Shared completeness check for Telegram, web, and X."""
+    from question_scope import assess_answer, extract_questions, revision_instruction
+
+    extraction = extract_questions(user_message)
+    if not extraction["questions"]:
+        return None
+    verdicts = assess_answer(extraction, draft or "")
+    if any(item.get("verdict") != "answered" for item in verdicts):
+        return revision_instruction(extraction, verdicts)
+    return None
+
+
 def settle_authored_interior(
     user_message: str,
     first: str,
