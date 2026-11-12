@@ -628,6 +628,9 @@ class BotRuntime:
 
         http_app.router.add_get(X_WEBHOOK_PATH, handle_x_crc)
         http_app.router.add_post(X_WEBHOOK_PATH, handle_x_event)
+        from x_integration.reply_audit import AUDIT_PATH, handle_reply_audit
+
+        http_app.router.add_post(AUDIT_PATH, handle_reply_audit)
         return http_app
 
     async def _start_http_server(self) -> None:
