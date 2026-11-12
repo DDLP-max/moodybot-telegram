@@ -2,7 +2,6 @@
 """The reply audit reads the ledger and does not treat a cursor as a post."""
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,7 +12,6 @@ from x_integration.reply_audit import (
     assemble_audit,
     audit_authorized,
     body_match,
-    diagnostic_authorized,
     read_post_records,
     verify_retrieved,
 )
@@ -85,13 +83,10 @@ def _db(path: Path, *, reply_id: str, text: str, status: str, http_status: int) 
 
 
 def test_authorization_rejects_a_missing_or_wrong_token():
-    assert diagnostic_authorized("") is False
     assert audit_authorized("", secret="webhook-secret") is False
     assert audit_authorized("nope", secret="webhook-secret") is False
     assert audit_authorized("webhook-secret", secret="webhook-secret") is True
-    token = "known-diagnostic-token"
-    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    assert diagnostic_authorized(token, digest) is True
+    assert audit_authorized("webhook-secret", secret="") is False
 
 
 def test_posted_row_is_not_confirmed_when_x_cannot_return_it():

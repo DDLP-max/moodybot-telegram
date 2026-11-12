@@ -6,7 +6,6 @@ The database is opened read-only. The access token is never returned.
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import sqlite3
@@ -19,8 +18,6 @@ TARGET_POST_ID = "2120746490700386493"
 BOT_USER_ID = "1912252811469025282"
 AUDIT_PATH = "/api/x/reply-audit"
 AUDIT_HEADER = "X-Telegram-Bot-Api-Secret-Token"
-# Temporary caller token, removed after the visibility read. Not the webhook secret.
-_LEGACY_AUDIT_SHA256 = "5b3492130d67e436a571a48b05820417ee0f56bb6f8024f18d2793406ec58295"
 _PUBLISH_COLUMNS = (
     "post_id",
     "reply_text",
@@ -47,7 +44,7 @@ _EVENT_COLUMNS = (
 
 
 def audit_authorized(header: str, secret: Optional[str] = None) -> bool:
-    """Accept the Telegram webhook secret. A legacy one-time token still works until removed."""
+    """The Telegram webhook secret. An empty secret rejects every caller."""
     presented = (header or "").strip()
     if not presented:
         return False
@@ -55,20 +52,9 @@ def audit_authorized(header: str, secret: Optional[str] = None) -> bool:
         from telegram_lifecycle import webhook_secret
 
         secret = webhook_secret()
-    if secret and hmac.compare_digest(presented, secret):
-        return True
-    if not _LEGACY_AUDIT_SHA256:
+    if not secret:
         return False
-    digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
-    return hmac.compare_digest(digest, _LEGACY_AUDIT_SHA256)
-
-
-def diagnostic_authorized(header: str, expected_hash: str = _LEGACY_AUDIT_SHA256) -> bool:
-    presented = (header or "").strip()
-    if not presented or not expected_hash:
-        return False
-    digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
-    return hmac.compare_digest(digest, expected_hash)
+    return hmac.compare_digest(presented, secret)
 
 
 def valid_post_id(post_id: str) -> bool:
@@ -343,7 +329,7 @@ def search_direct_replies(token: str, post_id: str) -> tuple[int, dict, list]:
 async def handle_reply_audit(request: web.Request) -> web.Response:
     import asyncio
 
-    header = request.headers.get(AUDIT_HEADER, "") or request.headers.get("X-Diagnostic-Token", "")
+    header = request.headers.get(AUDIT_HEADER, "")
     if not audit_authorized(header):
         return web.Response(status=401, text="unauthorized")
     post_id = request.query.get("post_id", "")
