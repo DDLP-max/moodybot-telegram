@@ -145,7 +145,7 @@ def draft_mention_reply(
                 prompt_hash=runtime.prompt_hash,
             )
             text_out = moodybot.safe_emoji(revised_final.text)
-        from x_integration.post_length import AUTONOMOUS_LIMIT
+        from x_integration.post_length import autonomous_limit
 
         def _shorten(instruction: str) -> str:
             rewritten = (complete or openrouter_complete)(
@@ -159,36 +159,36 @@ def draft_mention_reply(
         settled = settle_reply(
             extraction,
             text_out,
-            limit=AUTONOMOUS_LIMIT,
+            limit=autonomous_limit(),
             shorten=_shorten,
         )
         if not settled["publish"]:
             raise RuntimeError("incomplete_answer")
         text_out = settled["text"]
     else:
-        from x_integration.post_length import AUTONOMOUS_LIMIT, fit_x_post, weighted_length
+        from x_integration.post_length import autonomous_limit, weighted_length
 
-        if weighted_length(text_out) > AUTONOMOUS_LIMIT:
+        limit = autonomous_limit()
+        if weighted_length(text_out) > limit:
             caller = complete or openrouter_complete
-
-            def _shorten_plain(current: str) -> str:
-                rewritten = caller(
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Shorten this reply so it fits one X post. "
-                                "The hard limit is 200 weighted characters: emoji count as two, "
-                                "and a link counts as 23. Keep the same point and the closing "
-                                "emoji when it still fits. Return only the reply."
-                            ),
-                        },
-                        {"role": "user", "content": current},
-                    ]
-                )
-                return moodybot.safe_emoji(moodybot.clean_response(rewritten))
-
-            text_out = fit_x_post(text_out, _shorten_plain, AUTONOMOUS_LIMIT)
+            rewritten = caller(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Rewrite this reply in the same voice so it fits one X post. "
+                            f"The hard limit is {limit} weighted characters: emoji count as two, "
+                            "and a link counts as 23. Keep the same point. Do not cut it off. "
+                            "Return only the reply."
+                        ),
+                    },
+                    {"role": "user", "content": text_out},
+                ]
+            )
+            compressed = moodybot.safe_emoji(moodybot.clean_response(rewritten))
+            if not compressed or weighted_length(compressed) > limit:
+                raise RuntimeError("reply_too_long")
+            text_out = compressed
     try:
         live_log.append_exchange(key, user_input, text_out)
     except Exception:
@@ -198,10 +198,13 @@ def draft_mention_reply(
 
 def _with_post_limit(messages: List[dict]) -> List[dict]:
     """Tell the existing engine the post cap. The last user turn stays last."""
+    from x_integration.post_length import autonomous_limit
+
     note = {
         "role": "system",
         "content": (
-            "This reply will be posted on X. Hard limit: 200 weighted characters. "
+            "This reply will be posted on X. Hard limit: "
+            f"{autonomous_limit()} weighted characters. "
             "Emoji count as two characters. A link counts as 23. "
             "One post, one paragraph. Stop before the limit."
         ),

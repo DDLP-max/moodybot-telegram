@@ -124,12 +124,16 @@ def revision_instruction(extraction: dict, verdicts: list[dict]) -> str:
     )
 
 
-def length_instruction(extraction: dict) -> str:
+def length_instruction(extraction: dict, limit: Optional[int] = None) -> str:
+    from x_integration.post_length import autonomous_limit
+
+    cap = autonomous_limit() if limit is None else limit
     parts = " ".join(item.get("text") or "" for item in extraction.get("questions") or [])
     return (
-        "Rewrite the reply under 200 weighted characters. Cover every part: "
+        f"Rewrite the reply in the same voice under {cap} weighted characters. "
+        "Cover every part: "
         + parts
-        + ". Keep one voice. Do not drop a part to make it fit, and do not post twice."
+        + ". Do not drop a part to make it fit, and do not post twice."
     )
 
 
@@ -158,7 +162,8 @@ def settle_reply(
 ) -> dict:
     """Decide whether an answer may be published.
 
-    One shorten call is allowed. A part is never cut off without saying so.
+    One compression is allowed. A reply that is still too long, or that
+    lost a required part, is not published and is not trimmed.
     """
     from x_integration.post_length import weighted_length
 
@@ -176,7 +181,7 @@ def settle_reply(
         }
     if limit is not None and weighted_length(text) > limit and shorten is not None:
         shortened = True
-        candidate = str(shorten(length_instruction(extraction)) or "").strip()
+        candidate = str(shorten(length_instruction(extraction, limit)) or "").strip()
         candidate_verdicts = assess_answer(extraction, candidate)
         if candidate and not _incomplete(candidate_verdicts) and weighted_length(candidate) <= limit:
             return {
@@ -187,26 +192,22 @@ def settle_reply(
                 "fits": True,
                 "shortened": True,
             }
-        if candidate and not _incomplete(candidate_verdicts):
-            text = candidate
-            verdicts = candidate_verdicts
-    if limit is not None and text and weighted_length(text) > limit:
-        partial = explicit_partial(extraction, verdicts, limit, text)
-        if not partial:
-            return {
-                "publish": False,
-                "text": "",
-                "strategy": "incomplete",
-                "verdicts": verdicts,
-                "fits": False,
-                "shortened": shortened,
-            }
+        lost = not candidate or _incomplete(candidate_verdicts)
         return {
-            "publish": True,
-            "text": partial,
-            "strategy": "partial",
-            "verdicts": assess_answer(extraction, partial),
-            "fits": weighted_length(partial) <= limit,
+            "publish": False,
+            "text": "",
+            "strategy": "incomplete" if lost else "too_long",
+            "verdicts": candidate_verdicts,
+            "fits": False,
+            "shortened": True,
+        }
+    if limit is not None and text and weighted_length(text) > limit:
+        return {
+            "publish": False,
+            "text": "",
+            "strategy": "too_long",
+            "verdicts": verdicts,
+            "fits": False,
             "shortened": shortened,
         }
     fits = True if limit is None else weighted_length(text) <= limit

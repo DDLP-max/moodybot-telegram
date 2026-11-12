@@ -120,21 +120,35 @@ def test_completeness_accepts_one_metaphor_and_rejects_a_partial():
     assert unknown[0]["verdict"] == "cannot_answer"
 
 
-def test_overlong_reply_is_labeled_partial_instead_of_cut():
+def test_overlong_reply_is_not_truncated():
     found = extract_questions(COMPOUND)
     long_answer = BOTH + " " + ("Again. " * 80)
-    settled = settle_reply(
+    still_long = settle_reply(
         found,
         long_answer,
         limit=AUTONOMOUS_LIMIT,
         shorten=lambda _instruction: long_answer,
     )
-    assert settled["publish"] is True
-    assert settled["strategy"] == "partial"
-    assert settled["fits"] is True
-    assert weighted_length(settled["text"]) <= AUTONOMOUS_LIMIT
-    assert "ask for the rest" in settled["text"].lower()
-    assert "Again." not in settled["text"]
+    assert still_long["publish"] is False
+    assert still_long["strategy"] == "too_long"
+    assert still_long["text"] == ""
+    kept = settle_reply(
+        found,
+        long_answer,
+        limit=AUTONOMOUS_LIMIT,
+        shorten=lambda _instruction: BOTH,
+    )
+    assert kept["publish"] is True
+    assert kept["strategy"] == "complete"
+    assert weighted_length(kept["text"]) <= AUTONOMOUS_LIMIT
+    dropped = settle_reply(
+        found,
+        long_answer,
+        limit=AUTONOMOUS_LIMIT,
+        shorten=lambda _instruction: ONE_SIDE,
+    )
+    assert dropped["publish"] is False
+    assert dropped["strategy"] == "incomplete"
 
 
 if __name__ == "__main__":
@@ -146,5 +160,5 @@ if __name__ == "__main__":
     test_pointer_uses_parent_and_missing_parent_does_not_invent()
     test_note_text_is_the_question_source()
     test_completeness_accepts_one_metaphor_and_rejects_a_partial()
-    test_overlong_reply_is_labeled_partial_instead_of_cut()
+    test_overlong_reply_is_not_truncated()
     print("question scope ok")

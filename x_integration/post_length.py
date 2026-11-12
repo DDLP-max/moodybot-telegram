@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 POST_LIMIT = 280
-AUTONOMOUS_LIMIT = 200
+AUTONOMOUS_LIMIT = 280
 _SCALE = 100
 _DEFAULT_WEIGHT = 200
 _URL_LENGTH = 23
@@ -40,8 +40,24 @@ def fits_post(text: str) -> bool:
     return weighted_length(text) <= POST_LIMIT
 
 
+def autonomous_limit() -> int:
+    """The autonomous cap. X_AUTONOMOUS_CHAR_LIMIT overrides it for a longer account."""
+    import os
+
+    raw = (os.environ.get("X_AUTONOMOUS_CHAR_LIMIT") or "").strip()
+    if not raw:
+        return AUTONOMOUS_LIMIT
+    try:
+        value = int(raw)
+    except ValueError:
+        return AUTONOMOUS_LIMIT
+    if value < 1:
+        return AUTONOMOUS_LIMIT
+    return value
+
+
 def fits_autonomous(text: str) -> bool:
-    return weighted_length(text) <= AUTONOMOUS_LIMIT
+    return weighted_length(text) <= autonomous_limit()
 
 
 def fit_x_post(text: str, shorten=None, limit: int = POST_LIMIT) -> str:

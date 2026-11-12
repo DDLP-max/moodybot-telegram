@@ -13,7 +13,7 @@ from x_integration.engagement import (
     authoritative_decision,
     read_post_text,
 )
-from x_integration.post_length import AUTONOMOUS_LIMIT, weighted_length
+from x_integration.post_length import autonomous_limit, weighted_length
 
 GROK_USER_ID = "1720665183188922368"
 KNOWN_AI_IDS = frozenset({GROK_USER_ID})
@@ -309,7 +309,7 @@ def draft_battle_reply(recovered: dict, invitation: str, conversation_id: str, c
         complete=complete,
         brief=brief,
     )
-    if weighted_length(text) > AUTONOMOUS_LIMIT:
+    if weighted_length(text) > autonomous_limit():
         raise RuntimeError("battle draft exceeded the autonomous limit")
     return text
 
