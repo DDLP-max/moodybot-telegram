@@ -171,6 +171,14 @@ CREATE TABLE IF NOT EXISTS generation_notes (
     detail TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reply_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id TEXT NOT NULL,
+    reply_id TEXT NOT NULL,
+    result TEXT NOT NULL,
+    http_status INTEGER NOT NULL DEFAULT 0,
+    checked_at TEXT NOT NULL
+);
 """
 
 
@@ -1523,6 +1531,73 @@ class MentionLedger:
             "replies_failed": int(replies[2] or 0),
             "last_generation_error": str(note[0] or "") if note else "",
             "last_publish_error": error,
+        }
+
+    def outcome_summary(self) -> dict:
+        """Publication counts with names that say what they count.
+
+        No reply text and no credentials. model_generations counts recorded
+        provider calls. x_poll.drafted remains a dry-run counter elsewhere.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                generations = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM generation_calls
+                    WHERE status IN ('confirmed', 'estimated', 'unavailable')
+                    """
+                ).fetchone()
+                failures = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM events
+                    WHERE skip_reason IN (
+                        'generation_failed', 'incomplete_answer',
+                        'reply_too_long', 'budget_exhausted'
+                    )
+                    """
+                ).fetchone()
+                published = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM publications
+                    WHERE origin = 'automatic' AND status = 'posted'
+                    """
+                ).fetchone()
+                failed = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM publications
+                    WHERE origin = 'automatic' AND status = 'failed'
+                    """
+                ).fetchone()
+                battles = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM battle_events
+                    WHERE response_id != ''
+                    """
+                ).fetchone()
+                verified = None
+                present = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reply_verifications'"
+                ).fetchone()
+                if present:
+                    verified = conn.execute(
+                        """
+                        SELECT reply_id, parent_id, result
+                        FROM reply_verifications
+                        ORDER BY id DESC LIMIT 1
+                        """
+                    ).fetchone()
+            finally:
+                conn.close()
+        return {
+            "model_generations": int(generations[0] or 0),
+            "generation_failures": int(failures[0] or 0),
+            "x_publications_succeeded": int(published[0] or 0),
+            "x_publications_failed": int(failed[0] or 0),
+            "battle_publications": int(battles[0] or 0),
+            "last_verified_reply_id": str(verified[0] or "") if verified else "",
+            "last_verified_parent_id": str(verified[1] or "") if verified else "",
+            "last_verification_result": str(verified[2] or "") if verified else "",
         }
 
     def _automatic_counts(self) -> tuple[int, int]:

@@ -18,8 +18,9 @@ from aiohttp import web
 TARGET_POST_ID = "2120746490700386493"
 BOT_USER_ID = "1912252811469025282"
 AUDIT_PATH = "/api/x/reply-audit"
-# sha256 of the one-time diagnostic token. The token itself is not in git.
-DIAGNOSTIC_TOKEN_SHA256 = "5b3492130d67e436a571a48b05820417ee0f56bb6f8024f18d2793406ec58295"
+AUDIT_HEADER = "X-Telegram-Bot-Api-Secret-Token"
+# Temporary caller token, removed after the visibility read. Not the webhook secret.
+_LEGACY_AUDIT_SHA256 = "5b3492130d67e436a571a48b05820417ee0f56bb6f8024f18d2793406ec58295"
 _PUBLISH_COLUMNS = (
     "post_id",
     "reply_text",
@@ -45,12 +46,46 @@ _EVENT_COLUMNS = (
 )
 
 
-def diagnostic_authorized(header: str, expected_hash: str = DIAGNOSTIC_TOKEN_SHA256) -> bool:
+def audit_authorized(header: str, secret: Optional[str] = None) -> bool:
+    """Accept the Telegram webhook secret. A legacy one-time token still works until removed."""
+    presented = (header or "").strip()
+    if not presented:
+        return False
+    if secret is None:
+        from telegram_lifecycle import webhook_secret
+
+        secret = webhook_secret()
+    if secret and hmac.compare_digest(presented, secret):
+        return True
+    if not _LEGACY_AUDIT_SHA256:
+        return False
+    digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(digest, _LEGACY_AUDIT_SHA256)
+
+
+def diagnostic_authorized(header: str, expected_hash: str = _LEGACY_AUDIT_SHA256) -> bool:
     presented = (header or "").strip()
     if not presented or not expected_hash:
         return False
     digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
     return hmac.compare_digest(digest, expected_hash)
+
+
+def valid_post_id(post_id: str) -> bool:
+    return post_id.isdigit() and 5 <= len(post_id) <= 25
+
+
+def body_match(stored: str, published: str) -> str:
+    """exact, mention_prefix, mismatch, or not_compared. The prefix is X's @author."""
+    left = (stored or "").strip()
+    right = (published or "").strip()
+    if not left or not right:
+        return "not_compared"
+    if right == left:
+        return "exact"
+    if right.startswith("@") and " " in right and right.split(" ", 1)[1] == left:
+        return "mention_prefix"
+    return "mismatch"
 
 
 def read_post_records(path: Path, post_id: str = TARGET_POST_ID) -> dict:
@@ -102,48 +137,72 @@ def verify_retrieved(stored_text: str, stored_reply_id: str, retrieved: dict) ->
     http_status = int(retrieved.get("http_status") or 0)
     availability = str(retrieved.get("availability") or "")
     author_ok = author_id == BOT_USER_ID
-    parent_ok = parent_id == TARGET_POST_ID
-    text_ok = bool(stored_text) and published == stored_text
+    parent_ok = bool(parent_id) and parent_id == str(retrieved.get("expected_parent_id") or TARGET_POST_ID)
+    match = body_match(stored_text, published)
     accessible = availability == "accessible" and http_status == 200
-    reasons = []
     if not stored_reply_id:
-        reasons.append("ledger_has_no_reply_id")
-    if not accessible:
-        reasons.append(availability or "not_retrieved")
-    if stored_reply_id and author_id and not author_ok:
-        reasons.append("author_mismatch")
-    if stored_reply_id and parent_id and not parent_ok:
-        reasons.append("parent_mismatch")
-    if stored_reply_id and published and not text_ok:
-        reasons.append("text_mismatch")
+        status = "no_reply_id"
+    elif not accessible:
+        status = availability or "not_retrieved"
+    elif author_id and not author_ok:
+        status = "author_mismatch"
+    elif parent_id and not parent_ok:
+        status = "parent_mismatch"
+    elif match == "mismatch":
+        status = "text_mismatch"
+    elif match in {"exact", "mention_prefix"} and author_ok and parent_ok:
+        status = "confirmed"
+    else:
+        status = "not_compared"
     return {
         "author_id": author_id,
         "author_username": str(retrieved.get("author_username") or ""),
         "author_matches": author_ok,
         "in_reply_to_tweet_id": parent_id,
         "parent_matches": parent_ok,
-        "text": text,
-        "note_text": note,
-        "text_matches": text_ok,
+        "body_match": match,
+        "verification_status": status,
         "http_status": http_status,
         "availability": availability,
         "x_error": retrieved.get("error") if isinstance(retrieved.get("error"), dict) else {},
-        "discrepancy": bool(reasons),
-        "discrepancy_reasons": reasons,
+    }
+
+
+def _visibility(tweet: dict) -> dict:
+    withheld = tweet.get("withheld") if isinstance(tweet.get("withheld"), dict) else {}
+    metrics = tweet.get("public_metrics") if isinstance(tweet.get("public_metrics"), dict) else {}
+    return {
+        "http_status": int(tweet.get("http_status") or 0),
+        "availability": str(tweet.get("availability") or ""),
+        "conversation_id": str(tweet.get("conversation_id") or ""),
+        "reply_settings": str(tweet.get("reply_settings") or ""),
+        "possibly_sensitive": bool(tweet.get("possibly_sensitive")),
+        "withheld": bool(withheld),
+        "public_metrics": {
+            key: metrics.get(key)
+            for key in ("reply_count", "like_count", "retweet_count", "quote_count")
+            if key in metrics
+        },
     }
 
 
 def assemble_audit(records: dict, reply_lookup: Optional[dict], direct_replies: list) -> dict:
-    """Drop the token and state what the ledger and X each say."""
+    """Ids, statuses, and match result. No token and no reply body."""
     publication = records["publications"][0] if records["publications"] else None
+    parent_id = str(records["post_id"])
     stored_reply_id = str((publication or {}).get("x_reply_id") or "")
     stored_text = str((publication or {}).get("reply_text") or "")
-    stored_status = str((publication or {}).get("status") or "")
-    verification = verify_retrieved(stored_text, stored_reply_id, reply_lookup or {})
-    if stored_status == "posted" and verification["discrepancy"]:
-        verification["ledger_says_posted_but_x_does_not_confirm"] = True
-    else:
-        verification["ledger_says_posted_but_x_does_not_confirm"] = False
+    lookup = dict(reply_lookup or {})
+    lookup["expected_parent_id"] = parent_id
+    verification = verify_retrieved(stored_text, stored_reply_id, lookup)
+    original = lookup.get("original_post") if isinstance(lookup.get("original_post"), dict) else {}
+    reply_view = _visibility(lookup)
+    parent_view = _visibility(original)
+    same_conversation = bool(
+        reply_view["conversation_id"]
+        and parent_view["conversation_id"]
+        and reply_view["conversation_id"] == parent_view["conversation_id"]
+    )
     owners = []
     for item in direct_replies:
         owners.append({
@@ -151,37 +210,39 @@ def assemble_audit(records: dict, reply_lookup: Optional[dict], direct_replies: 
             "author_id": str(item.get("author_id") or ""),
             "author_username": str(item.get("author_username") or ""),
             "in_reply_to_tweet_id": str(item.get("in_reply_to_tweet_id") or ""),
-            "text": item.get("text") if isinstance(item.get("text"), str) else "",
             "is_moodybot": str(item.get("author_id") or "") == BOT_USER_ID,
         })
     return {
-        "post_id": records["post_id"],
-        "publications": records["publications"],
-        "events": records["events"],
-        "replied_posts": records["replied_posts"],
-        "stored_x_reply_id": stored_reply_id,
-        "stored_reply_text": stored_text,
-        "stored_status": stored_status,
+        "parent_post_id": parent_id,
+        "publication_id": stored_reply_id,
+        "stored_status": str((publication or {}).get("status") or ""),
         "stored_http_status": int((publication or {}).get("http_status") or 0),
-        "stored_detail": str((publication or {}).get("detail") or ""),
-        "stored_problem": (publication or {}).get("problem") or {},
-        "parent_post_id": records["post_id"],
-        "reply_verification": verification,
-        "direct_replies": owners,
-        "direct_reply_search": {
-            "http_status": int((reply_lookup or {}).get("search_http_status") or 0),
-            "error": (reply_lookup or {}).get("search_error") or {},
+        "author_id": verification["author_id"],
+        "author_username": verification["author_username"],
+        "in_reply_to_tweet_id": verification["in_reply_to_tweet_id"],
+        "retrieval_http_status": verification["http_status"],
+        "availability": verification["availability"],
+        "verification_status": verification["verification_status"],
+        "body_match": verification["body_match"],
+        "visibility": {
+            "parent": parent_view,
+            "reply": reply_view,
+            "same_conversation": same_conversation,
+            "direct_replies": owners,
+            "direct_reply_search_http_status": int(lookup.get("search_http_status") or 0),
         },
     }
 
 
-def run_reply_audit(database: Optional[Path] = None) -> dict:
+def run_reply_audit(database: Optional[Path] = None, post_id: str = TARGET_POST_ID) -> dict:
     from x_integration.state import ledger_path
 
     path = database or ledger_path()
+    if not valid_post_id(post_id):
+        return {"error": "invalid_post_id"}
     if not path.is_file():
-        return {"post_id": TARGET_POST_ID, "error": "database_missing", "database": str(path)}
-    records = read_post_records(path, TARGET_POST_ID)
+        return {"parent_post_id": post_id, "error": "database_missing"}
+    records = read_post_records(path, post_id)
     token = records.pop("access_token", "")
     reply_id = ""
     if records["publications"]:
@@ -192,20 +253,15 @@ def run_reply_audit(database: Optional[Path] = None) -> dict:
         lookup["availability"] = "token_unavailable"
         lookup["http_status"] = 0
     else:
-        original = retrieve_tweet(token, TARGET_POST_ID)
+        original = retrieve_tweet(token, post_id)
         if reply_id:
             lookup.update(retrieve_tweet(token, reply_id))
-        lookup["original_post"] = {
-            "http_status": original.get("http_status"),
-            "availability": original.get("availability"),
-            "author_id": original.get("author_id"),
-            "public_metrics": original.get("public_metrics") or {},
-            "error": original.get("error") or {},
-        }
-        search_status, search_error, replies = search_direct_replies(token, TARGET_POST_ID)
+        lookup["original_post"] = original
+        search_status, _search_error, replies = search_direct_replies(token, post_id)
         lookup["search_http_status"] = search_status
-        lookup["search_error"] = search_error
-    return assemble_audit(records, lookup, replies)
+    result = assemble_audit(records, lookup, replies)
+    _remember_verification(path, result)
+    return result
 
 
 def retrieve_tweet(token: str, tweet_id: str) -> dict:
@@ -217,7 +273,10 @@ def retrieve_tweet(token: str, tweet_id: str) -> dict:
             f"https://api.x.com/2/tweets/{tweet_id}",
             headers={"Authorization": f"Bearer {token}"},
             params={
-                "tweet.fields": "author_id,conversation_id,text,note_tweet,referenced_tweets,withheld,public_metrics",
+                "tweet.fields": (
+                    "author_id,conversation_id,text,note_tweet,referenced_tweets,"
+                    "withheld,public_metrics,reply_settings,possibly_sensitive"
+                ),
                 "expansions": "author_id",
                 "user.fields": "username",
             },
@@ -284,11 +343,58 @@ def search_direct_replies(token: str, post_id: str) -> tuple[int, dict, list]:
 async def handle_reply_audit(request: web.Request) -> web.Response:
     import asyncio
 
-    header = request.headers.get("X-Diagnostic-Token", "")
-    if not diagnostic_authorized(header):
+    header = request.headers.get(AUDIT_HEADER, "") or request.headers.get("X-Diagnostic-Token", "")
+    if not audit_authorized(header):
         return web.Response(status=401, text="unauthorized")
-    result = await asyncio.to_thread(run_reply_audit)
+    post_id = request.query.get("post_id", "")
+    if request.can_read_body:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload.get("post_id"):
+            post_id = str(payload.get("post_id") or "")
+    if not valid_post_id(post_id):
+        return web.Response(status=400, text="post_id required")
+    result = await asyncio.to_thread(run_reply_audit, None, post_id)
     return web.json_response(result)
+
+
+def _remember_verification(path: Path, result: dict) -> None:
+    """Record the check. Does not touch the cursor, publications, or tokens."""
+    if result.get("error"):
+        return
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reply_verifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id TEXT NOT NULL,
+                reply_id TEXT NOT NULL,
+                result TEXT NOT NULL,
+                http_status INTEGER NOT NULL DEFAULT 0,
+                checked_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO reply_verifications (parent_id, reply_id, result, http_status, checked_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                str(result.get("parent_post_id") or ""),
+                str(result.get("publication_id") or ""),
+                str(result.get("verification_status") or ""),
+                int(result.get("retrieval_http_status") or 0),
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _rows(conn: sqlite3.Connection, table: str, columns: tuple, where: str, args: tuple) -> list:
@@ -347,6 +453,9 @@ def _interpret_tweet(response, token: str) -> dict:
         "text": data.get("text") if isinstance(data.get("text"), str) else "",
         "note_text": note.get("text") if isinstance(note.get("text"), str) else "",
         "in_reply_to_tweet_id": _replied_to(data),
+        "conversation_id": str(data.get("conversation_id") or ""),
+        "reply_settings": str(data.get("reply_settings") or ""),
+        "possibly_sensitive": bool(data.get("possibly_sensitive")),
         "withheld": withheld,
         "public_metrics": data.get("public_metrics") if isinstance(data.get("public_metrics"), dict) else {},
         "error": error,

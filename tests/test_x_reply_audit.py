@@ -11,10 +11,13 @@ from x_integration.reply_audit import (
     BOT_USER_ID,
     TARGET_POST_ID,
     assemble_audit,
+    audit_authorized,
+    body_match,
     diagnostic_authorized,
     read_post_records,
     verify_retrieved,
 )
+from x_integration.state import MentionLedger
 
 
 def _db(path: Path, *, reply_id: str, text: str, status: str, http_status: int) -> None:
@@ -83,11 +86,12 @@ def _db(path: Path, *, reply_id: str, text: str, status: str, http_status: int) 
 
 def test_authorization_rejects_a_missing_or_wrong_token():
     assert diagnostic_authorized("") is False
-    assert diagnostic_authorized("nope") is False
+    assert audit_authorized("", secret="webhook-secret") is False
+    assert audit_authorized("nope", secret="webhook-secret") is False
+    assert audit_authorized("webhook-secret", secret="webhook-secret") is True
     token = "known-diagnostic-token"
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
     assert diagnostic_authorized(token, digest) is True
-    assert diagnostic_authorized("known-diagnostic-token ", digest) is True
 
 
 def test_posted_row_is_not_confirmed_when_x_cannot_return_it():
@@ -102,13 +106,12 @@ def test_posted_row_is_not_confirmed_when_x_cannot_return_it():
             {"http_status": 404, "availability": "unavailable", "error": {"title": "Not Found Error"}},
             [],
         )
-        assert result["stored_x_reply_id"] == "2120990000000000001"
-        assert result["stored_reply_text"] == "The stored line."
+        assert result["publication_id"] == "2120990000000000001"
         assert result["stored_status"] == "posted"
         assert result["stored_http_status"] == 201
         assert result["parent_post_id"] == TARGET_POST_ID
-        assert result["reply_verification"]["ledger_says_posted_but_x_does_not_confirm"] is True
-        assert "unavailable" in result["reply_verification"]["discrepancy_reasons"]
+        assert result["verification_status"] == "unavailable"
+        assert "stored_reply_text" not in result
         assert "access_token" not in result
         again = sqlite3.connect(path)
         assert again.execute("SELECT since_id FROM poll_state").fetchone()[0] == TARGET_POST_ID
@@ -129,8 +132,13 @@ def test_matching_retrieval_confirms_author_parent_and_text():
     check = verify_retrieved("The stored line.", "2120990000000000001", retrieved)
     assert check["author_matches"] is True
     assert check["parent_matches"] is True
-    assert check["text_matches"] is True
-    assert check["discrepancy"] is False
+    assert check["body_match"] == "exact"
+    assert check["verification_status"] == "confirmed"
+    prefixed = dict(retrieved)
+    prefixed["text"] = "@MattCanham805 The stored line."
+    prefixed_check = verify_retrieved("The stored line.", "2120990000000000001", prefixed)
+    assert body_match("The stored line.", prefixed["text"]) == "mention_prefix"
+    assert prefixed_check["verification_status"] == "confirmed"
 
 
 def test_another_accounts_reply_is_not_called_moodybot():
@@ -151,9 +159,33 @@ def test_another_accounts_reply_is_not_called_moodybot():
             "text": "not the bot",
         }],
     )
-    assert result["stored_x_reply_id"] == ""
-    assert result["direct_replies"][0]["is_moodybot"] is False
-    assert result["reply_verification"]["ledger_says_posted_but_x_does_not_confirm"] is False
+    assert result["publication_id"] == ""
+    assert result["verification_status"] == "no_reply_id"
+    reply = result["visibility"]["direct_replies"][0]
+    assert reply["is_moodybot"] is False
+    assert "text" not in reply
+
+
+def test_outcome_names_count_posts_rather_than_dry_runs():
+    with TemporaryDirectory() as tmp:
+        book = MentionLedger(Path(tmp) / "mentions.sqlite")
+        assert book.reserve_automatic_publication(TARGET_POST_ID, "body") == "claimed"
+        book.finish_publication(TARGET_POST_ID, status="posted", x_reply_id="2120747058424586436", http_status=201)
+        failed_id = "2120990000000000099"
+        assert book.claim("poll:" + failed_id, failed_id, "2082957781293035520", failed_id).proceed
+        book.finish(
+            "poll:" + failed_id,
+            status="skipped",
+            skip_reason="generation_failed",
+            post_id=failed_id,
+        )
+        summary = book.outcome_summary()
+        assert summary["x_publications_succeeded"] == 1
+        assert summary["x_publications_failed"] == 0
+        assert summary["generation_failures"] == 1
+        assert summary["model_generations"] == 0
+        assert summary["battle_publications"] == 0
+        assert summary["last_verification_result"] == ""
 
 
 if __name__ == "__main__":
@@ -161,4 +193,5 @@ if __name__ == "__main__":
     test_posted_row_is_not_confirmed_when_x_cannot_return_it()
     test_matching_retrieval_confirms_author_parent_and_text()
     test_another_accounts_reply_is_not_called_moodybot()
+    test_outcome_names_count_posts_rather_than_dry_runs()
     print("reply audit ok")

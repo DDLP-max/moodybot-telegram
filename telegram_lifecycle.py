@@ -281,6 +281,25 @@ def _engagement_summary() -> dict:
         return {"shadow": True, "mentions": None}
 
 
+def _outcome_metrics() -> dict:
+    empty = {
+        "model_generations": None,
+        "generation_failures": None,
+        "x_publications_succeeded": None,
+        "x_publications_failed": None,
+        "battle_publications": None,
+        "last_verified_reply_id": "",
+        "last_verified_parent_id": "",
+        "last_verification_result": "",
+    }
+    try:
+        from x_integration.state import ledger_from_env
+
+        return ledger_from_env().outcome_summary()
+    except Exception:
+        return empty
+
+
 def _generation_metrics() -> dict:
     empty = {
         "model_calls": None,
@@ -616,6 +635,7 @@ class BotRuntime:
             "x_engagement": _engagement_summary(),
             "x_battle": _battle_metrics(),
             "x_generation": _generation_metrics(),
+            "x_outcomes": _outcome_metrics(),
         }
         return web.json_response(body)
 
