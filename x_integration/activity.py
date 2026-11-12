@@ -57,6 +57,7 @@ def read_activity_ledger(path: Path) -> dict:
             "reviews": _all_rows(conn, "mention_reviews"),
             "battles": _all_rows(conn, "battle_events"),
             "generations": _all_rows(conn, "generation_calls"),
+            "audits": _all_rows(conn, "publication_audits"),
         }
     finally:
         conn.close()
@@ -144,9 +145,24 @@ def assemble_activity(ledger: dict, account_posts: list, parents: dict) -> dict:
         item["application_published"] = False
         lane = "battle_replies" if item["battle_response_id"] else "visible_without_ledger_publication"
         lanes[lane].append(item)
+    audits = []
+    for row in ledger.get("audits") or []:
+        audits.append({
+            "origin": str(row.get("origin") or ""),
+            "publishing_path": str(row.get("publishing_path") or ""),
+            "event_id": str(row.get("event_id") or ""),
+            "parent_id": str(row.get("parent_id") or ""),
+            "reply_text": str(row.get("reply_text") or ""),
+            "x_reply_id": str(row.get("x_reply_id") or ""),
+            "http_status": int(row.get("http_status") or 0),
+            "outcome": str(row.get("outcome") or ""),
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
+        })
     return {
         "since_id": str(ledger.get("since_id") or ""),
         "lanes": lanes,
+        "audits": audits,
     }
 
 

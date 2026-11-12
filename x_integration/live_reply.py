@@ -136,6 +136,8 @@ def _publish(directory: Path, reply: str) -> dict:
         production=MentionLedger(directory / "mentions.sqlite"),
         draft_db=directory / DRAFT_NAME,
         token=token,
+        origin="live_reply",
+        publishing_path="live_reply.run_live_reply",
     )
 
 

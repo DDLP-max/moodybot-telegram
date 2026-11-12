@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -500,6 +501,59 @@ def test_overlong_draft_is_refused_before_any_post():
     assert refused["weighted_length"] > 280
 
 
+def test_send_reply_records_the_attempt_and_does_not_retry_a_timeout():
+    import httpx
+
+    from x_integration.state import MentionLedger
+
+    calls = {"n": 0}
+
+    def explode(*_args, **_kwargs):
+        calls["n"] += 1
+        raise httpx.TimeoutException("timed out")
+
+    original = httpx.post
+    httpx.post = explode
+    try:
+        with TemporaryDirectory() as tmp:
+            book = MentionLedger(Path(tmp) / "mentions.sqlite")
+            book.set_since_id(POST_ID)
+            outcome = send_reply(
+                "access-secret-value",
+                POST_ID,
+                DRAFT,
+                origin="automatic",
+                publishing_path="webhook._publish_automatic",
+                event_id="poll:" + POST_ID,
+                audit=book,
+            )
+            assert outcome["outcome"] == "ambiguous"
+            assert calls["n"] == 1
+            assert book.get_since_id() == POST_ID
+            assert book.publication(POST_ID) is None
+            conn = sqlite3.connect(Path(tmp) / "mentions.sqlite")
+            row = conn.execute(
+                """
+                SELECT origin, publishing_path, event_id, parent_id, reply_text,
+                       x_reply_id, http_status, outcome
+                FROM publication_audits
+                """
+            ).fetchone()
+            conn.close()
+    finally:
+        httpx.post = original
+    assert row == (
+        "automatic",
+        "webhook._publish_automatic",
+        "poll:" + POST_ID,
+        POST_ID,
+        DRAFT,
+        "",
+        0,
+        "ambiguous",
+    )
+
+
 if __name__ == "__main__":
     test_preview_and_mismatch_do_not_post()
     test_rejected_credential_does_not_post()
@@ -507,6 +561,7 @@ if __name__ == "__main__":
     test_timeout_is_ambiguous_and_is_not_retried()
     test_concurrent_claims_allow_one_sender()
     test_send_reply_posts_one_in_reply_to_and_does_not_retry_timeouts()
+    test_send_reply_records_the_attempt_and_does_not_retry_a_timeout()
     test_credential_requires_moodybotai_and_tweet_write()
     test_automatic_flags_block_the_one_shot()
     test_preview_exit_code_stays_zero()

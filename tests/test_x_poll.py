@@ -347,7 +347,13 @@ def test_reply_publish_shape_is_not_sent_while_disabled():
     original = httpx.post
     httpx.post = fake_post
     try:
-        post_reply("998877", "held", token="test-user-token")
+        with TemporaryDirectory() as tmp:
+            post_reply(
+                "998877",
+                "held",
+                token="test-user-token",
+                ledger=MentionLedger(Path(tmp) / "mentions.sqlite"),
+            )
     finally:
         httpx.post = original
         _clear_env()

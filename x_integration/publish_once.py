@@ -65,6 +65,8 @@ def execute_publish(
     verify=None,
     send=None,
     token: Optional[str] = None,
+    origin: str = "manual",
+    publishing_path: str = "publish_once.execute_publish",
 ) -> dict:
     """Return the publish result. Network helpers are replaceable in tests."""
     replies_before = os.environ.get("X_REPLIES_ENABLED")
@@ -132,7 +134,17 @@ def execute_publish(
             access,
         )
     try:
-        outcome = (send or send_reply)(access, post_id, stored)
+        if send is None:
+            outcome = send_reply(
+                access,
+                post_id,
+                stored,
+                origin=origin,
+                publishing_path=publishing_path,
+                audit=book,
+            )
+        else:
+            outcome = send(access, post_id, stored)
     except Exception:
         book.finish_publication(post_id, status="ambiguous", detail="send_error")
         outcome = {"outcome": "ambiguous", "http_status": 0, "detail": "send_error", "x_reply_id": ""}
@@ -254,7 +266,16 @@ def verify_posting_credential(token: str) -> dict:
     }
 
 
-def send_reply(token: str, post_id: str, text: str) -> dict:
+def send_reply(
+    token: str,
+    post_id: str,
+    text: str,
+    *,
+    origin: str = "",
+    publishing_path: str = "",
+    event_id: str = "",
+    audit: Optional[MentionLedger] = None,
+) -> dict:
     """POST one reply. Transport failures stay ambiguous and are not retried."""
     import httpx
 
@@ -268,6 +289,21 @@ def send_reply(token: str, post_id: str, text: str) -> dict:
             "problem": {"reason": "reply_too_long", "weighted_length": weighted_length(text)},
             "x_reply_id": "",
         }
+    audit_id = _begin_audit(
+        audit,
+        origin=origin,
+        publishing_path=publishing_path or "publish_once.send_reply",
+        event_id=event_id,
+        parent_id=post_id,
+        reply_text=text,
+    )
+    if audit is not None and not audit_id:
+        return {
+            "outcome": "failed",
+            "http_status": 0,
+            "detail": "audit_unavailable",
+            "x_reply_id": "",
+        }
     try:
         response = httpx.post(
             TWEETS_URL,
@@ -276,50 +312,107 @@ def send_reply(token: str, post_id: str, text: str) -> dict:
             timeout=20,
         )
     except httpx.TimeoutException:
-        return {"outcome": "ambiguous", "http_status": 0, "detail": "timeout", "x_reply_id": ""}
+        return _settle_audit(
+            audit, audit_id, {"outcome": "ambiguous", "http_status": 0, "detail": "timeout", "x_reply_id": ""}
+        )
     except httpx.TransportError:
-        return {"outcome": "ambiguous", "http_status": 0, "detail": "transport", "x_reply_id": ""}
+        return _settle_audit(
+            audit, audit_id, {"outcome": "ambiguous", "http_status": 0, "detail": "transport", "x_reply_id": ""}
+        )
     if response.status_code in {200, 201}:
         try:
             body = response.json()
         except ValueError:
-            return {
-                "outcome": "ambiguous",
-                "http_status": response.status_code,
-                "detail": "unreadable_body",
-                "x_reply_id": "",
-            }
+            return _settle_audit(
+                audit,
+                audit_id,
+                {
+                    "outcome": "ambiguous",
+                    "http_status": response.status_code,
+                    "detail": "unreadable_body",
+                    "x_reply_id": "",
+                },
+            )
         data = body.get("data") if isinstance(body, dict) else None
         reply_id = str((data or {}).get("id") or "") if isinstance(data, dict) else ""
         if not reply_id:
-            return {
-                "outcome": "ambiguous",
+            return _settle_audit(
+                audit,
+                audit_id,
+                {
+                    "outcome": "ambiguous",
+                    "http_status": response.status_code,
+                    "detail": "missing_reply_id",
+                    "x_reply_id": "",
+                },
+            )
+        return _settle_audit(
+            audit,
+            audit_id,
+            {
+                "outcome": "posted",
                 "http_status": response.status_code,
-                "detail": "missing_reply_id",
-                "x_reply_id": "",
-            }
-        return {
-            "outcome": "posted",
-            "http_status": response.status_code,
-            "detail": "",
-            "x_reply_id": reply_id,
-        }
+                "detail": "",
+                "x_reply_id": reply_id,
+            },
+        )
     problem = problem_record(response, token)
     if response.status_code >= 500:
-        return {
-            "outcome": "ambiguous",
+        return _settle_audit(
+            audit,
+            audit_id,
+            {
+                "outcome": "ambiguous",
+                "http_status": response.status_code,
+                "detail": str(problem.get("title") or "server_error"),
+                "problem": problem,
+                "x_reply_id": "",
+            },
+        )
+    return _settle_audit(
+        audit,
+        audit_id,
+        {
+            "outcome": "failed",
             "http_status": response.status_code,
-            "detail": str(problem.get("title") or "server_error"),
+            "detail": _problem_title(response, token),
             "problem": problem,
             "x_reply_id": "",
-        }
-    return {
-        "outcome": "failed",
-        "http_status": response.status_code,
-        "detail": _problem_title(response, token),
-        "problem": problem,
-        "x_reply_id": "",
-    }
+        },
+    )
+
+
+def _begin_audit(audit, *, origin: str, publishing_path: str, event_id: str, parent_id: str, reply_text: str) -> int:
+    if audit is None:
+        return 0
+    try:
+        return int(
+            audit.begin_publication_audit(
+                origin=origin,
+                publishing_path=publishing_path,
+                event_id=event_id,
+                parent_id=parent_id,
+                reply_text=reply_text,
+            )
+            or 0
+        )
+    except Exception:
+        return 0
+
+
+def _settle_audit(audit, audit_id: int, outcome: dict) -> dict:
+    if audit is not None and audit_id:
+        try:
+            audit.finish_publication_audit(
+                audit_id,
+                outcome=str(outcome.get("outcome") or ""),
+                http_status=int(outcome.get("http_status") or 0),
+                x_reply_id=str(outcome.get("x_reply_id") or ""),
+                detail=str(outcome.get("detail") or ""),
+            )
+        except Exception:
+            pass
+    return outcome
 
 
 def problem_record(response, token: str) -> dict:

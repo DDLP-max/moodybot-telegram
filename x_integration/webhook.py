@@ -424,7 +424,15 @@ def _publish_automatic(
                 "status": "activation_stopped",
                 "reason": book.activation_status()["stop_reason"],
             }
-    outcome = send_reply(str(check.get("token") or ""), mention.post_id, reply)
+    outcome = send_reply(
+        str(check.get("token") or ""),
+        mention.post_id,
+        reply,
+        origin="automatic",
+        publishing_path="webhook._publish_automatic",
+        event_id=mention.event_id,
+        audit=book,
+    )
     kind = str(outcome.get("outcome") or "ambiguous")
     http_status = int(outcome.get("http_status") or 0)
     if kind == "failed" and http_status == 0 and outcome.get("detail") == "reply_too_long":
@@ -467,7 +475,7 @@ def _publish_automatic(
     }
 
 
-def post_reply(in_reply_to_tweet_id: str, text: str, token: str = "") -> None:
+def post_reply(in_reply_to_tweet_id: str, text: str, token: str = "", ledger=None) -> None:
     """Live posting is refused until a dry run has succeeded and the flag is on.
 
     The flag is read by process_mention. This function is the only place a
@@ -486,7 +494,15 @@ def post_reply(in_reply_to_tweet_id: str, text: str, token: str = "") -> None:
     if not access or not in_reply_to_tweet_id or not text.strip():
         raise RuntimeError("X reply is not configured")
     from x_integration.publish_once import send_reply
+    from x_integration.state import ledger_from_env
 
-    outcome = send_reply(access, in_reply_to_tweet_id, text)
+    outcome = send_reply(
+        access,
+        in_reply_to_tweet_id,
+        text,
+        origin="post_reply",
+        publishing_path="webhook.post_reply",
+        audit=ledger or ledger_from_env(),
+    )
     if outcome.get("outcome") != "posted":
         raise RuntimeError(str(outcome.get("detail") or "X reply was not posted"))

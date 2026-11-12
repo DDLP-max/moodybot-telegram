@@ -179,6 +179,20 @@ CREATE TABLE IF NOT EXISTS reply_verifications (
     http_status INTEGER NOT NULL DEFAULT 0,
     checked_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS publication_audits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin TEXT NOT NULL DEFAULT '',
+    publishing_path TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL DEFAULT '',
+    parent_id TEXT NOT NULL DEFAULT '',
+    reply_text TEXT NOT NULL DEFAULT '',
+    x_reply_id TEXT NOT NULL DEFAULT '',
+    http_status INTEGER NOT NULL DEFAULT 0,
+    outcome TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -1261,6 +1275,78 @@ class MentionLedger:
             except Exception:
                 _rollback(conn)
                 raise
+            finally:
+                conn.close()
+
+    def begin_publication_audit(
+        self,
+        *,
+        origin: str,
+        publishing_path: str,
+        event_id: str,
+        parent_id: str,
+        reply_text: str,
+    ) -> int:
+        """Append one attempt before the network write. Does not claim a slot."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO publication_audits (
+                        origin, publishing_path, event_id, parent_id, reply_text,
+                        x_reply_id, http_status, outcome, detail, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, '', 0, 'sending', '', ?, ?)
+                    """,
+                    (
+                        str(origin or ""),
+                        str(publishing_path or ""),
+                        str(event_id or ""),
+                        str(parent_id or ""),
+                        str(reply_text or ""),
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+                return int(cursor.lastrowid or 0)
+            finally:
+                conn.close()
+
+    def finish_publication_audit(
+        self,
+        audit_id: int,
+        *,
+        outcome: str,
+        http_status: int,
+        x_reply_id: str,
+        detail: str,
+    ) -> None:
+        """Close the attempt. A missing id is left untouched."""
+        if not audit_id:
+            return
+        now = _now()
+        safe_detail = _public_reason(detail)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    UPDATE publication_audits
+                    SET outcome = ?, http_status = ?, x_reply_id = ?, detail = ?, updated_at = ?
+                    WHERE id = ? AND outcome = 'sending'
+                    """,
+                    (
+                        str(outcome or ""),
+                        int(http_status or 0),
+                        str(x_reply_id or ""),
+                        safe_detail,
+                        now,
+                        int(audit_id),
+                    ),
+                )
+                conn.commit()
             finally:
                 conn.close()
 
