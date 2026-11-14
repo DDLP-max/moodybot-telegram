@@ -131,9 +131,10 @@ def length_instruction(extraction: dict, limit: Optional[int] = None) -> str:
     parts = " ".join(item.get("text") or "" for item in extraction.get("questions") or [])
     return (
         f"Rewrite the reply in the same voice under {cap} weighted characters. "
-        "Cover every part: "
+        "Cover what honestly fits: "
         + parts
-        + ". Do not drop a part to make it fit, and do not post twice."
+        + ". If a requested list cannot fit, do not pretend it is complete. "
+        "Do not post twice."
     )
 
 

@@ -254,6 +254,8 @@ class ResponsePlan:
     engagement_energy: bool = False
     # Permission to add material — distinct from response_budget (length).
     contribution_budget: str = "one_beat"  # zero | micro | one_beat | develop
+    # Full user text for the request contract. Style routing must not replace it.
+    user_text: str = ""
 
 
 @dataclass
@@ -861,30 +863,33 @@ def apply_budget_to_structure(
 
 
 def response_budget_guidance(budget: str, structure: str = "", topic_mode: str = "") -> str:
-    """Inject Depth × Shape guidance. Purpose first; length is a consequence."""
+    """Voice shape only. It never sets a sentence count or a word budget."""
     b = (budget or "medium").lower()
     struct = normalize_structure(structure)
     mode = (topic_mode or "").lower()
+    shared = (
+        "This shape is voice, not a cap. The user's request decides how much is said. "
+        "Do not stop early to satisfy a sentence count or a word count. Do not pad.\n"
+    )
     if b == "low" or struct == "SNAP":
         return (
             "\nRESPONSE BUDGET — Depth: low × Shape: SNAP.\n"
             "PURPOSE: Surprise the reader.\n"
-            "FORMAT: one paragraph; one movement. Usually 1–3 sentences.\n"
-            "Stop at the spear. Soft ~15–70 words (consequence, not the design).\n"
-            "PASS: \"That's like saying prison is just a room.\"\n"
-            "Do not pad. Do not lyricize.\n"
+            + shared
+            + "PASS: \"That's like saying prison is just a room.\"\n"
+            "Do not lyricize.\n"
         )
     if struct == "REFLECTION":
         return (
             "\nRESPONSE BUDGET — Depth: high × Shape: REFLECTION.\n"
             "PURPOSE: Leave the reader seeing their own life differently.\n"
             "PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.\n"
-            "STRUCTURAL CONTRACT — emit blank lines between beats (not one wall of text):\n"
+            "STRUCTURAL CONTRACT — a new paragraph when the thought changes:\n"
             "Paragraph 1 — Observation\n"
             "Paragraph 2 — Deepening\n"
             "Paragraph 3 — Consequence\n"
-            "Paragraph 4 (optional) — Acceptance (only if earned)\n"
-            "STOP. 3–6 paragraphs max.\n"
+            "Paragraph 4 — Acceptance, only if it earns its place\n"
+            "There is no paragraph quota.\n"
             "REFLECTION EDITORIAL RULE: Does this paragraph introduce a new layer, "
             "or merely another way of saying the previous one? "
             "If it merely reinforces — delete it.\n"
@@ -892,29 +897,28 @@ def response_budget_guidance(budget: str, structure: str = "", topic_mode: str =
             "If the answer is just another proof of the same point, remove it.\n"
             "Each paragraph should feel like the conversation moved somewhere new.\n"
             "FAIL: Observation → Proof → Proof again → Summary → Moral.\n"
-            "PASS: three clean paragraphs that deepen once each, then stop.\n"
+            + shared
         )
     if b == "high":
         return (
             "\nRESPONSE BUDGET — Depth: high × Shape: Extended KNIFE.\n"
             "PURPOSE: Develop one mechanism until it feels inevitable.\n"
             "PARAGRAPH LAW: Paragraphs are semantic units, not visual spacing.\n"
-            "STRUCTURAL CONTRACT — emit blank lines between beats (not one wall of text):\n"
+            "STRUCTURAL CONTRACT — a new paragraph when the thought changes:\n"
             "Paragraph 1 — Observation\n"
             "Paragraph 2 — Development / proof\n"
-            "Paragraph 3 (optional) — Consequence\n"
-            "STOP. 2–4 paragraphs. Each advances the mechanism.\n"
-            f"Topic mode: {mode or 'argument'}. Soft ~100–260 words (consequence).\n"
+            "Paragraph 3 — Consequence, when it changes the meaning\n"
+            f"Topic mode: {mode or 'argument'}.\n"
             "AND THEN? TEST: if the next paragraph is just another proof of the same point, remove it.\n"
             "Do NOT flip into lyrical REFLECTION on politics/hot-takes.\n"
+            + shared
         )
     return (
         "\nRESPONSE BUDGET — Depth: medium × Shape: KNIFE.\n"
         "PURPOSE: Reframe the reader.\n"
-        "FORMAT: one paragraph / one movement. Two only if the second is the proof "
-        "rather than another thesis.\n"
-        "Stop after the proof. Soft ~50–140 words (consequence).\n"
-        "Reframe → proof → spear. Develop enough to land — do not force SNAP.\n"
+        "The second movement is the proof, when the proof is not already in the first. "
+        "Develop enough to land. Do not force SNAP.\n"
+        + shared
     )
 
 
@@ -937,10 +941,10 @@ def contribution_budget_guidance(budget: str) -> str:
         )
     if b == "one_beat":
         return (
-            "\nCONTRIBUTION BUDGET: one beat. One earned addition — not a second list, "
-            "not a dissection. Recognition wants articulation. Comic taxonomies are "
-            "worlds to enter; one category is participation.\n"
-            "FAIL: eight more cities. FAIL: \"Shared laughter creates emotional intimacy because…\"\n"
+            "\nCONTRIBUTION BUDGET: one beat. A recognition gets one true line. "
+            "A completed joke does not get a lecture. "
+            "An explicit list, count, or explanation is the answer, not a list to refuse.\n"
+            "FAIL: \"Shared laughter creates emotional intimacy because…\"\n"
             "PASS: \"That's usually the part you end up missing.\"\n"
         )
     return (
@@ -1484,6 +1488,7 @@ def build_response_plan(
         governing_pattern=None,
         central_insight=None,
         original_subject=subject,
+        user_text=user_message or "",
         claim_domain=domain,
         lens=lens,
         routed_lens=lens,
@@ -1530,7 +1535,7 @@ def build_response_plan(
 CORE_WRITE_DIRECTIVE = """CORE WRITE RULE (highest priority for this reply):
 
 Surface geometry (mandatory): CUT → NAME → PROVE ONCE → STOP → 🥃
-Deep reasoning stays internal. External delivery is aggressive compression.
+Deep reasoning stays internal. External delivery is dense. Density is not a reason to drop a requested answer.
 
 Layers (mandatory — keep independent):
   0) Social mode — what kind of human moment? (before intelligence; not a new pipeline box)
@@ -1699,34 +1704,29 @@ FAIL (Paula): completed "invite him. send claude the google meet." → "At this 
 FAIL (KFC): popcorn chicken swagger → brand analysis.
 PASS (Feelings): "That's usually the part you end up missing."
 
-RESPONSE BUDGET = Depth × Shape — proportionality / social intelligence, not padding.
+RESPONSE BUDGET = Depth × Shape — voice, not a word quota.
 
 Depth: low | medium | high
 Shape: SNAP | KNIFE | REFLECTION
 (STORY is a legacy name for REFLECTION — contemplation, not narrative.)
 
-Structure purpose (emotional outcome — design; length is a consequence):
-| Shape | Purpose | Stop rule |
-|---|---|---|
-| SNAP | Surprise the reader. | Stop at the spear. |
-| KNIFE | Reframe the reader. | Stop after the proof. |
-| Extended KNIFE | Develop one mechanism until it feels inevitable. | Stop when the mechanism is inevitable. |
-| REFLECTION | Leave the reader seeing their own life differently. | Earn every paragraph. |
+Structure purpose (delivery, not a cap):
+| Shape | Purpose |
+|---|---|
+| SNAP | Surprise the reader. |
+| KNIFE | Reframe the reader. |
+| Extended KNIFE | Develop one mechanism until it feels inevitable. |
+| REFLECTION | Leave the reader seeing their own life differently. |
 
-| Depth | Shape | Soft range (consequence) | When |
-|---|---|---|---|
-| low | SNAP | ~15–70 | hot takes, food, memes, obvious claims |
-| medium | KNIFE | ~50–140 | opinions, short relationship posts |
-| high | Extended KNIFE | ~100–260 | long political/ideological arguments |
-| high | REFLECTION | ~250–450 | existential, aging, grief, purpose, love, legacy, identity, failure, forgiveness, parenthood |
+The user's explicit request overrides shape. A requested count, a requested explanation, and a requested one-sentence limit are the job. A short remark can still be short. Do not pad. Do not derive length from the prompt's word count.
 
 EXPAND topics (high × REFLECTION even if the prompt is short):
 existential, grief, mortality, purpose, identity, parenthood, love, aging, failure, forgiveness, legacy.
 
-COMPRESS topics (SNAP or KNIFE — never midnight lyric by default):
+COMPRESS topics means a hotter, denser voice — never a reason to drop requested content:
 hot takes, politics, social media posts, opinions, food, memes, obvious claims.
 
-The Editor still cuts all three shapes. It just edits different budgets.
+The Editor removes restatement. It does not enforce a word count or a sentence count.
 Old failure: every paragraph deserves another metaphor.
 New failure: every prompt deserves one observation.
 Neither is right. Don't ramble ≠ be short.
@@ -1737,20 +1737,12 @@ Split when the thought changes. Merge when the thought doesn't.
 Never create a paragraph simply because it "looks nicer."
 Law 7 extension: every sentence must survive — and every paragraph must survive.
 
-CADENCE BY STRUCTURE (structural contract — emit blank lines; not formatting polish):
-- SNAP: one paragraph; one movement.
-- KNIFE: one paragraph; two only if the second is the proof rather than another thesis.
-- Extended KNIFE:
-  Paragraph 1 — Observation
-  Paragraph 2 — Development / proof
-  Paragraph 3 (optional) — Consequence
-  STOP. 2–4 paragraphs.
-- REFLECTION:
-  Paragraph 1 — Observation
-  Paragraph 2 — Deepening
-  Paragraph 3 — Consequence
-  Paragraph 4 (optional) — Acceptance (only if earned)
-  STOP. 3–6 paragraphs.
+CADENCE BY STRUCTURE (structural contract — a new paragraph when the thought changes):
+- SNAP: one movement, when one movement is the whole answer.
+- KNIFE: the reframe, and the proof when the proof is not already in the reframe.
+- Extended KNIFE: observation, then development, then a consequence when it changes the meaning.
+- REFLECTION: observation, deepening, consequence, and acceptance when each earns its place.
+There is no paragraph quota.
 
 REFLECTION EDITORIAL RULE:
 Does this paragraph introduce a new layer, or merely another way of saying the previous one?
@@ -2419,8 +2411,11 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             "because you saw straight through them.\"\n"
             "PASS: \"Everybody hates assumptions right up until the receipts arrive.\"\n"
         )
+    from request_contract import request_guidance
+
     return (
-        f"RUNTIME TURN (this reply only):\n"
+        request_guidance(getattr(plan, "user_text", "") or "")
+        + f"RUNTIME TURN (this reply only):\n"
         f"Interpretive lens (Identity, locked): {lens}. Capability (Intelligence): {cap}."
         + f"{voice_bit}{struct_bit}{mech_bit}{budget_bit} Claim type: {domain}."
         + q_bit
@@ -2431,7 +2426,7 @@ def _plan_turn_instruction(plan: ResponsePlan) -> str:
             if pick_one or forced or awe or handoff or terminal or pick_defend or premise_guard or provoc_gen
             else (
                 "Lens = way of seeing (what you notice first), not a style theme. "
-                "Capability ≠ lens. Gold compresses within budget (density, not brevity). "
+                "Capability ≠ lens. Gold removes restatement. It does not delete a requested answer. "
                 "Never name the lens in prose.\n"
             )
         )

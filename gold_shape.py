@@ -786,57 +786,7 @@ def _compress_once(
         if trimmed:
             ss = trimmed
 
-    # Soft caps only when overlong failure present — scaled by depth; never tweet-gut REFLECTION
-    caps = _budget_soft_caps(response_budget)
-    soft_cap = {
-        "SNAP": max(40, caps["SNAP"] - 15),
-        "KNIFE": max(80, caps["KNIFE"] - 20),
-        "REFLECTION": caps["REFLECTION"],
-    }.get(structure, caps["KNIFE"])
-    wc = len(words(" ".join(ss)))
-    min_sentences_before_gut = 12 if reflection else (7 if high else 4)
-    overlong_flags = (
-        "knife_overlong",
-        "snap_overlong",
-        "reflection_overlong",
-        "thesis_repetition",
-        "over_confirming",
-    )
-    if (
-        structure in {"SNAP", "KNIFE", "REFLECTION"}
-        and wc > soft_cap
-        and len(ss) > min_sentences_before_gut
-        and any(f in failures for f in overlong_flags)
-    ):
-        spear_ok, spear, spear_i = detect_spear(ss)
-        if reflection or high:
-            keep_idx = {0, 1, 2, 3}
-            if spear_i >= 0:
-                keep_idx.add(spear_i)
-                if spear_i > 0:
-                    keep_idx.add(spear_i - 1)
-                if spear_i + 1 < len(ss):
-                    keep_idx.add(spear_i + 1)
-            if reflection:
-                for i in range(min(6, len(ss))):
-                    keep_idx.add(i)
-            ss = [s for i, s in enumerate(ss) if i in keep_idx]
-        else:
-            try:
-                from discovery_craft import protected_discovery_indices
-
-                protect_idx = protected_discovery_indices(ss)
-            except Exception:
-                protect_idx = set()
-            keep_idx = {0} | protect_idx
-            if spear_i >= 0:
-                keep_idx.add(spear_i)
-            if len(ss) > 1:
-                keep_idx.add(min(1, len(ss) - 1))
-            if spear_i >= 2:
-                keep_idx.add(spear_i - 1)
-            ss = [s for i, s in enumerate(ss) if i in keep_idx]
-
+    # Length is not a deletion rule. Restatement can go. Requested items stay.
     text = " ".join(ss)
 
     if "abstract_closer" in failures:
@@ -920,17 +870,15 @@ def apply_gold_shape_pass(
         "cta_or_costume_tail",
         "stacked_metaphor",
         "multi_mechanism_essay",
-        "knife_overlong",
-        "snap_overlong",
-        "knife_too_many_sentences",
-        "reflection_overlong",
-        "reflection_too_many_sentences",
         "paragraph_restatement",
         "over_confirming",
         "essay_diction",
         "abstract_closer",
     }
-    if any(f in rewrite_triggers for f in failures):
+    from request_contract import content_is_protected
+
+    # An explicit count or a requested explanation is not a compression target.
+    if any(f in rewrite_triggers for f in failures) and not content_is_protected(user_message):
         compressed = _compress_once(
             user_message, body, structure, failures, response_budget=budget
         )

@@ -1435,7 +1435,7 @@ async def _complete_and_send(mb, update, chat, update_id, caption, intent, image
                 json={
                     "model": mb.OPENROUTER_MODEL,
                     "messages": messages,
-                    "max_tokens": 1000,
+                    "max_tokens": 2000,
                 },
                 timeout=45,
             )

@@ -988,9 +988,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 json={
                     "model": OPENROUTER_MODEL,
                     "messages": messages,
-                    "max_tokens": 1000
+                    "max_tokens": 2000
                 },
-                timeout=20
+                timeout=45
             )
 
             latency_ms = (time.monotonic() - t0) * 1000.0
@@ -1056,6 +1056,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Process response
             stage = "response_content"
             raw_content = result["choices"][0]["message"]["content"]
+            finish_reason = (result["choices"][0].get("finish_reason") or "")
             logger.info(
                 "[update %s] OpenRouter content ok chars=%s",
                 update_id,
@@ -1107,9 +1108,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         json={
                             "model": OPENROUTER_MODEL,
                             "messages": retry_messages(messages, gate_reason),
-                            "max_tokens": 1000
+                            "max_tokens": 2000
                         },
-                        timeout=20
+                        timeout=45
                     )
                     retry_latency_ms = (time.monotonic() - t_retry) * 1000.0
                     retry_result = retry_response.json()
@@ -1120,6 +1121,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     if retry_response.status_code < 400 and retry_has_choices:
                         retry_draft = retry_result["choices"][0]["message"]["content"]
+                        finish_reason = retry_result["choices"][0].get("finish_reason") or ""
                         logger.info(
                             "[update %s] Generation retry ok chars=%s model_calls=%s",
                             update_id,
@@ -1155,6 +1157,65 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     generation_settle,
                     generation_reject,
                 )
+            from request_contract import (
+                CONTINUATION_TOKEN_CEILING,
+                completion_gap,
+            )
+
+            gap = completion_gap(user_input, raw_content or "")
+            if (gap or finish_reason == "length") and model_calls_for_update < 3:
+                followup = gap or (
+                    "The previous answer was cut off by the token limit. "
+                    "Continue from the last sentence. Do not restart. "
+                    "Do not drop what was already said. Return only the continuation."
+                )
+                model_calls_for_update += 1
+                try:
+                    continued = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                            "HTTP-Referer": "https://moodybot.ai",
+                            "X-Title": "MoodyBot",
+                        },
+                        json={
+                            "model": OPENROUTER_MODEL,
+                            "messages": messages + [
+                                {"role": "assistant", "content": raw_content or ""},
+                                {"role": "user", "content": followup},
+                            ],
+                            "max_tokens": CONTINUATION_TOKEN_CEILING,
+                        },
+                        timeout=45,
+                    )
+                    continued_result = continued.json()
+                    continued_ok = (
+                        continued.status_code < 400
+                        and isinstance(continued_result.get("choices"), list)
+                        and bool(continued_result["choices"])
+                    )
+                    if continued_ok:
+                        extra = continued_result["choices"][0]["message"]["content"] or ""
+                        if gap:
+                            raw_content = extra
+                        elif extra.strip():
+                            raw_content = f"{(raw_content or '').rstrip()} {extra.strip()}"
+                        if completion_gap(user_input, raw_content or ""):
+                            logger.error(
+                                "[update %s] Generation still short after one continuation",
+                                update_id,
+                            )
+                    else:
+                        logger.error(
+                            "[update %s] Continuation failed status=%s",
+                            update_id,
+                            continued.status_code,
+                        )
+                except Exception:
+                    logger.exception(
+                        "[update %s] Continuation failed; keeping the first draft",
+                        update_id,
+                    )
             draft_paragraph_count = paragraph_count(raw_content)
 
             # Apply new post-processing pipeline

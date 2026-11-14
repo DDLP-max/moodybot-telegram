@@ -15,21 +15,14 @@ Question → Claim type → Interpretive lens → Lens question → Capability �
 
 ### Response Budget = Depth × Shape
 
-Purpose first; length is a consequence.
+Purpose first. Shape is voice, not a word quota. The user's request overrides it.
 
-| Shape | Purpose | Stop rule |
-|---|---|---|
-| SNAP | Surprise the reader. | Stop at the spear. |
-| KNIFE | Reframe the reader. | Stop after the proof. |
-| Extended KNIFE | Develop one mechanism until inevitable. | Stop when inevitable. |
-| REFLECTION | Leave the reader seeing their own life differently. | Earn every paragraph. |
-
-| Depth | Shape | Soft range | When |
-|---|---|---|---|
-| low | SNAP | ~15–70 | hot takes, food, memes |
-| medium | KNIFE | ~50–140 | opinions, short posts |
-| high | Extended KNIFE | ~100–260 | long ideology / multi-claim |
-| high | REFLECTION | ~250–450 | existential, aging, grief, purpose, love, legacy |
+| Shape | Purpose |
+|---|---|
+| SNAP | Surprise the reader. |
+| KNIFE | Reframe the reader. |
+| Extended KNIFE | Develop one mechanism until inevitable. |
+| REFLECTION | Leave the reader seeing their own life differently. |
 
 REFLECTION (ex-STORY) = contemplation, not narrative.
 Earn every paragraph: Observation → Deepening → Consequence → Acceptance.

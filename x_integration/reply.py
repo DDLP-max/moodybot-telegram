@@ -184,8 +184,9 @@ def draft_mention_reply(
                         "content": (
                             "Rewrite this reply in the same voice so it fits one X post. "
                             f"The hard limit is {limit} weighted characters: emoji count as two, "
-                            "and a link counts as 23. Keep the same point. Do not cut it off. "
-                            "Return only the reply."
+                            "and a link counts as 23. If the full request cannot fit, give an "
+                            "honest partial or decline. Do not claim a list is complete when it is not. "
+                            "Do not cut a sentence in half. Return only the reply."
                         ),
                     },
                     {"role": "user", "content": text_out},
@@ -212,7 +213,10 @@ def _with_post_limit(messages: List[dict]) -> List[dict]:
             "This reply will be posted on X. Hard limit: "
             f"{autonomous_limit()} weighted characters. "
             "Emoji count as two characters. A link counts as 23. "
-            "One post, one paragraph. Stop before the limit."
+            "This limit applies only to this X post and overrides any request for a "
+            "list, a count, or a long explanation. Do not try to fit ten items. "
+            "Give a truthful short answer, or decline. Do not claim the full request "
+            "was completed. One post. Stop before the limit."
         ),
     }
     prepared = list(messages)

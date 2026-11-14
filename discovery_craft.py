@@ -1691,6 +1691,10 @@ def exceeds_contribution_budget(user_message: str, response: str, *, plan: objec
             return True
         return len(ss) >= 3 or wc > 36
     if budget == CONTRIBUTION_ONE_BEAT:
+        from request_contract import content_is_protected
+
+        if content_is_protected(user_message):
+            return False
         labeled = len(re.findall(r"(?m)^[A-Z][A-Za-z .]{1,24}:\s+\S+", body))
         if labeled >= 3:
             return True

@@ -207,6 +207,33 @@ def maybe_append_cta(text: str, mode: str) -> str:
     
     return f"{text}\n\n{cta}"
 
+def _split_for_telegram(text: str, limit: int = 3500) -> list:
+    """Split on paragraph, line, then word. Never drop a piece."""
+    remaining = (text or "").strip()
+    if not remaining:
+        return [""]
+    if len(remaining) <= limit:
+        return [remaining]
+    parts = []
+    while remaining:
+        if len(remaining) <= limit:
+            parts.append(remaining)
+            break
+        window = remaining[:limit]
+        cut = window.rfind("\n\n")
+        if cut < limit // 2:
+            cut = window.rfind("\n")
+        if cut < limit // 2:
+            cut = window.rfind(" ")
+        if cut < 1:
+            cut = limit
+        piece = remaining[:cut].strip()
+        if piece:
+            parts.append(piece)
+        remaining = remaining[cut:].strip()
+    return parts or [remaining]
+
+
 async def send_message(
     update: Update,
     text: str,
@@ -237,31 +264,32 @@ async def send_message(
     # Apply CTA only when explicitly allowed (engagement is last)
     formatted_text = maybe_append_cta(cleaned_text, mode) if allow_cta else cleaned_text
     
-    # Format for HTML parse mode
-    html_text = format_html_message(formatted_text)
+    # Format for HTML parse mode, then split only at Telegram's delivery limit.
+    chunks = _split_for_telegram(formatted_text)
     try:
         from gold_shape import paragraph_count as _paragraph_count
 
         logger.info(
-            "PARA_TRACE_TELEGRAM mode=%s telegram_payload_paragraph_count=%s",
+            "PARA_TRACE_TELEGRAM mode=%s telegram_payload_paragraph_count=%s chunks=%s",
             mode,
             _paragraph_count(formatted_text),
+            len(chunks),
         )
     except Exception:
         pass
 
-    try:
-        # Send with HTML parse mode
-        await update.message.reply_text(html_text, parse_mode='HTML')
-        logger.info(f"Message sent successfully in {mode} mode")
-    except Exception as e:
-        logger.error(f"Failed to send HTML message: {e}")
+    for index, chunk in enumerate(chunks):
+        html_text = format_html_message(chunk)
         try:
-            # Fallback to plain text
-            await update.message.reply_text(formatted_text)
-            logger.info("Fallback to plain text successful")
-        except Exception as e2:
-            logger.error(f"Failed to send fallback message: {e2}")
+            await update.message.reply_text(html_text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Failed to send HTML message chunk {index + 1}: {e}")
+            try:
+                await update.message.reply_text(chunk)
+            except Exception as e2:
+                logger.error(f"Failed to send fallback message chunk {index + 1}: {e2}")
+                return
+    logger.info(f"Message sent successfully in {mode} mode chunks={len(chunks)}")
 
 async def send_simple_message(update: Update, text: str) -> None:
     """

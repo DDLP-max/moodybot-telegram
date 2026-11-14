@@ -236,7 +236,7 @@ def test_overlong_reply_is_cut_to_a_standard_post():
                     for item in messages
                     if item.get("role") == "system"
                 )
-                if "Cover every part" in system:
+                if "Cover what honestly fits" in system:
                     return "Gugino already knows the room. \U0001f943"
                 return long_reply
 
