@@ -274,13 +274,48 @@ def send_reply(
     origin: str = "",
     publishing_path: str = "",
     event_id: str = "",
+    author_id: str = "",
+    enforce_opt_out: bool = False,
     audit: Optional[MentionLedger] = None,
 ) -> dict:
-    """POST one reply. Transport failures stay ambiguous and are not retried."""
+    """POST one reply. Transport failures stay ambiguous and are not retried.
+
+    Automatic callers pass the parent author and enforce_opt_out. The check
+    runs before the audit row and before the network write. Manual
+    execute_publish does not set the flag, so an operator confirm still posts.
+    """
     import httpx
 
     from x_integration.post_length import fits_post
 
+    if enforce_opt_out:
+        if audit is None or not str(author_id or "").strip():
+            return {
+                "outcome": "failed",
+                "http_status": 0,
+                "detail": "opt_out_unavailable",
+                "x_reply_id": "",
+            }
+        try:
+            blocked = audit.is_opted_out(author_id)
+        except Exception:
+            return {
+                "outcome": "failed",
+                "http_status": 0,
+                "detail": "opt_out_unavailable",
+                "x_reply_id": "",
+            }
+        if blocked:
+            try:
+                audit.note_opt_out_suppression(author_id, post_id, "publish")
+            except Exception:
+                pass
+            return {
+                "outcome": "failed",
+                "http_status": 0,
+                "detail": "opt_out",
+                "x_reply_id": "",
+            }
     if not fits_post(text):
         return {
             "outcome": "failed",

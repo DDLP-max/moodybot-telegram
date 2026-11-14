@@ -91,7 +91,7 @@ def test_stopped_one_reply_gate_does_not_block_live_test():
         "http_status": 200,
     }
 
-    def send(token, post_id, text):
+    def send(token, post_id, text, **_extra):
         sent.append((post_id, text))
         return {"outcome": "posted", "http_status": 201, "detail": "", "x_reply_id": "reply-live"}
 

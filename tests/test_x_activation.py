@@ -122,7 +122,7 @@ def test_two_mentions_allow_one_post_and_a_success_stops_the_next():
     _arm()
     posts = []
 
-    def send(token, post_id, text):
+    def send(token, post_id, text, **_extra):
         posts.append(post_id)
         return {"outcome": "posted", "http_status": 201, "detail": "", "x_reply_id": "reply-1"}
 
@@ -168,7 +168,7 @@ def test_http_403_consumes_the_allowance_and_leaves_history():
     _arm()
     posts = []
 
-    def send(token, post_id, text):
+    def send(token, post_id, text, **_extra):
         posts.append(post_id)
         return {
             "outcome": "failed",
@@ -207,7 +207,7 @@ def test_timeout_consumes_the_allowance_and_stays_ambiguous():
     _arm()
     posts = []
 
-    def send(token, post_id, text):
+    def send(token, post_id, text, **_extra):
         posts.append(post_id)
         return {"outcome": "ambiguous", "http_status": 0, "detail": "timeout", "x_reply_id": ""}
 

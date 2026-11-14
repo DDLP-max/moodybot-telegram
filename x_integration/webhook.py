@@ -130,6 +130,22 @@ def process_mention(mention: Mention, *, ledger: Optional[MentionLedger] = None)
     if own and mention.author_id == own:
         book.finish(mention.event_id, status="skipped", skip_reason="own_post")
         return {"status": "skipped", "reason": "own_post"}
+    from x_integration.opt_out import screen_author
+
+    if screen_author(
+        book,
+        mention.author_id,
+        mention.author_username,
+        mention.post_id,
+        mention.text,
+    ):
+        book.finish(
+            mention.event_id,
+            status="skipped",
+            skip_reason="opt_out",
+            post_id=mention.post_id,
+        )
+        return {"status": "skipped", "reason": "opt_out"}
     if book.already_replied(mention.post_id):
         book.finish(mention.event_id, status="skipped", skip_reason="already_replied")
         return {"status": "skipped", "reason": "already_replied"}
@@ -331,6 +347,18 @@ def _publish_automatic(
     question_id: str = "",
 ) -> dict:
     """Post once. A write that X may have accepted is never sent again."""
+    if not replies_enabled():
+        book.release_pending_event(mention.event_id)
+        return {"status": "not_publishing", "reason": "replies_disabled"}
+    if book.is_opted_out(mention.author_id):
+        book.note_opt_out_suppression(mention.author_id, mention.post_id, "publish")
+        book.finish(
+            mention.event_id,
+            status="skipped",
+            skip_reason="opt_out",
+            post_id=mention.post_id,
+        )
+        return {"status": "skipped", "reason": "opt_out"}
     from x_integration.account_probe import validated_user_token
     from x_integration.post_length import fits_autonomous
     from x_integration.publish_once import send_reply
@@ -424,6 +452,19 @@ def _publish_automatic(
                 "status": "activation_stopped",
                 "reason": book.activation_status()["stop_reason"],
             }
+    if not replies_enabled() or book.is_opted_out(mention.author_id):
+        book.release_automatic_reservation(mention.post_id)
+        if book.is_opted_out(mention.author_id):
+            book.note_opt_out_suppression(mention.author_id, mention.post_id, "publish")
+            book.finish(
+                mention.event_id,
+                status="skipped",
+                skip_reason="opt_out",
+                post_id=mention.post_id,
+            )
+            return {"status": "skipped", "reason": "opt_out"}
+        book.release_pending_event(mention.event_id)
+        return {"status": "not_publishing", "reason": "replies_disabled"}
     outcome = send_reply(
         str(check.get("token") or ""),
         mention.post_id,
@@ -431,6 +472,8 @@ def _publish_automatic(
         origin="automatic",
         publishing_path="webhook._publish_automatic",
         event_id=mention.event_id,
+        author_id=mention.author_id,
+        enforce_opt_out=True,
         audit=book,
     )
     kind = str(outcome.get("outcome") or "ambiguous")
@@ -475,7 +518,13 @@ def _publish_automatic(
     }
 
 
-def post_reply(in_reply_to_tweet_id: str, text: str, token: str = "", ledger=None) -> None:
+def post_reply(
+    in_reply_to_tweet_id: str,
+    text: str,
+    token: str = "",
+    ledger=None,
+    author_id: str = "",
+) -> None:
     """Live posting is refused until a dry run has succeeded and the flag is on.
 
     The flag is read by process_mention. This function is the only place a
@@ -496,13 +545,19 @@ def post_reply(in_reply_to_tweet_id: str, text: str, token: str = "", ledger=Non
     from x_integration.publish_once import send_reply
     from x_integration.state import ledger_from_env
 
+    book = ledger or ledger_from_env()
+    if author_id and book.is_opted_out(author_id):
+        book.note_opt_out_suppression(author_id, in_reply_to_tweet_id, "publish")
+        raise RuntimeError("opt_out")
     outcome = send_reply(
         access,
         in_reply_to_tweet_id,
         text,
         origin="post_reply",
         publishing_path="webhook.post_reply",
-        audit=ledger or ledger_from_env(),
+        author_id=author_id,
+        enforce_opt_out=bool(author_id),
+        audit=book,
     )
     if outcome.get("outcome") != "posted":
         raise RuntimeError(str(outcome.get("detail") or "X reply was not posted"))

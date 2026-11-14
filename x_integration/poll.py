@@ -445,6 +445,12 @@ def _classify_mention(
     complete=None,
 ) -> dict:
     from x_integration.eligibility import classify_mention
+    from x_integration.opt_out import screen_mention
+
+    screened = screen_mention(book, tweet)
+    if screened is not None:
+        screened["queued"] = False
+        return screened
 
     post_id = str(tweet.get("id") or "").strip()
     conversation_id = str(tweet.get("conversation_id") or post_id)

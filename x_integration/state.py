@@ -193,6 +193,26 @@ CREATE TABLE IF NOT EXISTS publication_audits (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS x_user_opt_outs (
+    user_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    source_post_id TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'opted_out'
+);
+CREATE TABLE IF NOT EXISTS x_opt_out_suppressions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    post_id TEXT NOT NULL DEFAULT '',
+    stage TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS x_opt_out_state (
+    name TEXT PRIMARY KEY,
+    last_result TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -1906,6 +1926,163 @@ class MentionLedger:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=10000")
         return conn
+
+
+
+    def record_opt_out(
+        self,
+        user_id: str,
+        username: str = "",
+        source_post_id: str = "",
+        reason: str = "",
+    ) -> str:
+        """Store an opt-out by X user id. A handle change does not remove it."""
+        user_id = str(user_id or "").strip()
+        if not user_id.isdigit():
+            return "ignored"
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute(
+                    "SELECT user_id FROM x_user_opt_outs WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                conn.execute(
+                    """
+                    INSERT INTO x_user_opt_outs (
+                        user_id, username, created_at, source_post_id, reason, status
+                    ) VALUES (?, ?, ?, ?, ?, 'opted_out')
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        username = CASE
+                            WHEN excluded.username != '' THEN excluded.username
+                            ELSE x_user_opt_outs.username
+                        END
+                    """,
+                    (
+                        user_id,
+                        str(username or "")[:80],
+                        now,
+                        str(source_post_id or ""),
+                        str(reason or "")[:80],
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO x_opt_out_state (name, last_result, updated_at)
+                    VALUES ('current', 'recorded', ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        last_result = 'recorded',
+                        updated_at = excluded.updated_at
+                    """,
+                    (now,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return "present" if existing else "recorded"
+
+    def is_opted_out(self, user_id: str) -> bool:
+        user_id = str(user_id or "").strip()
+        if not user_id.isdigit():
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT 1 FROM x_user_opt_outs
+                    WHERE user_id = ? AND status = 'opted_out'
+                    """,
+                    (user_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        return row is not None
+
+    def note_opt_out_suppression(self, user_id: str, post_id: str = "", stage: str = "") -> None:
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO x_opt_out_suppressions (user_id, post_id, stage, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (str(user_id or ""), str(post_id or ""), str(stage or "")[:40], now),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO x_opt_out_state (name, last_result, updated_at)
+                    VALUES ('current', 'suppressed', ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        last_result = 'suppressed',
+                        updated_at = excluded.updated_at
+                    """,
+                    (now,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def opt_out_summary(self) -> dict:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM x_user_opt_outs WHERE status = 'opted_out'"
+                ).fetchone()
+                recent = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM x_user_opt_outs
+                    WHERE status = 'opted_out' AND created_at >= ?
+                    """,
+                    (cutoff,),
+                ).fetchone()
+                suppressed = conn.execute(
+                    "SELECT COUNT(*) FROM x_opt_out_suppressions"
+                ).fetchone()
+                state = conn.execute(
+                    "SELECT last_result, updated_at FROM x_opt_out_state WHERE name = 'current'"
+                ).fetchone()
+            finally:
+                conn.close()
+        return {
+            "enforcement_active": True,
+            "opted_out_users": int(total[0] if total else 0),
+            "opt_outs_24h": int(recent[0] if recent else 0),
+            "replies_suppressed": int(suppressed[0] if suppressed else 0),
+            "last_result": str(state[0] if state else ""),
+            "last_at": str(state[1] if state else ""),
+        }
+
+    def list_opt_outs(self) -> list:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT user_id, username, created_at, source_post_id, reason, status
+                    FROM x_user_opt_outs
+                    ORDER BY created_at
+                    """
+                ).fetchall()
+            finally:
+                conn.close()
+        return [
+            {
+                "user_id": row[0],
+                "username": row[1],
+                "created_at": row[2],
+                "source_post_id": row[3],
+                "reason": row[4],
+                "status": row[5],
+            }
+            for row in rows
+        ]
 
 
 def state_dir() -> tuple[Path, str]:

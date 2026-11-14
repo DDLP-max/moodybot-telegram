@@ -176,7 +176,7 @@ def test_consumed_gate_stays_consumed_and_beta_does_not_reset_it():
         "http_status": 200,
     }
 
-    def send(token, post_id, text):
+    def send(token, post_id, text, **_extra):
         sent.append(post_id)
         return {"outcome": "posted", "http_status": 201, "detail": "", "x_reply_id": "reply-9"}
 

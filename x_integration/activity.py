@@ -166,12 +166,17 @@ def assemble_activity(ledger: dict, account_posts: list, parents: dict) -> dict:
     }
 
 
-def run_activity(database: Optional[Path] = None) -> dict:
-    from x_integration.state import ledger_path
+def run_activity(database: Optional[Path] = None, include_opt_outs: bool = False) -> dict:
+    from x_integration.state import MentionLedger, ledger_path
 
     path = database or ledger_path()
     if not path.is_file():
-        return {"since_id": "", "error": "database_missing", "lanes": {name: [] for name in _LANES}}
+        return {
+            "since_id": "",
+            "error": "database_missing",
+            "lanes": {name: [] for name in _LANES},
+            "opt_out": _empty_opt_out(),
+        }
     ledger = read_activity_ledger(path)
     token = str(ledger.pop("access_token", "") or "")
     account_http = 0
@@ -183,7 +188,22 @@ def run_activity(database: Optional[Path] = None) -> dict:
         account_posts = _fill_reply_lookups(token, ledger, account_posts)
     result = assemble_activity(ledger, account_posts, parents)
     result["account_posts_http_status"] = account_http
+    book = MentionLedger(path)
+    result["opt_out"] = book.opt_out_summary()
+    if include_opt_outs:
+        result["opt_outs"] = book.list_opt_outs()
     return _scrub(result)
+
+
+def _empty_opt_out() -> dict:
+    return {
+        "enforcement_active": True,
+        "opted_out_users": 0,
+        "opt_outs_24h": 0,
+        "replies_suppressed": 0,
+        "last_result": "",
+        "last_at": "",
+    }
 
 
 def fetch_account_posts(token: str) -> tuple[int, list]:
@@ -223,7 +243,32 @@ async def handle_activity(request: web.Request) -> web.Response:
 
     if not audit_authorized(request.headers.get(AUDIT_HEADER, "")):
         return web.Response(status=401, text="unauthorized")
-    result = await asyncio.to_thread(run_activity)
+    payload = {}
+    if request.can_read_body:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict):
+            payload = body
+    action = str(payload.get("opt_out_action") or "")
+    if action == "record":
+        user_id = str(payload.get("user_id") or "").strip()
+        if not user_id.isdigit():
+            return web.Response(status=400, text="user_id required")
+
+        def _record() -> None:
+            from x_integration.state import ledger_from_env
+
+            ledger_from_env().record_opt_out(
+                user_id,
+                str(payload.get("username") or ""),
+                str(payload.get("source_post_id") or "operator"),
+                str(payload.get("reason") or "operator"),
+            )
+
+        await asyncio.to_thread(_record)
+    result = await asyncio.to_thread(run_activity, None, action == "list")
     return web.json_response(result)
 
 
